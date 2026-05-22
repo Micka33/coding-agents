@@ -641,6 +641,15 @@ Developer agents should not ask the human questions directly by default. When a
 developer is blocked, it should return a blocked handoff to the engineering
 manager with the proposed question and the reason it is blocking.
 
+If a developer or other implementation subagent needs access to files or modules
+outside its approved write scope, it must request expanded access from the
+engineering manager. The request must identify the requested paths, why the
+current scope is insufficient, what it tried, risks of granting or denying the
+access, and any alternative designs. The engineering manager may consult the
+software architect and product analyst to decide whether the request is
+technically and product-wise justified, whether the task should be split, or
+whether another solution should be proposed.
+
 The same rule applies to all specialist agents: code-reviewer, qa-engineer,
 devops-engineer, security-reviewer, and technical-writer. They may ask the
 engineering manager for clarification when they would otherwise have to make an
