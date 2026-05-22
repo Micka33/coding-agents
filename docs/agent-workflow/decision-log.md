@@ -37,3 +37,33 @@ Consequences:
   persistence.
 - Versioned repository artifacts remain the source of truth for approved
   decisions and requirements.
+
+### DEC-0002: Scout subagent for codebase reconnaissance
+
+Status: approved
+
+Context:
+
+The engineering manager may be asked where implementation stands. Answering from
+workflow artifacts alone can be misleading when the codebase has advanced beyond
+the docs or when docs are stale.
+
+Decision:
+
+Add a disposable `scout` subagent that performs fast codebase reconnaissance and
+returns compressed context for handoff to the engineering manager or another
+agent. The manager must call the scout for status, progress, readiness, or gap
+analysis questions unless the human explicitly asks for docs-only analysis.
+
+Options considered:
+
+- Manager manually reads docs and code with generic filesystem tools.
+- Add a read-only status snapshot tool.
+- Add a scout subagent with codebase reconnaissance instructions.
+
+Consequences:
+
+- Status answers must compare documented state with actual code state.
+- The manager can delegate context-gathering without bloating its own prompt.
+- Scout remains disposable and does not own product or architecture decisions.
+- Scout `execute` access must remain constrained to reconnaissance commands.

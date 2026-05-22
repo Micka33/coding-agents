@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import traceback
 from pathlib import Path
 from typing import Iterable
 
@@ -14,17 +15,20 @@ from coding_agents.config import (
     DEFAULT_ARTIFACTS_DIR,
     DEFAULT_CHECKPOINTER_BACKEND,
     DEFAULT_MODEL,
+    DEFAULT_SCOUT_REASONING_EFFORT,
     DEFAULT_SQLITE_CHECKPOINT_PATH,
     POSTGRES_CHECKPOINT_URL_ENV,
     DEFAULT_THREAD_ID,
     REASONING_EFFORT_ENV,
+    SCOUT_MODEL_ENV,
+    SCOUT_REASONING_EFFORT_ENV,
     SQLITE_CHECKPOINT_PATH_ENV,
     AgentMode,
     AgentTeamConfig,
     CheckpointerBackend,
 )
 from coding_agents.env import load_dotenv_file
-from coding_agents.messages import last_message_text
+from coding_agents.messages import conversation_transcript, last_message_text
 from coding_agents.team import create_development_team_agent
 
 
@@ -35,6 +39,12 @@ def main(argv: Iterable[str] | None = None) -> int:
     load_dotenv_file(args.root / ".env")
     model = args.model or os.environ.get("CODING_AGENTS_MODEL", DEFAULT_MODEL)
     reasoning_effort = args.reasoning_effort or os.environ.get(REASONING_EFFORT_ENV)
+    scout_model = args.scout_model or os.environ.get(SCOUT_MODEL_ENV) or model
+    scout_reasoning_effort = (
+        args.scout_reasoning_effort
+        or os.environ.get(SCOUT_REASONING_EFFORT_ENV)
+        or DEFAULT_SCOUT_REASONING_EFFORT
+    )
     checkpointer_backend = args.checkpointer or os.environ.get(CHECKPOINTER_BACKEND_ENV) or DEFAULT_CHECKPOINTER_BACKEND
     sqlite_checkpoint_path = args.sqlite_checkpoint_path or os.environ.get(SQLITE_CHECKPOINT_PATH_ENV) or DEFAULT_SQLITE_CHECKPOINT_PATH
     postgres_checkpoint_url = args.postgres_checkpoint_url or os.environ.get(POSTGRES_CHECKPOINT_URL_ENV) or os.environ.get("DATABASE_URL")
@@ -57,6 +67,8 @@ def main(argv: Iterable[str] | None = None) -> int:
         thread_id=args.thread_id,
         artifacts_dir=args.artifacts_dir,
         reasoning_effort=reasoning_effort,
+        scout_model=scout_model,
+        scout_reasoning_effort=scout_reasoning_effort,
         checkpointer_backend=checkpointer_backend,
         sqlite_checkpoint_path=sqlite_checkpoint_path,
         postgres_checkpoint_url=postgres_checkpoint_url,
@@ -75,9 +87,12 @@ def main(argv: Iterable[str] | None = None) -> int:
     print(f"Model: {model}")
     if reasoning_effort:
         print(f"Reasoning effort: {reasoning_effort}")
+    if scout_reasoning_effort:
+        print(f"Scout: {scout_model} ({scout_reasoning_effort})")
     print(f"Checkpointer: {agent.checkpointer_handle.backend} ({agent.checkpointer_handle.location})")
     print(f"Thread: {args.thread_id}")
     print("Type /exit to quit, /help for commands.")
+    _print_restored_conversation(agent, args.thread_id)
 
     try:
         while True:
@@ -101,6 +116,8 @@ def main(argv: Iterable[str] | None = None) -> int:
                     config={"configurable": {"thread_id": args.thread_id}},
                 )
             except Exception as exc:  # pragma: no cover - model/runtime errors vary
+                if args.debug:
+                    traceback.print_exc()
                 print(f"\nError: {exc}", file=sys.stderr)
                 continue
 
@@ -120,6 +137,16 @@ def _parse_args(argv: Iterable[str] | None) -> argparse.Namespace:
         "--reasoning-effort",
         default=None,
         help=f"Model reasoning effort or {REASONING_EFFORT_ENV} value.",
+    )
+    parser.add_argument(
+        "--scout-model",
+        default=None,
+        help=f"Scout model string or {SCOUT_MODEL_ENV} value.",
+    )
+    parser.add_argument(
+        "--scout-reasoning-effort",
+        default=None,
+        help=f"Scout reasoning effort or {SCOUT_REASONING_EFFORT_ENV} value.",
     )
     parser.add_argument(
         "--mode",
@@ -202,6 +229,26 @@ Workflow:
   - workflow artifacts live in {artifacts_dir}
 """.strip()
     )
+
+
+def _print_restored_conversation(agent: object, thread_id: str) -> None:
+    try:
+        snapshot = agent.get_state(  # type: ignore[attr-defined]
+            {"configurable": {"thread_id": thread_id}}
+        )
+    except Exception as exc:  # pragma: no cover - checkpoint backends vary
+        print(f"\nCould not restore conversation history: {exc}", file=sys.stderr)
+        return
+
+    values = getattr(snapshot, "values", {}) or {}
+    messages = values.get("messages") or []
+    transcript = conversation_transcript(messages)
+    if not transcript:
+        return
+
+    print("\nRestored conversation:")
+    for role, text in transcript:
+        print(f"\n{role}> {text}")
 
 
 def _print_startup_error(exc: Exception, model: str) -> None:

@@ -79,6 +79,9 @@ flowchart TB
     product <--> artifacts
     architect <--> artifacts
 
+    scout["scout<br/>codebase reconnaissance"]
+    manager <--> scout
+
     gate -->|approved| implementation["Implementation mode enabled"]
 
     subgraph implementation_agents["Implementation mode agents"]
@@ -125,6 +128,8 @@ Communication rules:
   `ask_software_architect`
 - the product analyst and software architect may participate in a structured
   discussion mediated by the engineering manager
+- the engineering manager calls the scout when a request requires actual
+  codebase context, especially status, progress, readiness, or gap analysis
 - the product analyst and software architect may reply with clarification
   questions when they need more information to produce a useful answer
 - any specialist agent may reply with clarification questions when context is
@@ -190,6 +195,21 @@ Responsibilities:
 - decide whether prototypes are needed
 - create architecture decision records
 - recommend technology choices
+
+### scout
+
+Fast codebase reconnaissance agent.
+
+Responsibilities:
+
+- inspect the actual repository before status or progress answers
+- locate relevant files with `grep`, `glob`, and `ls`
+- read key line ranges rather than whole files
+- identify important types, functions, interfaces, and dependencies
+- return compressed context that another agent can use without re-reading every
+  file
+- separate codebase facts from documentation claims
+- avoid making product or architecture decisions
 
 ### developer
 
@@ -373,6 +393,7 @@ Only these roles are active by default:
 - engineering-manager
 - product-analyst
 - software-architect
+- scout
 - human decision maker
 
 The purpose of shaping mode is to iterate on the product, prioritization, task
@@ -417,6 +438,16 @@ available context is insufficient. The engineering manager should first try to
 answer from existing artifacts. If the question requires a product decision,
 architectural tradeoff, or missing business context, the engineering manager
 escalates it to the human.
+
+When the human asks where implementation stands, what is done, what remains, or
+whether implementation is ready, the engineering manager must ask the scout to
+inspect the actual codebase unless the human explicitly asks for docs-only
+analysis. The manager then compares:
+
+- documented state
+- codebase state
+- mismatches between docs and code
+- recommended reconciliation steps
 
 The same clarification rule applies to all specialist agents. They should not
 make undocumented assumptions when context is missing. Instead, they should ask
@@ -742,6 +773,8 @@ The recommended Deep Agents mapping is:
   `ask_product_analyst`
 - software-architect as a resident deep agent contacted through
   `ask_software_architect`
+- scout as a disposable compiled subagent contacted through the `task` tool for
+  fast codebase reconnaissance
 - developer as one or more disposable custom subagents
 - code-reviewer as a custom subagent
 - qa-engineer as a custom subagent
@@ -772,6 +805,19 @@ Version 0.1 also exposes these manager-only tools:
 - `ask_product_analyst`: continue the resident product analyst conversation
 - `ask_software_architect`: continue the resident software architect
   conversation
+
+The scout subagent is configured with scoped reconnaissance tools:
+
+- `ls`
+- `read_file`
+- `glob`
+- `grep`
+- `execute`
+- `web_search`
+- `fetch_url`
+
+The scout `execute` tool should be limited to read-only reconnaissance commands.
+It is not a general-purpose shell for implementation work.
 
 Agents should use web tools when current external information, documentation, or
 source verification is needed. Any summary that depends on web results should

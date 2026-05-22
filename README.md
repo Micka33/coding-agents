@@ -7,6 +7,8 @@ LangChain Deep Agents.
 
 - `engineering-manager` as the main Deep Agent
 - resident product and architecture agents with SQLite-backed thread memory
+- `scout` subagent for fast codebase reconnaissance before status/progress
+  answers
 - specialist subagents for development, review, QA, DevOps, security, and
   documentation
 - web tools powered by Tavily: `web_search` and `fetch_url`
@@ -37,6 +39,8 @@ You can also configure the model in `.env`:
 ```bash
 CODING_AGENTS_MODEL=openai:gpt-5.5
 CODING_AGENTS_REASONING_EFFORT=xhigh
+CODING_AGENTS_SCOUT_MODEL=openai:gpt-5.5
+CODING_AGENTS_SCOUT_REASONING_EFFORT=medium
 CODING_AGENTS_CHECKPOINTER=sqlite
 CODING_AGENTS_SQLITE_CHECKPOINT_PATH=.coding-agents/checkpoints.sqlite
 ```
@@ -57,6 +61,13 @@ Or use the project script:
 uv run coding-agents
 ```
 
+Use the same thread id to continue a previous conversation. The CLI restores
+the visible user/manager transcript before showing the next prompt:
+
+```bash
+uv run coding-agents --thread-id feature-shaping
+```
+
 Optional model override:
 
 ```bash
@@ -67,6 +78,7 @@ Optional reasoning override:
 
 ```bash
 uv run python main.py --reasoning-effort xhigh
+uv run python main.py --scout-reasoning-effort medium
 ```
 
 Optional checkpointer override:

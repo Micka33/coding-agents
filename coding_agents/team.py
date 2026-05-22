@@ -18,6 +18,7 @@ from coding_agents.env import load_dotenv_file
 from coding_agents.permissions import filesystem_permissions
 from coding_agents.prompts import engineering_manager_prompt, implementation_subagents
 from coding_agents.resident_agents import create_resident_agent_team
+from coding_agents.scout import create_scout_subagent
 from coding_agents.tools import default_tools
 
 
@@ -59,6 +60,7 @@ def create_development_team_agent(config: AgentTeamConfig | None = None) -> Deve
         ensure_agent_workflow_files(root_dir, config.artifacts_dir)
 
     model = _resolve_model(config)
+    scout_model = _resolve_scout_model(config)
     memory = _existing_memory_files(root_dir, config.memory)
     shared_tools = default_tools()
     checkpointer_handle = create_checkpointer_handle(config)
@@ -78,7 +80,14 @@ def create_development_team_agent(config: AgentTeamConfig | None = None) -> Deve
         model=model,
         tools=manager_tools,
         system_prompt=engineering_manager_prompt(config.mode, config.artifacts_dir),
-        subagents=implementation_subagents(shared_tools),
+        subagents=[
+            create_scout_subagent(
+                model=scout_model,
+                root_dir=root_dir,
+                tools=shared_tools,
+            ),
+            *implementation_subagents(shared_tools),
+        ],
         backend=FilesystemBackend(root_dir=root_dir, virtual_mode=True),
         permissions=filesystem_permissions(config.mode, config.artifacts_dir),
         skills=list(config.skills) or None,
@@ -92,8 +101,27 @@ def create_development_team_agent(config: AgentTeamConfig | None = None) -> Deve
 def _resolve_model(config: AgentTeamConfig) -> str | BaseChatModel:
     """Resolve the configured model and optional reasoning effort."""
 
-    model = config.resolved_model()
-    reasoning_effort = config.resolved_reasoning_effort()
+    return _resolve_model_value(
+        model=config.resolved_model(),
+        reasoning_effort=config.resolved_reasoning_effort(),
+    )
+
+
+def _resolve_scout_model(config: AgentTeamConfig) -> str | BaseChatModel:
+    """Resolve the configured scout model with medium reasoning by default."""
+
+    return _resolve_model_value(
+        model=config.resolved_scout_model(),
+        reasoning_effort=config.resolved_scout_reasoning_effort(),
+    )
+
+
+def _resolve_model_value(
+    *,
+    model: str | BaseChatModel,
+    reasoning_effort: str | None,
+) -> str | BaseChatModel:
+    """Resolve a model value and optional reasoning effort."""
 
     if reasoning_effort is None or not isinstance(model, str):
         return model

@@ -18,7 +18,10 @@ DEFAULT_THREAD_ID = "development-agent-team"
 DEFAULT_ARTIFACTS_DIR = "docs/agent-workflow"
 DEFAULT_CHECKPOINTER_BACKEND: CheckpointerBackend = "sqlite"
 DEFAULT_SQLITE_CHECKPOINT_PATH = ".coding-agents/checkpoints.sqlite"
+DEFAULT_SCOUT_REASONING_EFFORT = "medium"
 REASONING_EFFORT_ENV = "CODING_AGENTS_REASONING_EFFORT"
+SCOUT_MODEL_ENV = "CODING_AGENTS_SCOUT_MODEL"
+SCOUT_REASONING_EFFORT_ENV = "CODING_AGENTS_SCOUT_REASONING_EFFORT"
 CHECKPOINTER_BACKEND_ENV = "CODING_AGENTS_CHECKPOINTER"
 SQLITE_CHECKPOINT_PATH_ENV = "CODING_AGENTS_SQLITE_CHECKPOINT_PATH"
 POSTGRES_CHECKPOINT_URL_ENV = "CODING_AGENTS_POSTGRES_URL"
@@ -34,6 +37,8 @@ class AgentTeamConfig:
     thread_id: str = DEFAULT_THREAD_ID
     artifacts_dir: str = DEFAULT_ARTIFACTS_DIR
     reasoning_effort: str | None = None
+    scout_model: str | BaseChatModel | None = None
+    scout_reasoning_effort: str | None = None
     checkpointer_backend: CheckpointerBackend | None = None
     sqlite_checkpoint_path: str | Path | None = None
     postgres_checkpoint_url: str | None = None
@@ -55,6 +60,23 @@ class AgentTeamConfig:
         if self.reasoning_effort is not None:
             return self.reasoning_effort
         return os.environ.get(REASONING_EFFORT_ENV)
+
+    def resolved_scout_model(self) -> str | BaseChatModel:
+        """Return the configured scout model or the main model."""
+
+        if self.scout_model is not None:
+            return self.scout_model
+        configured = os.environ.get(SCOUT_MODEL_ENV)
+        if configured:
+            return configured
+        return self.resolved_model()
+
+    def resolved_scout_reasoning_effort(self) -> str | None:
+        """Return the configured scout reasoning effort."""
+
+        if self.scout_reasoning_effort is not None:
+            return self.scout_reasoning_effort
+        return os.environ.get(SCOUT_REASONING_EFFORT_ENV, DEFAULT_SCOUT_REASONING_EFFORT)
 
     def resolved_checkpointer_backend(self) -> CheckpointerBackend:
         """Return the configured checkpointer backend."""
