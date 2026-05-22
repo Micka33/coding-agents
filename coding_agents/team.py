@@ -98,7 +98,21 @@ def _resolve_model(config: AgentTeamConfig) -> str | BaseChatModel:
     if reasoning_effort is None or not isinstance(model, str):
         return model
 
-    return init_chat_model(model=model, reasoning_effort=reasoning_effort)
+    model_kwargs: dict[str, Any] = {"reasoning_effort": reasoning_effort}
+    if _is_openai_model(model):
+        model_kwargs["use_responses_api"] = True
+
+    return init_chat_model(model=model, **model_kwargs)
+
+
+def _is_openai_model(model: str) -> bool:
+    """Return whether a LangChain model string targets OpenAI."""
+
+    if ":" in model:
+        provider, _model_name = model.split(":", 1)
+        return provider == "openai"
+
+    return model.startswith(("gpt-", "chatgpt-", "o1", "o3", "o4"))
 
 
 def _existing_memory_files(root_dir: Path, configured: tuple[str, ...]) -> tuple[str, ...]:

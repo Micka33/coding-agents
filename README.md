@@ -41,6 +41,9 @@ CODING_AGENTS_CHECKPOINTER=sqlite
 CODING_AGENTS_SQLITE_CHECKPOINT_PATH=.coding-agents/checkpoints.sqlite
 ```
 
+When an OpenAI model is used with `CODING_AGENTS_REASONING_EFFORT`, the module
+uses the OpenAI Responses API so reasoning and function tools can work together.
+
 Postgres checkpointing is available when needed:
 
 ```bash
