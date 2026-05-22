@@ -1,0 +1,20 @@
+[project]
+name = "coding-agents"
+version = "0.1.0"
+description = "Reusable development-agent team built on LangChain Deep Agents"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "deepagents>=0.6.3",
+    "langchain-openai>=1.2.1",
+    "langgraph-checkpoint-postgres>=3.1.0",
+    "langgraph-checkpoint-sqlite>=3.1.0",
+    "tavily-python>=0.7.24",
+]
+
+[project.scripts]
+coding-agents = "coding_agents.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
