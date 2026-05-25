@@ -64,6 +64,9 @@ Or use the project script:
 uv run coding-agents
 ```
 
+The CLI supports multi-line prompts: press `Enter` to add a line, then
+`Esc+Enter` to submit.
+
 Use the same thread id to continue a previous conversation. The CLI restores
 the visible user/manager transcript before showing the next prompt:
 

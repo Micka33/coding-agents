@@ -9,6 +9,8 @@ import traceback
 from pathlib import Path
 from typing import Iterable
 
+from prompt_toolkit import PromptSession
+
 from coding_agents.artifacts import ensure_agent_workflow_files
 from coding_agents.config import (
     CHECKPOINTER_BACKEND_ENV,
@@ -120,13 +122,19 @@ def main(argv: Iterable[str] | None = None) -> int:
     print(f"Checkpointer: {agent.checkpointer_handle.backend} ({agent.checkpointer_handle.location})")
     print(f"Execution: {execution_backend}")
     print(f"Thread: {args.thread_id}")
-    print("Type /exit to quit, /help for commands.")
+    print("Type /exit to quit, /help for commands. Enter adds a line; Esc+Enter submits.")
     _print_restored_conversation(agent, args.thread_id)
+
+    prompt_session: PromptSession[str] = PromptSession()
 
     try:
         while True:
             try:
-                user_input = input("\nuser> ").strip()
+                user_input = prompt_session.prompt(
+                    "\nuser> ",
+                    multiline=True,
+                    prompt_continuation="... ",
+                ).strip()
             except (EOFError, KeyboardInterrupt):
                 print()
                 return 0
@@ -287,6 +295,10 @@ def _print_help(artifacts_dir: str) -> None:
 Commands:
   /help   Show this help
   /exit   Quit the CLI
+
+Input:
+  - Enter adds a new line
+  - Esc+Enter submits the prompt
 
 Workflow:
   - shaping mode is the default
