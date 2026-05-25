@@ -71,10 +71,13 @@ class CheckpointHistoryReader:
         with self._connect() as conn:
             threads = self._discover_manager_threads(conn)
             active_thread_id = self._resolve_active_thread(threads, requested_thread_id)
+            task_runs = self._load_task_runs(conn, active_thread_id, include_messages=False)
             agents = []
             for definition in AGENT_DEFINITIONS:
                 thread_id = f"{active_thread_id}{definition['threadSuffix']}"
                 messages = self._load_thread_messages(conn, thread_id, definition["id"])
+                if definition["id"] == "manager":
+                    self._attach_task_runs(messages, task_runs)
                 agents.append(
                     {
                         **definition,
@@ -97,9 +100,30 @@ class CheckpointHistoryReader:
                 "activeThreadId": active_thread_id,
                 "threads": threads,
                 "agents": agents,
+                "taskRuns": task_runs,
                 "hasTimestamps": has_timestamps,
                 "residentAgentTools": RESIDENT_AGENT_TOOLS,
             }
+
+    def build_task_run(self, requested_thread_id: str | None, run_id: str) -> dict[str, Any]:
+        if not self.db_path.exists():
+            raise FileNotFoundError(f"Checkpoint database not found: {self.db_path}")
+
+        with self._connect() as conn:
+            threads = self._discover_manager_threads(conn)
+            active_thread_id = self._resolve_active_thread(threads, requested_thread_id)
+            task_runs = self._load_task_runs(conn, active_thread_id, include_messages=True)
+            manager_messages = self._load_thread_messages(conn, active_thread_id, "manager")
+            self._attach_task_runs(manager_messages, task_runs)
+            for run in task_runs:
+                if run["id"] == run_id:
+                    return {
+                        "dbPath": str(self.db_path),
+                        "generatedAt": _timestamp_info(datetime.now(UTC).isoformat()),
+                        "activeThreadId": active_thread_id,
+                        "run": run,
+                    }
+        raise KeyError(f"Task run not found: {run_id}")
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True, timeout=1)
@@ -167,6 +191,7 @@ class CheckpointHistoryReader:
         conn: sqlite3.Connection,
         thread_id: str,
         agent_id: str,
+        checkpoint_ns: str = "",
     ) -> list[dict[str, Any]]:
         rows = conn.execute(
             """
@@ -184,11 +209,11 @@ class CheckpointHistoryReader:
                AND c.checkpoint_ns = w.checkpoint_ns
                AND c.checkpoint_id = w.checkpoint_id
             WHERE w.thread_id = ?
-              AND w.checkpoint_ns = ''
+              AND w.checkpoint_ns = ?
               AND w.channel = 'messages'
             ORDER BY w.checkpoint_id ASC, w.task_id ASC, w.idx ASC
             """,
-            (thread_id,),
+            (thread_id, checkpoint_ns),
         ).fetchall()
 
         messages: list[Any] = []
@@ -224,6 +249,78 @@ class CheckpointHistoryReader:
             )
             for index, message in enumerate(messages)
         ]
+
+    def _load_task_runs(
+        self,
+        conn: sqlite3.Connection,
+        thread_id: str,
+        *,
+        include_messages: bool,
+    ) -> list[dict[str, Any]]:
+        rows = conn.execute(
+            """
+            SELECT
+                checkpoint_ns,
+                MIN(checkpoint_id) AS first_checkpoint_id,
+                MAX(checkpoint_id) AS last_checkpoint_id,
+                COUNT(*) AS checkpoint_count
+            FROM checkpoints
+            WHERE thread_id = ?
+              AND checkpoint_ns LIKE 'tools:%'
+            GROUP BY checkpoint_ns
+            ORDER BY MIN(checkpoint_id) ASC
+            """,
+            (thread_id,),
+        ).fetchall()
+
+        runs: list[dict[str, Any]] = []
+        for row in rows:
+            checkpoint_ns = str(row["checkpoint_ns"])
+            messages = self._load_thread_messages(conn, thread_id, "task-run", checkpoint_ns)
+            target_agent = _infer_task_run_agent(messages)
+            stats = self._agent_stats(messages)
+            run = {
+                "id": checkpoint_ns,
+                "checkpointNs": checkpoint_ns,
+                "threadId": thread_id,
+                "name": f"Run {target_agent or 'agent'}",
+                "shortName": target_agent or "agent",
+                "targetAgent": target_agent,
+                "kind": "disposable-run",
+                "accent": "disposable",
+                "exists": True,
+                "firstCheckpointId": row["first_checkpoint_id"],
+                "lastCheckpointId": row["last_checkpoint_id"],
+                "checkpointCount": row["checkpoint_count"],
+                "preview": _task_run_preview(messages),
+                "stats": stats,
+            }
+            if include_messages:
+                run["messages"] = messages
+            runs.append(run)
+        return runs
+
+    def _attach_task_runs(
+        self,
+        manager_messages: list[dict[str, Any]],
+        task_runs: list[dict[str, Any]],
+    ) -> None:
+        task_calls = [
+            call
+            for message in manager_messages
+            for call in message["toolCalls"]
+            if call["kind"] == "disposable-agent"
+        ]
+
+        for call, run in zip(task_calls, task_runs, strict=False):
+            target_agent = call.get("targetAgent") or run.get("targetAgent")
+            call["runId"] = run["id"]
+            call["runCheckpointNs"] = run["checkpointNs"]
+            call["runStats"] = run["stats"]
+            run["callId"] = call["id"]
+            run["targetAgent"] = target_agent
+            run["name"] = f"Run {target_agent or 'agent'}"
+            run["shortName"] = target_agent or run.get("shortName") or "agent"
 
     def _loads_typed(self, type_name: str | None, blob: bytes | None, fallback: Any) -> Any:
         if not type_name or blob is None:
@@ -268,6 +365,28 @@ def _coerce_message_list(value: Any) -> list[Any]:
         return list(convert_to_messages(value))
     except Exception:
         return list(value)
+
+
+def _infer_task_run_agent(messages: list[dict[str, Any]]) -> str | None:
+    for message in messages:
+        if message.get("type") != "human":
+            continue
+        for line in str(message.get("contentText") or "").splitlines():
+            if line.lower().startswith("role:"):
+                value = line.split(":", 1)[1].strip()
+                return value or None
+    return None
+
+
+def _task_run_preview(messages: list[dict[str, Any]]) -> str:
+    for message in messages:
+        if message.get("type") != "human":
+            continue
+        text = " ".join(str(message.get("contentText") or "").split())
+        if len(text) > 260:
+            return f"{text[:257]}..."
+        return text
+    return ""
 
 
 def _register_missing_timestamps(
@@ -601,6 +720,9 @@ class AgentHistoryRequestHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/state":
             self._serve_state(parsed.query)
             return
+        if parsed.path == "/api/task-run":
+            self._serve_task_run(parsed.query)
+            return
         if parsed.path in {"", "/"}:
             self._serve_static_file(STATIC_DIR / "index.html")
             return
@@ -624,6 +746,25 @@ class AgentHistoryRequestHandler(BaseHTTPRequestHandler):
             return
         self._send_json(payload)
 
+    def _serve_task_run(self, query: str) -> None:
+        params = parse_qs(query)
+        thread_id = (params.get("thread_id") or [None])[0]
+        run_id = (params.get("run_id") or [None])[0]
+        if not run_id:
+            self._send_json({"error": "run_id is required"}, status=HTTPStatus.BAD_REQUEST)
+            return
+
+        reader = CheckpointHistoryReader(self.server.db_path)  # type: ignore[attr-defined]
+        try:
+            payload = reader.build_task_run(thread_id, run_id)
+        except KeyError as exc:
+            self._send_json({"error": str(exc)}, status=HTTPStatus.NOT_FOUND)
+            return
+        except Exception as exc:
+            self._send_json({"error": str(exc)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+            return
+        self._send_json(payload)
+
     def _serve_static_file(self, path: Path) -> None:
         try:
             resolved = path.resolve()
@@ -641,9 +782,12 @@ class AgentHistoryRequestHandler(BaseHTTPRequestHandler):
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store" if resolved.name == "index.html" else "public, max-age=60")
+        self.send_header("Cache-Control", "no-store")
         self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError):
+            return
 
     def _send_json(self, payload: dict[str, Any], status: HTTPStatus = HTTPStatus.OK) -> None:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -652,7 +796,10 @@ class AgentHistoryRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError):
+            return
 
 
 def parse_args() -> argparse.Namespace:
