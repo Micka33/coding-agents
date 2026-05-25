@@ -24,7 +24,7 @@ notes: Approved for testing.
 class ReadinessGateTests(unittest.TestCase):
     def test_artifact_initializer_creates_unapproved_yaml_without_overwrite(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             created = ensure_agent_workflow_files(root)
             gate_path = root / "docs/agent-workflow/readiness-gate.yaml"
 
@@ -53,7 +53,7 @@ class ReadinessGateTests(unittest.TestCase):
 
     def test_safe_custom_artifacts_dir_remains_repo_relative(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             created = ensure_agent_workflow_files(root, "project/governance/")
 
             self.assertIn(root / "project/governance/readiness-gate.yaml", created)

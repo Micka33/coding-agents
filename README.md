@@ -103,16 +103,25 @@ Use implementation mode only after the readiness gate has been approved:
 uv run python main.py --mode implementation
 ```
 
-Enable local command execution for trusted implementation runs:
+Enable local command execution for trusted shaping validation runs:
+
+```bash
+uv run python main.py --mode shaping --execution local
+```
+
+Enable local command execution for trusted implementation runs after readiness
+approval:
 
 ```bash
 uv run python main.py --mode implementation --execution local
 ```
 
 Local execution exposes Deep Agents' `execute` tool to the implementation
-manager graph and implementation specialists. Commands run on this machine with
-the current user's environment and permissions. Scout, shaping mode, and
-resident product/architecture agents remain without general shell execution.
+manager graph and implementation specialists. In shaping mode, it exposes
+`execute` to the engineering manager for validation, diagnostics, and evidence
+gathering only. Commands run on this machine with the current user's environment
+and permissions. Scout and resident product/architecture agents remain without
+general shell execution.
 
 ## Python API
 

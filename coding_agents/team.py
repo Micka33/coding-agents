@@ -67,8 +67,6 @@ def create_development_team_agent(config: AgentTeamConfig | None = None) -> Deve
     implementation_enabled = config.mode == "implementation"
     if implementation_enabled:
         assert_readiness_approved(root_dir, artifacts_dir)
-    elif config.resolved_execution_backend() != "none":
-        raise ValueError("command execution is only available in implementation mode")
 
     disable_default_general_purpose_subagent(config.resolved_model())
     model = _resolve_model(config)

@@ -290,7 +290,7 @@ Workflow:
   - shaping mode is the default
   - implementation mode requires readiness-gate.yaml approved for full_implementation
   - implementation writes require explicit --write-path allowlists
-  - local command execution requires --execution local in implementation mode
+  - local command execution requires --execution local
   - workflow artifacts live in {artifacts_dir}
 """.strip()
     )

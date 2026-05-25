@@ -214,21 +214,43 @@ class TeamGovernanceTests(unittest.TestCase):
             kwargs = patched["create_deep_agent"].call_args.kwargs
             self.assertEqual(kwargs["backend"], "local-backend")
 
-    def test_shaping_rejects_local_execution(self) -> None:
+    def test_shaping_local_execution_uses_local_shell_backend_without_implementation_subagents(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
             config = AgentTeamConfig(
-                root_dir=Path(tmp),
+                root_dir=root,
                 mode="shaping",
+                model="test:model",
+                scout_model="test:scout",
                 checkpointer_backend="memory",
                 execution_backend="local",
                 initialize_artifacts=True,
             )
 
-            with patch("coding_agents.team.create_deep_agent") as create_deep_agent:
-                with self.assertRaisesRegex(ValueError, "implementation mode"):
-                    create_development_team_agent(config)
+            with patched_team_construction() as patched:
+                create_development_team_agent(config)
 
-            create_deep_agent.assert_not_called()
+            patched["implementation_subagents"].assert_not_called()
+            patched["filesystem_backend"].assert_not_called()
+            patched["local_shell_backend"].assert_called_once_with(
+                root_dir=root.resolve(),
+                virtual_mode=True,
+            )
+            kwargs = patched["create_deep_agent"].call_args.kwargs
+            self.assertEqual(kwargs["backend"], "local-backend")
+            self.assertEqual(kwargs["subagents"], [{"name": "scout"}])
+            self.assertEqual(
+                _check_fs_permission(kwargs["permissions"], "write", "/coding_agents/config.py"),
+                "deny",
+            )
+            self.assertEqual(
+                _check_fs_permission(kwargs["permissions"], "write", "/docs/agent-workflow/readiness-gate.md"),
+                "allow",
+            )
+            self.assertEqual(
+                _check_fs_permission(kwargs["permissions"], "write", "/docs/agent-workflow/readiness-gate.yaml"),
+                "deny",
+            )
 
     def test_resident_agents_disable_default_general_purpose_subagent(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

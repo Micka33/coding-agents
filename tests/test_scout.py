@@ -100,7 +100,7 @@ class ScoutSecretGuardTests(unittest.TestCase):
 
     def test_scout_refuses_symlink_alias_to_env_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             env_file = root / ".env"
             env_file.write_text("TOKEN=super-secret", encoding="utf-8")
             alias = root / "public.txt"

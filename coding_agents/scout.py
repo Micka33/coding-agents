@@ -238,12 +238,14 @@ def _reject_symlink_components(root: Path, relative: Path) -> None:
             continue
         current = current / part
         try:
-            if current.is_symlink():
-                raise PermissionError(f"Refusing to access symlink path: {current.relative_to(root).as_posix()}")
-            if not current.exists():
-                break
+            is_symlink = current.is_symlink()
+            exists = current.exists()
         except OSError as exc:
             raise PermissionError(f"Refusing to access unsafe path: {current}") from exc
+        if is_symlink:
+            raise PermissionError(f"Refusing to access symlink path: {current.relative_to(root).as_posix()}")
+        if not exists:
+            break
 
 
 def _relative_path(root: Path, path: Path) -> str:

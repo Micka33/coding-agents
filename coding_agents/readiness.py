@@ -73,6 +73,10 @@ def read_readiness_gate(
         raise ReadinessGateError(
             f"Implementation mode denied: readiness gate path is unsafe: {exc}"
         ) from exc
+    if not _gate_filename_exists_exactly(path):
+        raise ReadinessGateError(
+            f"Implementation mode denied: readiness gate file is missing at {path}."
+        )
     if path.is_symlink():
         raise ReadinessGateError(
             f"Implementation mode denied: readiness gate file must not be a symlink at {path}."
@@ -144,6 +148,15 @@ def _parse_readiness_yaml(text: str, *, path: Path) -> dict[str, Any]:
         values[key] = _parse_scalar(raw_value.strip(), path=path, line_number=line_number)
 
     return values
+
+
+def _gate_filename_exists_exactly(path: Path) -> bool:
+    try:
+        return any(child.name == path.name for child in path.parent.iterdir())
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return path.exists()
 
 
 def _parse_scalar(value: str, *, path: Path, line_number: int) -> str | bool:

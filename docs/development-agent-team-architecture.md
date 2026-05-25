@@ -829,11 +829,14 @@ The scout has no shell or `execute` tool in the hardened V0 implementation. Scou
 execution must not be reintroduced for scout without a separate approved design
 and security review.
 
-Implementation mode can opt into command execution with an explicit execution
-backend. The initial supported backend is `local`, which exposes Deep Agents'
-`execute` tool to the engineering-manager graph and implementation specialists.
-Local commands run on the host machine with the current user's environment and
-permissions. Shaping mode, scout, and resident product/architecture agents do
+Trusted runs can opt into command execution with an explicit execution backend.
+The initial supported backend is `local`, which exposes Deep Agents' `execute`
+tool to the engineering-manager graph. In implementation mode it also exposes
+execution to implementation specialists. In shaping mode, the engineering
+manager may use execution only for validation, diagnostics, and evidence
+gathering; it must not use execution to implement changes or approve the
+readiness gate. Local commands run on the host machine with the current user's
+environment and permissions. Scout and resident product/architecture agents do
 not receive general command execution.
 
 Agents should use web tools when current external information, documentation, or

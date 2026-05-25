@@ -33,7 +33,7 @@ class SafeFilesystemBackendTests(unittest.TestCase):
 
     def test_rejects_file_symlink_alias_to_readiness_gate_for_read_write_and_edit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             gate = root / "docs/agent-workflow/readiness-gate.yaml"
             gate.parent.mkdir(parents=True)
             gate.write_text("approved: false\n", encoding="utf-8")
@@ -50,10 +50,10 @@ class SafeFilesystemBackendTests(unittest.TestCase):
             write_result = backend.write("/implementation/gate-alias.yaml", "approved: true\n")
             edit_result = backend.edit("/implementation/gate-alias.yaml", "false", "true")
 
-        for result in (read_result, write_result, edit_result):
-            self.assertIsNotNone(result.error)
-            self.assertIn("symlink", result.error)
-        self.assertEqual(gate.read_text(encoding="utf-8"), "approved: false\n")
+            for result in (read_result, write_result, edit_result):
+                self.assertIsNotNone(result.error)
+                self.assertIn("symlink", result.error)
+            self.assertEqual(gate.read_text(encoding="utf-8"), "approved: false\n")
 
     def test_rejects_directory_symlink_descendant_inside_allowed_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
