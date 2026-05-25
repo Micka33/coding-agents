@@ -25,7 +25,16 @@ http://127.0.0.1:8765
 - appels outils collapsed par défaut;
 - appels `ask_product_analyst` / `ask_software_architect` visibles sans input ni
   résultat dans la colonne manager;
-- appels `task` vers les agents non persistants visibles avec input et résultat
-  collapsed par défaut;
+- appels `task` vers les agents non persistants visibles depuis la colonne
+  manager, avec ouverture d'un drawer de transcript complet;
+- ajout temporaire d'un run non persistant comme colonne dans la vue
+  multi-colonnes;
 - rafraîchissement live par polling, avec auto-scroll seulement si la vue est
   déjà en bas.
+
+## API locale
+
+- `GET /api/state` expose les agents persistants et les résumés des runs
+  `tools:*`;
+- `GET /api/task-run?thread_id=...&run_id=tools:...` charge le transcript
+  complet d'un run non persistant à la demande.
