@@ -208,7 +208,8 @@ function renderToolResultMessage(message, agent) {
 
 function renderToolCall(call, result, message, agent, index, context) {
   const detailKey = `${messageKey(agent, message)}:tool:${call.id || `${index}:${call.name}`}`;
-  const pathSummary = renderToolPathSummary(toolCallPaths(call));
+  const display = toolCallDisplay(call);
+  const pathSummary = display.isSpecific ? "" : renderToolPathSummary(toolCallPaths(call));
 
   if (call.kind === "resident-agent") {
     const target = call.targetAgent || call.name;
@@ -236,7 +237,7 @@ function renderToolCall(call, result, message, agent, index, context) {
     <details class="tool-call generic-tool" data-detail-key="${escapeAttr(detailKey)}">
       <summary>
         <span class="call-heading">
-          <span class="call-name">${escapeHtml(call.name)}</span>
+          <span class="call-name" title="${escapeAttr(display.title)}">${escapeHtml(display.label)}</span>
           ${pathSummary}
           <span class="badge">outil</span>
         </span>
@@ -253,6 +254,50 @@ function renderToolCall(call, result, message, agent, index, context) {
       </div>
     </details>
   `;
+}
+
+function toolCallDisplay(call) {
+  const name = String(call.name || "outil");
+  const args = toolCallArgs(call);
+  const normalizedName = name.toLowerCase();
+
+  if (normalizedName === "grep") {
+    const pattern = formatInlineValue(args.pattern || args.query || "");
+    const target = formatGrepTarget(args.path, args.glob);
+    const label = `grep ${pattern || "<pattern>"} in ${target}`;
+    return { isSpecific: true, label, title: label };
+  }
+
+  if (normalizedName === "execute") {
+    const command = oneLine(args.command || args.cmd || args.shell || "");
+    const label = command ? `execute ${command}` : "execute";
+    return { isSpecific: true, label, title: command || label };
+  }
+
+  return { isSpecific: false, label: name, title: name };
+}
+
+function toolCallArgs(call) {
+  if (call.args && typeof call.args === "object") return call.args;
+  return parseJsonObject(call.rawArguments) || {};
+}
+
+function formatGrepTarget(path, glob) {
+  const normalizedPath = oneLine(path || ".");
+  const normalizedGlob = oneLine(glob || "");
+  if (!normalizedGlob) return normalizedPath;
+  if (!normalizedPath || normalizedPath === ".") return normalizedGlob;
+  return `${normalizedPath.replace(/\/+$/, "")}/${normalizedGlob.replace(/^\/+/, "")}`;
+}
+
+function formatInlineValue(value) {
+  const text = oneLine(value);
+  if (!text) return "";
+  return /\s/.test(text) ? JSON.stringify(text) : text;
+}
+
+function oneLine(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
 }
 
 function renderDisposableAgentCall(call, result, detailKey, context) {
