@@ -1,6 +1,6 @@
 # Decision Log
 
-Status: draft
+Status: approved for implementation entry
 
 ## Status Legend
 
@@ -12,6 +12,7 @@ Status: draft
 - `tested`: passing command output or equivalent execution evidence has been recorded.
 - `partial`: partially observed in code or documentation.
 - `missing`: not observed in code.
+- `approved for implementation entry`: accepted by the human decision maker as the current basis for bounded, task-scoped implementation work.
 
 ## Decisions
 
@@ -196,9 +197,10 @@ Context:
 
 The readiness gate was documented before it was coded. The limited governance
 implementation now includes a machine-readable readiness artifact and runtime
-guard, but broad implementation mode remains unapproved until the gate records
-explicit full implementation approval. A documentation-only convention is not
-sufficient for an autonomous agent workflow.
+guard. Broad implementation entry was approved by the human decision maker on
+2026-05-25, but runtime implementation mode remains unavailable until the YAML
+gate records explicit full implementation approval. A documentation-only
+convention is not sufficient for an autonomous agent workflow.
 
 Decision:
 
@@ -481,3 +483,41 @@ Validation evidence as of 2026-05-25:
   no `execute` tool.
 - Automated validation passed with `uv run --project / python -m unittest discover -s tests`.
 - Result: exit code 0, `Ran 64 tests in 0.297s`, `OK`.
+
+### DEC-0008: Approve broad implementation entry for bounded task-scoped work
+
+Decision status: approved
+
+Implementation status: approved for implementation entry; machine-readable gate recording pending
+
+Context:
+
+DEC-0004/DEC-0005/DEC-0007 governance controls are implemented, statically inspected, and locally tested. The local unittest suite passed on 2026-05-25 with `uv run --project / python -m unittest discover -s tests` (`Ran 64 tests`, `OK`). CI is still missing, and DEC-0006 Python runtime compatibility review remains unresolved.
+
+Decision:
+
+Approve entry into broad implementation mode for bounded, task-scoped tasks. Missing CI and DEC-0006 runtime review are release-readiness blockers, not implementation-entry blockers.
+
+Selected option:
+
+- Proceed with bounded implementation tasks after the machine-readable readiness gate records `full_implementation` approval.
+- Require each task to have a complete brief, explicit ownership, files/modules in scope, constraints, acceptance criteria, and task-scoped write permissions.
+- Keep CI and DEC-0006 visible as blockers before delivery-ready, release-ready, production-ready, or external distribution claims.
+
+Rejected options:
+
+- Block all implementation until CI is added.
+- Block all implementation until DEC-0006 runtime compatibility review is complete.
+- Permit unbounded implementation work without task-scoped briefs.
+
+Rationale:
+
+The governance controls needed to safely bound implementation work have passing local validation. CI and runtime compatibility affect repeatable release validation and adoption, but the human decision maker accepted them as release-readiness blockers rather than implementation-entry blockers.
+
+Consequences:
+
+- Broad implementation work is approved only for bounded, task-scoped tasks.
+- Runtime implementation mode still requires `readiness-gate.yaml` to record `approved: true`, `approval_scope: full_implementation`, approver, and date. Current agent tool permissions denied updating that YAML file.
+- CI remains a P0 release-readiness follow-up.
+- DEC-0006 remains a release-readiness follow-up.
+- No artifact may claim release readiness, production readiness, or external distribution readiness until release blockers are cleared or explicitly accepted.

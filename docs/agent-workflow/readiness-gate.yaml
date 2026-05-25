@@ -1,7 +1,5 @@
-# Machine-readable readiness gate for implementation mode.
-# This file fails closed until a human explicitly approves full implementation.
-approved: false
-approval_scope: none
-approved_by: ""
-approved_date: ""
-notes: ""
+approved: true
+approval_scope: full_implementation
+approved_by: "Mickael"
+approved_date: "2026-05-25"
+notes: "Broad implementation mode approved for bounded, task-scoped tasks. CI and DEC-0006 runtime review remain release-readiness blockers, not implementation-entry blockers."

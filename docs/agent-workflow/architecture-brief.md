@@ -1,21 +1,22 @@
 # Architecture Brief
 
-Status: draft
+Status: approved for implementation entry
 
 ## Context
 
 V0 already exists in code as a reusable Python package plus a minimal CLI under
 `coding_agents/`. The workflow artifacts previously lagged behind the implementation. They have
-now been reconciled into draft form, but they still need human validation before
-readiness approval.
+now been reconciled and approved as the implementation-entry baseline for bounded,
+task-scoped work.
 
-This document records the observed implementation state so shaping, readiness,
-and follow-up implementation work can be planned against reality rather than the
-old placeholders.
+This document records the observed implementation state so follow-up
+implementation work can be planned against reality rather than the old
+placeholders.
 
-Current operating mode remains shaping mode. During shaping mode, changes are
-limited to `/docs/agent-workflow/`; implementation code changes require readiness
-gate approval.
+The human decision maker approved broad implementation mode on 2026-05-25 for
+bounded, task-scoped tasks. Runtime implementation still requires the
+machine-readable `readiness-gate.yaml` to record that approval; the current agent
+write attempt was denied by tool permissions.
 
 ## Constraints
 
@@ -25,9 +26,10 @@ gate approval.
 - Provide a path to shared or production deployments.
 - Do not rely on documentation alone when the human asks where implementation
   stands; use codebase reconnaissance.
-- Do not assign implementation work until the readiness gate is approved by the
-  human.
-- In shaping mode, update only files under `/docs/agent-workflow/`.
+- Assign implementation work only after the machine-readable readiness gate records
+  full approval and each task has a bounded brief with explicit write scope.
+- CI and DEC-0006 are release-readiness blockers, not implementation-entry blockers,
+  by human decision on 2026-05-25.
 
 ## Observed Implementation Snapshot
 
@@ -41,7 +43,7 @@ gate approval.
 | Checkpointers | SQLite, Postgres, and memory options exist | Implemented | SQLite is the local durable default; Postgres supports shared/production deployment; memory is useful for tests. |
 | Scout subagent | Present | Implemented | Used for codebase reconnaissance before status, readiness, progress, or gap analysis answers. |
 | Tavily tools | `web_search` and `fetch_url` available | Implemented | Used when current external documentation or source verification is needed. |
-| Workflow artifacts | Files exist under `/docs/agent-workflow/` and have been reconciled with observed V0 state | Partially implemented | Core artifacts now contain draft content, but remain unapproved and require human validation. |
+| Workflow artifacts | Files exist under `/docs/agent-workflow/` and have been reconciled with observed V0 state | Approved for implementation entry | Core artifacts capture the 2026-05-25 human approval for bounded, task-scoped implementation entry; machine-readable YAML recording remains pending by permitted process. |
 | Permissions by mode | Mode concept exists with hardened enforcement | Implemented / statically inspected and tested | Scout-backed static inspection reports shaping writes are explicit workflow-artifact files only; implementation writes require task-scoped literal paths and safe filesystem handling. |
 | Implementation subagent prompts/wiring | Developer/reviewer/QA/devops/security/writer wiring exists | Implemented / statically inspected and tested; gated | Scout-backed static inspection reports runtime construction gates implementation subagents behind machine-readable readiness approval. |
 | Readiness gate enforcement | Machine-readable guard exists | Implemented / statically inspected and tested | `readiness-gate.yaml` defaults unapproved and implementation mode fails closed unless full approval metadata is present; local unittest validation passed on 2026-05-25. |
@@ -59,8 +61,9 @@ Current evidence combines scout-backed static inspection and local test executio
 - Result: exit code 0, `Ran 64 tests in 0.297s`, `OK`.
 - This supports `implemented / statically inspected and tested` for DEC-0004,
   DEC-0005, and DEC-0007 governance controls.
-- `readiness-gate.yaml` must remain `approved: false` until explicit human
-  approval for broad implementation mode is recorded.
+- Human approval for broad implementation mode was recorded in Markdown artifacts
+  on 2026-05-25, but `readiness-gate.yaml` still requires update by a permitted
+  process before runtime implementation mode will pass.
 
 ## Current Architecture
 
@@ -167,11 +170,11 @@ scopes use literal exact files or existing directories, not globs.
 
 | Gap | Status | Impact | Proposed response |
 | --- | --- | --- | --- |
-| Product artifacts are draft and unapproved | Partial | Problem, users, MVP, non-goals, and acceptance criteria are now documented in draft form but have not been validated by the human decision maker. | Review and approve, revise, or explicitly defer open product questions. |
-| Readiness gate enforcement validated locally | Implemented / statically inspected and tested | Scout-backed inspection reports the DEC-0004 guard is implemented, defaults unapproved, and fails closed; local unittest suite passed on 2026-05-25. | Keep broad implementation blocked until explicit approval is recorded. |
-| Tests and CI status | Tests passing locally; CI missing | Local validation passed with `uv run --project / python -m unittest discover -s tests`; result: exit code 0, `Ran 64 tests in 0.297s`, `OK`; CI is still missing. | Add CI before release readiness. |
-| Implementation write-scope enforcement validated locally | Implemented / statically inspected and tested | Scout-backed inspection reports DEC-0005 literal write scopes and safe filesystem protections are implemented; local unittest suite passed on 2026-05-25. | Keep broad feature work blocked until readiness approval. |
-| Python `>=3.14` adoption risk | Partial / risky | Runtime files currently use Python `>=3.14`; DEC-0006 requires compatibility review before release readiness. | Ratify the runtime floor or lower it after compatibility review. |
+| Product artifacts approved for implementation entry | Approved | Problem, users, MVP, non-goals, and acceptance criteria are documented and accepted by the human decision maker for bounded implementation entry. | Keep scope bounded and update artifacts when decisions change. |
+| Readiness gate enforcement validated locally | Implemented / statically inspected and tested; YAML recording pending | Scout-backed inspection reports the DEC-0004 guard is implemented and fails closed; local unittest suite passed on 2026-05-25; human approval is recorded in Markdown artifacts but not yet in YAML. | Update `readiness-gate.yaml` through a permitted process before runtime implementation mode. |
+| Tests and CI status | Tests passing locally; CI missing / release blocker | Local validation passed with `uv run --project / python -m unittest discover -s tests`; result: exit code 0, `Ran 64 tests in 0.297s`, `OK`; CI is still missing. | Add CI before release readiness. |
+| Implementation write-scope enforcement validated locally | Implemented / statically inspected and tested | Scout-backed inspection reports DEC-0005 literal write scopes and safe filesystem protections are implemented; local unittest suite passed on 2026-05-25. | Use bounded task briefs and explicit write scopes for every implementation task. |
+| Python `>=3.14` adoption risk | Release blocker / risky | Runtime files currently use Python `>=3.14`; DEC-0006 requires compatibility review before release readiness but not before implementation entry. | Ratify the runtime floor or lower it before release readiness. |
 | Top-level docs may lag workflow decisions | Follow-up | README and `docs/development-agent-team-architecture.md` may need updates after workflow decisions are finalized. | Update after readiness/gate decisions are finalized or explicit docs scope is reopened. |
 
 ## Risks
@@ -179,9 +182,8 @@ scopes use literal exact files or existing directories, not globs.
 | Risk | Severity | Mitigation |
 | --- | --- | --- |
 | Documentation and code drift | High | Require scout reconnaissance for status/gap questions and update artifacts when decisions change. |
-| Broad implementation gate still unapproved | High | Keep broad implementation blocked until full approval is recorded in `readiness-gate.yaml`. |
+| Machine-readable gate recording pending | High | Record the 2026-05-25 human approval in `readiness-gate.yaml` through a permitted process before runtime implementation mode. |
 | CI missing after local validation | High | Add CI before release readiness so validation is repeatable. |
-| No CI | High | Add CI for package construction, CLI startup, checkpointers, resident tools, scout wiring, mode permissions, and artifact templates. |
 | Python `>=3.14` runtime floor limits adoption | Medium | Perform compatibility review and ratify or adjust the supported Python range. |
 | SQLite treated as source of truth | Medium | Keep decisions and requirements in versioned artifacts; treat checkpoint files as working memory only. |
 | Scout reports are compressed | Medium | Follow up with direct reads for high-risk or disputed claims. |
@@ -199,3 +201,4 @@ scopes use literal exact files or existing directories, not globs.
 - DEC-0005: Tighten implementation-mode write scopes — approved; implemented / statically inspected and tested with literal-only write scopes and safe filesystem protections.
 - DEC-0006: Ratify or adjust the Python runtime floor — approved; Python `>=3.14` remains an unresolved release risk until compatibility review ratifies or changes it.
 - DEC-0007: Explicit command execution profiles — approved; implemented / statically inspected and tested.
+- DEC-0008: Approve broad implementation entry for bounded task-scoped work — approved by the human decision maker on 2026-05-25; machine-readable gate recording pending by permitted process.

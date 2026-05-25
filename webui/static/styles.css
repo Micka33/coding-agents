@@ -386,18 +386,39 @@ details.tool-call[open] summary {
 
 .call-heading {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 8px;
   width: 100%;
+  min-width: 0;
 }
 
 .call-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
   font-weight: 700;
   color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.call-path {
+  flex: 1 1 auto;
+  min-width: 42px;
+  overflow: hidden;
+  padding: 2px 7px;
+  border-radius: 999px;
+  color: var(--ink);
+  background: #eef4f8;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .badge {
+  flex: 0 0 auto;
   padding: 2px 7px;
   border-radius: 999px;
   color: var(--muted);

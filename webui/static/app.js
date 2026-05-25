@@ -598,6 +598,7 @@ function renderBlock(block, message, agent, index) {
 
 function renderToolCall(call, result, message, agent, index) {
   const detailKey = `${messageKey(agent, message)}:tool:${call.id || `${index}:${call.name}`}`;
+  const pathSummary = renderToolPathSummary(toolCallPaths(call));
 
   if (call.kind === "resident-agent") {
     const target = call.targetAgent || call.name;
@@ -648,6 +649,7 @@ function renderToolCall(call, result, message, agent, index) {
       <summary>
         <span class="call-heading">
           <span class="call-name">${escapeHtml(call.name)}</span>
+          ${pathSummary}
           <span class="badge">outil</span>
         </span>
       </summary>
@@ -663,6 +665,94 @@ function renderToolCall(call, result, message, agent, index) {
       </div>
     </details>
   `;
+}
+
+function renderToolPathSummary(paths) {
+  if (!paths.length) return "";
+  const [firstPath, ...rest] = paths;
+  const fullText = paths.join("\n");
+  const suffix = rest.length ? ` +${rest.length}` : "";
+  return `<span class="call-path" title="${escapeAttr(fullText)}">${escapeHtml(firstPath)}${escapeHtml(suffix)}</span>`;
+}
+
+function toolCallPaths(call) {
+  const paths = [];
+  const seen = new Set();
+  const sources = [call.args, parseJsonObject(call.rawArguments)];
+
+  sources.forEach((source) => collectPathCandidates(source, paths, seen));
+  return paths;
+}
+
+function collectPathCandidates(value, paths, seen, parentKey = "") {
+  if (!value || paths.length >= 4) return;
+
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectPathCandidates(item, paths, seen, parentKey));
+    return;
+  }
+
+  if (typeof value !== "object") {
+    if (isPathKey(parentKey) && isDisplayablePath(value)) addPathCandidate(String(value), paths, seen);
+    return;
+  }
+
+  Object.entries(value).forEach(([key, entry]) => {
+    if (paths.length >= 4) return;
+    if (isPathKey(key) && isDisplayablePath(entry)) {
+      addPathCandidate(String(entry), paths, seen);
+      return;
+    }
+    if (isPathContainerKey(key) || typeof entry === "object") {
+      collectPathCandidates(entry, paths, seen, key);
+    }
+  });
+}
+
+function addPathCandidate(value, paths, seen) {
+  const path = value.trim();
+  if (!path || seen.has(path)) return;
+  seen.add(path);
+  paths.push(path);
+}
+
+function isPathKey(key) {
+  return [
+    "absolute_path",
+    "destination",
+    "file",
+    "file_path",
+    "filepath",
+    "filename",
+    "path",
+    "relative_path",
+    "target_file",
+    "target_path",
+    "write_path",
+  ].includes(String(key || "").replaceAll("-", "_").toLowerCase());
+}
+
+function isPathContainerKey(key) {
+  return ["files", "paths", "edits", "changes", "operations"].includes(
+    String(key || "").replaceAll("-", "_").toLowerCase(),
+  );
+}
+
+function isDisplayablePath(value) {
+  if (typeof value !== "string") return false;
+  const text = value.trim();
+  if (!text || text.length > 300 || text.includes("\n")) return false;
+  return text.includes("/") || text.includes("\\") || /\.[A-Za-z0-9]{1,12}$/.test(text);
+}
+
+function parseJsonObject(value) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 function speakerLabel(message, agent) {

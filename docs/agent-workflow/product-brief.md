@@ -1,12 +1,12 @@
 # Product Brief
 
-Status: draft
+Status: approved for implementation entry
 
 ## Problem
 
 The project is a development-agent team built on LangChain Deep Agents. It should help a human decision maker shape, plan, implement, review, test, and document software work through a governed multi-agent workflow.
 
-The observed V0 code already exists largely as a Python package and CLI under `coding_agents/`, but the workflow artifacts are not yet complete enough to approve implementation mode. The immediate product need is to align the documentation with the current implementation state without claiming readiness-gate approval.
+The observed V0 code already exists largely as a Python package and CLI under `coding_agents/`. The workflow artifacts have been reconciled with the current implementation state, governance tests pass locally, and the human decision maker approved broad implementation entry for bounded, task-scoped tasks on 2026-05-25.
 
 ## Target Users
 
@@ -25,14 +25,14 @@ The observed V0 code already exists largely as a Python package and CLI under `c
 
 ## Non-Goals
 
-- Do not claim the readiness gate is approved until a human explicitly approves it.
-- Do not treat the existing V0 code as production-ready without tests, CI, and gate validation.
+- Do not claim release readiness, delivery readiness, production readiness, or external distribution readiness until CI and DEC-0006 are complete or explicitly accepted as release risks.
+- Do not treat the existing V0 code as production-ready without CI and runtime compatibility validation.
 - Do not allow broad implementation-mode write access before scoped task ownership is defined.
 - Do not implement a web UI in V0; web UI is the next product step after local-first V0.
 - Do not implement multi-feature-stream coordination in the MVP.
 - Do not distribute V0 externally; V0 is for local/repository use until tests, CI, runtime support, and API boundaries are validated.
 - Do not introduce a persistent StoreBackend beyond the documented SQLite/Postgres/memory checkpointing options for V0.
-- Do not expand scope beyond documentation and planning while the project remains in shaping mode.
+- Do not expand implementation scope beyond bounded, task-scoped work without a new readiness or scope decision.
 
 ## MVP Scope
 
@@ -52,12 +52,13 @@ V0 MVP is a single-feature-stream development-agent workflow with:
 
 - Code exists largely as a Python package and CLI under `coding_agents/`.
 - Core agent roles and web tools are represented.
-- Workflow artifacts have been moved from placeholders to draft state.
-- Implementation mode is not approved.
+- Workflow artifacts have been moved from placeholders to an implementation-entry-approved baseline.
+- Broad implementation mode is approved for bounded, task-scoped tasks, but runtime activation still requires the machine-readable readiness gate to be updated by a permitted process.
 
 ## Open Questions / Deferred Decisions
 
 - Which Python runtime range will be ratified by the DEC-0006 compatibility review before release readiness.
+- Which permitted process or human edit will record the approval in `readiness-gate.yaml`, since current agent write permissions denied that update.
 - Which automated tests and CI checks are required before V0 can be considered delivery-ready or production-ready.
 - How the approved implementation-mode task-scoped write allowlists will be implemented and verified.
 - How the approved coded readiness guard will be implemented and bootstrapped before broader implementation work.
