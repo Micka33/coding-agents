@@ -362,6 +362,47 @@ select {
   background: var(--control-background);
 }
 
+.compact-field select {
+  min-width: 116px;
+}
+
+.cost-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  min-height: 32px;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 0 10px;
+  border: 1px solid var(--control-selected-border);
+  border-radius: 8px;
+  color: var(--app-text);
+  background: var(--control-selected-background);
+  font-size: 0.78rem;
+  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.cost-pill:hover {
+  border-color: var(--control-hover-border);
+  background: var(--control-hover-background);
+}
+
+.cost-pill.partial {
+  border-color: var(--tool-call-resident-border);
+  color: var(--badge-resident-text);
+  background: var(--badge-resident-background);
+}
+
+.inline-cost-pill {
+  min-height: 24px;
+  padding: 0 7px;
+  font-size: 0.72rem;
+}
+
 .refresh-button:hover,
 .segmented button:hover {
   color: var(--app-text);
@@ -931,6 +972,17 @@ details.task-call-payload[open] summary {
   font-size: 0.78rem;
 }
 
+.cost-total {
+  color: var(--app-text);
+  font-size: 1rem;
+  font-weight: 780;
+}
+
+.cost-warning {
+  color: var(--badge-resident-text);
+  background: var(--badge-resident-background);
+}
+
 .mini-button,
 .icon-button {
   min-height: 30px;
@@ -1105,6 +1157,98 @@ details.task-call-payload[open] summary {
   height: 100%;
 }
 
+.cost-drawer {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.cost-drawer-body {
+  overflow: auto;
+  padding: 16px;
+}
+
+.cost-section + .cost-section {
+  margin-top: 18px;
+}
+
+.cost-section {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.cost-section h3 {
+  margin: 0 0 8px;
+  color: var(--app-text-muted);
+  font-size: 0.78rem;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.cost-note {
+  margin: 10px 0 0;
+  color: var(--app-text-muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.cost-kpis {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.cost-kpi {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  background: var(--panel-soft-background);
+}
+
+.cost-kpi span,
+.cost-kpi strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cost-kpi span {
+  color: var(--app-text-muted);
+  font-size: 0.72rem;
+}
+
+.cost-kpi strong {
+  margin-top: 4px;
+  color: var(--app-text);
+  font-size: 0.95rem;
+}
+
+.cost-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+
+.cost-table th,
+.cost-table td {
+  padding: 8px;
+  border: 1px solid var(--app-border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.cost-table th {
+  color: var(--app-text-muted);
+  background: var(--panel-soft-background);
+  font-size: 0.72rem;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.cost-table td {
+  color: var(--app-text);
+}
+
 @media (max-width: 1060px) {
   .app-header {
     grid-template-columns: 1fr;
@@ -1154,6 +1298,7 @@ details.task-call-payload[open] summary {
   .switch,
   .segmented,
   .refresh-button,
+  .cost-pill,
   .agent-chip {
     min-width: 0;
     width: 100%;
@@ -1200,5 +1345,13 @@ details.task-call-payload[open] summary {
 
   .run-drawer {
     width: 100vw;
+  }
+
+  .cost-kpis {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .inline-cost-pill {
+    width: auto;
   }
 }

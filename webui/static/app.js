@@ -11,7 +11,7 @@ import {
 import { renderRunDrawer } from "./drawer.js";
 import { renderLayout } from "./layouts.js";
 import { handleDetailsToggle } from "./messageList.js";
-import { resetColumnSelection, resetRunState, setFormatMarkdown, setTheme, state } from "./state.js";
+import { resetColumnSelection, resetRunState, setFormatMarkdown, setPricingTier, setTheme, state } from "./state.js";
 import { capturePinnedScrollers, formatTime, restorePinnedScrollers } from "./utils.js";
 
 const els = collectElements();
@@ -23,6 +23,7 @@ function init() {
   els.app.addEventListener("click", handleActionClick, true);
   els.drawerRoot.addEventListener("toggle", (event) => handleDetailsToggle(event, state.openDetails), true);
   els.drawerRoot.addEventListener("click", handleActionClick, true);
+  els.threadCostButton.addEventListener("click", handleActionClick);
   els.columnPicker.addEventListener("click", handleColumnPickerClick);
 
   els.viewButtons.forEach((button) => {
@@ -37,6 +38,9 @@ function init() {
     resetColumnSelection();
     loadState({ preserveScroll: false });
   });
+
+  els.pricingTierSelect.addEventListener("change", handlePricingTierChange);
+  els.pricingTierSelect.addEventListener("input", handlePricingTierChange);
 
   els.agentSelect.addEventListener("change", () => {
     state.selectedAgentId = els.agentSelect.value;
@@ -94,9 +98,10 @@ async function loadState(options = {}) {
   const previousThreadId = state.data?.activeThreadId || null;
 
   try {
-    const payload = await fetchState(state.selectedThreadId);
+    const payload = await fetchState(state.selectedThreadId, state.pricingTier);
     state.data = payload;
     state.selectedThreadId = payload.activeThreadId;
+    state.pricingTier = payload.pricing?.tier || state.pricingTier;
     if (previousThreadId && previousThreadId !== payload.activeThreadId) {
       resetRunState();
       resetColumnSelection();
@@ -117,6 +122,15 @@ async function loadState(options = {}) {
   } finally {
     state.loading = false;
   }
+}
+
+function handlePricingTierChange() {
+  const nextTier = els.pricingTierSelect.value;
+  if (nextTier === state.pricingTier) return;
+  setPricingTier(nextTier);
+  state.taskRunCache = new Map();
+  state.taskRunPromises = new Map();
+  loadState({ refreshRuns: true });
 }
 
 async function refreshOpenRuns(force) {
@@ -162,7 +176,7 @@ function render(options = {}) {
 
   renderControls(els, state, agents, optionsForColumns);
   renderLayout(els, agents, resultMaps, state, context);
-  renderRunDrawer(els, state, context);
+  renderRunDrawer(els, state, context, agents);
   restorePinnedScrollers(pinned, firstLoad);
 }
 
@@ -198,6 +212,10 @@ async function handleActionClick(event) {
     await openRunDrawer(runId);
   } else if (action === "close-run-drawer") {
     closeRunDrawer();
+  } else if (action === "open-cost-breakdown") {
+    openCostBreakdown(target.dataset.costScope, target.dataset.costId);
+  } else if (action === "close-cost-breakdown") {
+    closeCostBreakdown();
   } else if (action === "open-run-column" && runId) {
     await openRunColumn(runId);
   } else if (action === "close-run-column" && runId) {
@@ -207,6 +225,7 @@ async function handleActionClick(event) {
 
 async function openRunDrawer(runId) {
   state.drawerRunId = runId;
+  state.costBreakdown = null;
   state.activeRunId = runId;
   render();
   await ensureTaskRunLoaded(runId);
@@ -216,6 +235,20 @@ async function openRunDrawer(runId) {
 function closeRunDrawer() {
   state.drawerRunId = null;
   if (!state.tempRunIds.includes(state.activeRunId)) state.activeRunId = null;
+  render();
+}
+
+function openCostBreakdown(scope, id) {
+  state.costBreakdown = {
+    scope: scope || "thread",
+    id: id || null,
+  };
+  state.drawerRunId = null;
+  render();
+}
+
+function closeCostBreakdown() {
+  state.costBreakdown = null;
   render();
 }
 
@@ -240,7 +273,7 @@ async function ensureTaskRunLoaded(runId, options = {}) {
   }
   if (state.taskRunPromises.has(runId)) return state.taskRunPromises.get(runId);
 
-  const promise = fetchTaskRun(state.selectedThreadId, runId)
+  const promise = fetchTaskRun(state.selectedThreadId, runId, state.pricingTier)
     .then((payload) => {
       if (payload.activeThreadId === state.selectedThreadId) {
         state.taskRunCache.set(runId, payload.run);

@@ -10,12 +10,14 @@ export const state = {
   live: true,
   formatMarkdown: preferences.formatMarkdown,
   theme: preferences.theme,
+  pricingTier: preferences.pricingTier,
   search: "",
   loading: false,
   pollTimer: null,
   openDetails: new Map(),
   selectedColumnIds: null,
   drawerRunId: null,
+  costBreakdown: null,
   activeRunId: null,
   tempRunIds: [],
   taskRunCache: new Map(),
@@ -24,6 +26,7 @@ export const state = {
 
 export function resetRunState() {
   state.drawerRunId = null;
+  state.costBreakdown = null;
   state.activeRunId = null;
   state.tempRunIds = [];
   state.taskRunCache = new Map();
@@ -45,10 +48,16 @@ export function setTheme(theme) {
   savePreference("theme", state.theme);
 }
 
+export function setPricingTier(tier) {
+  state.pricingTier = normalizePricingTier(tier);
+  savePreference("pricingTier", state.pricingTier);
+}
+
 function loadPreferences() {
   return {
     formatMarkdown: loadBooleanPreference("formatMarkdown", true),
     theme: loadThemePreference(),
+    pricingTier: loadStringPreference("pricingTier", "standard"),
   };
 }
 
@@ -70,10 +79,23 @@ function normalizeTheme(theme) {
   return theme === "light" ? "light" : "dark";
 }
 
+function normalizePricingTier(tier) {
+  return ["standard", "batch", "flex", "priority"].includes(tier) ? tier : "standard";
+}
+
 function loadBooleanPreference(key, fallback) {
   try {
     const value = localStorage.getItem(preferenceKey(key));
     return value === null ? fallback : value === "true";
+  } catch {
+    return fallback;
+  }
+}
+
+function loadStringPreference(key, fallback) {
+  try {
+    const value = localStorage.getItem(preferenceKey(key));
+    return value || fallback;
   } catch {
     return fallback;
   }

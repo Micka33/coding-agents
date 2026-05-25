@@ -1,4 +1,4 @@
-import { escapeAttr, escapeHtml, formatTime } from "./utils.js";
+import { escapeAttr, escapeHtml, formatCost, formatTime } from "./utils.js";
 
 export function collectElements() {
   return {
@@ -7,6 +7,8 @@ export function collectElements() {
     dbPath: document.querySelector("#dbPath"),
     columnPicker: document.querySelector("#columnPicker"),
     threadSelect: document.querySelector("#threadSelect"),
+    threadCostButton: document.querySelector("#threadCostButton"),
+    pricingTierSelect: document.querySelector("#pricingTierSelect"),
     agentSelect: document.querySelector("#agentSelect"),
     syncToggle: document.querySelector("#syncToggle"),
     liveToggle: document.querySelector("#liveToggle"),
@@ -30,6 +32,8 @@ export function renderControls(els, state, agents, columnOptions) {
     })
     .join("");
   if (state.selectedThreadId) els.threadSelect.value = state.selectedThreadId;
+  renderThreadCostButton(els, state);
+  renderPricingTierSelect(els, state);
 
   els.agentSelect.innerHTML = agents
     .map((agent) => `<option value="${escapeAttr(agent.id)}">${escapeHtml(agent.name)}</option>`)
@@ -80,4 +84,21 @@ function renderColumnPicker(els, state, options) {
     <span class="column-picker-label">Colonnes</span>
     <div class="agent-chips">${chips || `<span class="empty-chip">Aucun agent</span>`}</div>
   `;
+}
+
+function renderThreadCostButton(els, state) {
+  const cost = state.data?.cost;
+  els.threadCostButton.textContent = formatCost(cost);
+  els.threadCostButton.title = cost?.partial
+    ? "Estimation de coût partielle du thread"
+    : "Estimation de coût du thread";
+  els.threadCostButton.classList.toggle("partial", Boolean(cost?.partial));
+}
+
+function renderPricingTierSelect(els, state) {
+  const tiers = state.data?.pricing?.availableTiers || ["standard", "batch", "flex", "priority"];
+  els.pricingTierSelect.innerHTML = tiers
+    .map((tier) => `<option value="${escapeAttr(tier)}">${escapeHtml(tier)}</option>`)
+    .join("");
+  els.pricingTierSelect.value = state.data?.pricing?.tier || state.pricingTier || "standard";
 }

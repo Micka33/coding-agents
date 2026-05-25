@@ -18,6 +18,8 @@ from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.graph.message import add_messages
 from langgraph.types import Overwrite
 
+from webui.pricing import combine_cost_summaries, estimate_messages_cost, load_pricing_catalog
+
 
 ROOT = Path(__file__).resolve().parents[1]
 WEBUI_DIR = Path(__file__).resolve().parent
@@ -60,9 +62,11 @@ RESIDENT_AGENT_TOOLS = {
 class CheckpointHistoryReader:
     """Read and normalize LangGraph checkpoint messages from SQLite."""
 
-    def __init__(self, db_path: Path) -> None:
+    def __init__(self, db_path: Path, pricing_tier: str = "standard") -> None:
         self.db_path = db_path
         self.serde = JsonPlusSerializer()
+        self.pricing_catalog = load_pricing_catalog()
+        self.pricing_tier = pricing_tier if pricing_tier in self.pricing_catalog.get("tiers", {}) else "standard"
 
     def build_state(self, requested_thread_id: str | None = None) -> dict[str, Any]:
         if not self.db_path.exists():
@@ -94,6 +98,14 @@ class CheckpointHistoryReader:
                 for message in agent["messages"]
             )
 
+            thread_cost = combine_cost_summaries(
+                [agent["stats"]["cost"] for agent in agents]
+                + [run["stats"]["cost"] for run in task_runs],
+                pricing_version=self.pricing_catalog["pricing_version"],
+                currency=self.pricing_catalog["currency"],
+                tier=self.pricing_tier,
+            )
+
             return {
                 "dbPath": str(self.db_path),
                 "generatedAt": _timestamp_info(datetime.now(UTC).isoformat()),
@@ -101,6 +113,8 @@ class CheckpointHistoryReader:
                 "threads": threads,
                 "agents": agents,
                 "taskRuns": task_runs,
+                "cost": thread_cost,
+                "pricing": self._pricing_metadata(),
                 "hasTimestamps": has_timestamps,
                 "residentAgentTools": RESIDENT_AGENT_TOOLS,
             }
@@ -121,6 +135,7 @@ class CheckpointHistoryReader:
                         "dbPath": str(self.db_path),
                         "generatedAt": _timestamp_info(datetime.now(UTC).isoformat()),
                         "activeThreadId": active_thread_id,
+                        "pricing": self._pricing_metadata(),
                         "run": run,
                     }
         raise KeyError(f"Task run not found: {run_id}")
@@ -330,7 +345,16 @@ class CheckpointHistoryReader:
         except Exception:
             return fallback
 
-    def _agent_stats(self, messages: list[dict[str, Any]]) -> dict[str, int]:
+    def _pricing_metadata(self) -> dict[str, Any]:
+        return {
+            "tier": self.pricing_tier,
+            "availableTiers": list(self.pricing_catalog.get("tiers", {}).keys()),
+            "version": self.pricing_catalog.get("pricing_version"),
+            "currency": self.pricing_catalog.get("currency", "USD"),
+            "tokenUnit": self.pricing_catalog.get("token_unit", "1M tokens"),
+        }
+
+    def _agent_stats(self, messages: list[dict[str, Any]]) -> dict[str, Any]:
         tool_calls = 0
         resident_calls = 0
         disposable_agent_calls = 0
@@ -353,6 +377,11 @@ class CheckpointHistoryReader:
             "residentAgentCalls": resident_calls,
             "disposableAgentCalls": disposable_agent_calls,
             "thinkingBlocks": thinking_blocks,
+            "cost": estimate_messages_cost(
+                messages,
+                tier=self.pricing_tier,
+                catalog=self.pricing_catalog,
+            ),
         }
 
 
@@ -738,7 +767,8 @@ class AgentHistoryRequestHandler(BaseHTTPRequestHandler):
     def _serve_state(self, query: str) -> None:
         params = parse_qs(query)
         thread_id = (params.get("thread_id") or [None])[0]
-        reader = CheckpointHistoryReader(self.server.db_path)  # type: ignore[attr-defined]
+        pricing_tier = (params.get("pricing_tier") or ["standard"])[0]
+        reader = CheckpointHistoryReader(self.server.db_path, pricing_tier=pricing_tier)  # type: ignore[attr-defined]
         try:
             payload = reader.build_state(thread_id)
         except Exception as exc:
@@ -750,11 +780,12 @@ class AgentHistoryRequestHandler(BaseHTTPRequestHandler):
         params = parse_qs(query)
         thread_id = (params.get("thread_id") or [None])[0]
         run_id = (params.get("run_id") or [None])[0]
+        pricing_tier = (params.get("pricing_tier") or ["standard"])[0]
         if not run_id:
             self._send_json({"error": "run_id is required"}, status=HTTPStatus.BAD_REQUEST)
             return
 
-        reader = CheckpointHistoryReader(self.server.db_path)  # type: ignore[attr-defined]
+        reader = CheckpointHistoryReader(self.server.db_path, pricing_tier=pricing_tier)  # type: ignore[attr-defined]
         try:
             payload = reader.build_task_run(thread_id, run_id)
         except KeyError as exc:

@@ -28,6 +28,7 @@ export function columnOptions(data) {
     name: agent.name,
     shortName: agent.shortName || agent.name,
     kind: agent.kind || "resident",
+    threadId: agent.threadId,
     stats: agent.stats || {},
     runIds: [],
     runCount: 0,
@@ -161,15 +162,119 @@ function emptyStats() {
     residentAgentCalls: 0,
     disposableAgentCalls: 0,
     thinkingBlocks: 0,
+    cost: emptyCost(),
   };
 }
 
 function addStats(left, right) {
   const stats = { ...emptyStats(), ...left };
-  Object.keys(emptyStats()).forEach((key) => {
+  ["messages", "toolCalls", "residentAgentCalls", "disposableAgentCalls", "thinkingBlocks"].forEach((key) => {
     stats[key] = (stats[key] || 0) + (right[key] || 0);
   });
+  stats.cost = addCosts(stats.cost, right.cost);
   return stats;
+}
+
+function emptyCost() {
+  return {
+    estimated_cost_usd: 0,
+    estimated_cost_usd_decimal: "0",
+    partial: false,
+    calls_with_usage: 0,
+    messages_without_usage: 0,
+    priced_calls: 0,
+    unpriced_calls: 0,
+    tokens: {
+      input: 0,
+      input_uncached: 0,
+      input_cached: 0,
+      output: 0,
+      reasoning_output: 0,
+    },
+    subtotals_usd: {
+      input: "0",
+      cached_input: "0",
+      output: "0",
+    },
+    by_model: [],
+    unpriced_models: [],
+  };
+}
+
+function addCosts(left, right) {
+  const cost = cloneCost(left || emptyCost());
+  const incoming = right || emptyCost();
+  cost.pricing_version = cost.pricing_version || incoming.pricing_version;
+  cost.currency = cost.currency || incoming.currency;
+  cost.tier = cost.tier || incoming.tier;
+  cost.estimated_cost_usd += Number(incoming.estimated_cost_usd || 0);
+  cost.estimated_cost_usd_decimal = String(cost.estimated_cost_usd);
+  cost.partial = Boolean(cost.partial || incoming.partial);
+  cost.calls_with_usage += incoming.calls_with_usage || 0;
+  cost.messages_without_usage += incoming.messages_without_usage || 0;
+  cost.priced_calls += incoming.priced_calls || 0;
+  cost.unpriced_calls += incoming.unpriced_calls || 0;
+  mergeTokenCounts(cost.tokens, incoming.tokens || {});
+  mergeCostParts(cost.subtotals_usd, incoming.subtotals_usd || {});
+  cost.by_model = mergeModelCosts(cost.by_model, incoming.by_model || []);
+  cost.unpriced_models = mergeUnpricedModels(cost.unpriced_models, incoming.unpriced_models || []);
+  return cost;
+}
+
+function cloneCost(cost) {
+  return {
+    ...emptyCost(),
+    ...cost,
+    tokens: { ...emptyCost().tokens, ...(cost.tokens || {}) },
+    subtotals_usd: { ...emptyCost().subtotals_usd, ...(cost.subtotals_usd || {}) },
+    by_model: [...(cost.by_model || [])],
+    unpriced_models: [...(cost.unpriced_models || [])],
+  };
+}
+
+function mergeTokenCounts(target, source) {
+  Object.keys(emptyCost().tokens).forEach((key) => {
+    target[key] = (target[key] || 0) + (source[key] || 0);
+  });
+}
+
+function mergeCostParts(target, source) {
+  Object.keys(emptyCost().subtotals_usd).forEach((key) => {
+    target[key] = String(Number(target[key] || 0) + Number(source[key] || 0));
+  });
+}
+
+function mergeModelCosts(left, right) {
+  const byModel = new Map((left || []).map((model) => [model.priced_model || model.model, { ...model }]));
+  (right || []).forEach((model) => {
+    const key = model.priced_model || model.model;
+    const current = byModel.get(key) || {
+      ...model,
+      calls: 0,
+      estimated_cost_usd: 0,
+      estimated_cost_usd_decimal: "0",
+      tokens: { ...emptyCost().tokens },
+      subtotals_usd: { ...emptyCost().subtotals_usd },
+    };
+    current.calls = (current.calls || 0) + (model.calls || 0);
+    current.estimated_cost_usd = Number(current.estimated_cost_usd || 0) + Number(model.estimated_cost_usd || 0);
+    current.estimated_cost_usd_decimal = String(current.estimated_cost_usd);
+    mergeTokenCounts(current.tokens, model.tokens || {});
+    mergeCostParts(current.subtotals_usd, model.subtotals_usd || {});
+    byModel.set(key, current);
+  });
+  return [...byModel.values()].sort((a, b) => Number(b.estimated_cost_usd || 0) - Number(a.estimated_cost_usd || 0));
+}
+
+function mergeUnpricedModels(left, right) {
+  const byModel = new Map((left || []).map((model) => [model.model, { ...model }]));
+  (right || []).forEach((model) => {
+    const key = model.model || "unknown";
+    const current = byModel.get(key) || { model: key, calls: 0, error: model.error };
+    current.calls += model.calls || 0;
+    byModel.set(key, current);
+  });
+  return [...byModel.values()].sort((a, b) => (b.calls || 0) - (a.calls || 0));
 }
 
 export function buildTaskRunMap(data, taskRunCache) {

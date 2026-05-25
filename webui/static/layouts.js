@@ -1,6 +1,6 @@
 import { buildTimelineRows } from "./data.js";
 import { renderMessagePane, replacePanePart } from "./panes.js";
-import { directChildren, escapeAttr, escapeHtml, formatTimelineTime, htmlToElement, insertChildAt } from "./utils.js";
+import { directChildren, escapeAttr, escapeHtml, formatCost, formatTimelineTime, htmlToElement, insertChildAt } from "./utils.js";
 
 export function renderLayout(els, agents, resultMaps, state, context) {
   if (state.view === "single") {
@@ -130,6 +130,7 @@ function renderLaneHeader(agent, className) {
           <span class="stat">${stats.messages || 0} msg</span>
           <span class="stat">${stats.toolCalls || 0} outils</span>
           <span class="stat">${stats.disposableAgentCalls || 0} agents</span>
+          ${renderCostPill(stats.cost, "column", agent.id)}
         </div>
         ${closeButton}
       </div>
@@ -164,7 +165,27 @@ function renderTimelineAgentHeader(agent) {
         <h2>${escapeHtml(agent.shortName || agent.name)}</h2>
         <p>${escapeHtml(agent.threadId)}</p>
       </div>
+      ${renderCostPill(agent.stats?.cost, "column", agent.id)}
     </div>
+  `;
+}
+
+function renderCostPill(cost, scope, id) {
+  if (!cost) return "";
+  const label = formatCost(cost);
+  const partial = cost.partial ? " partial" : "";
+  const title = cost.partial ? "Estimation partielle: certains appels n'ont pas de tarif." : "Voir le breakdown du coût.";
+  return `
+    <button
+      class="cost-pill inline-cost-pill${partial}"
+      type="button"
+      data-action="open-cost-breakdown"
+      data-cost-scope="${escapeAttr(scope)}"
+      data-cost-id="${escapeAttr(id)}"
+      title="${escapeAttr(title)}"
+    >
+      ${escapeHtml(label)}
+    </button>
   `;
 }
 

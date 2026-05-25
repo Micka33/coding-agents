@@ -124,6 +124,20 @@ export function formatTimelineTime(epochMs) {
     .replace(", ", "\n");
 }
 
+export function formatCost(cost) {
+  const value = Number(cost?.estimated_cost_usd || 0);
+  if (!Number.isFinite(value) || value <= 0) return "≈ $0.00";
+  if (value < 0.01) return `≈ $${value.toFixed(4)}`;
+  if (value < 100) return `≈ $${value.toFixed(2)}`;
+  return `≈ $${new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value)}`;
+}
+
+export function formatCompactNumber(value) {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number)) return "0";
+  return new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(number);
+}
+
 export function prettyJson(value) {
   if (value === null || value === undefined) return "";
   if (typeof value === "string") return value;
