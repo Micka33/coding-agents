@@ -75,6 +75,10 @@ gate approval.
 - Implementation-mode agents are available for developer, code review, QA,
   DevOps, security, and documentation work, but should only be activated after
   readiness approval.
+- Local command execution is an explicit implementation-mode profile. When
+  enabled, the manager graph and implementation specialists receive the Deep
+  Agents `execute` tool against the host machine; scout, shaping mode, and
+  resident product/architecture agents remain without general shell execution.
 - `/docs/agent-workflow/` remains the durable source of truth for product,
   architecture, planning, readiness, and decision artifacts.
 

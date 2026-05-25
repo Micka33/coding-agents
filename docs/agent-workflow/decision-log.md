@@ -186,7 +186,8 @@ Consequences:
 
 ### DEC-0004: Machine-enforce readiness before implementation mode
 
-Decision status: approved  
+Decision status: approved
+
 Implementation status: implemented / validation pending
 
 Context:
@@ -256,7 +257,8 @@ Consequences:
 
 ### DEC-0005: Tighten implementation-mode write scopes
 
-Decision status: approved  
+Decision status: approved
+
 Implementation status: implemented / validation pending
 
 Context:
@@ -409,3 +411,47 @@ Consequences:
 - A lower version range may require dependency or syntax compatibility checks.
 - The future web UI should use the same package runtime decision unless a later
   architecture decision splits runtimes deliberately.
+
+### DEC-0007: Explicit command execution profiles
+
+Decision status: approved
+
+Implementation status: implemented / validation pending
+
+Context:
+
+Implementation specialists need to run real development commands: tests,
+linters, build commands, database CLIs, and diagnostics. The previous hardened
+V0 removed scout shell execution and left the main manager graph on a filesystem
+backend without command execution, so agents could add tests but could not run
+them.
+
+Decision:
+
+Add an explicit command execution profile. The default remains `none`. A trusted
+implementation run may opt into `local`, which exposes Deep Agents' `execute`
+tool to the engineering-manager graph and implementation specialists.
+
+Selected option:
+
+- Add `--execution local` / `execution_backend="local"` for implementation mode.
+- Keep shaping mode, scout, and resident product/architecture agents without
+  general shell execution.
+- Preserve safe filesystem handling for file tools even when local shell
+  execution is enabled.
+
+Rejected options:
+
+- Reintroduce scout shell execution.
+- Add command-specific wrappers such as `run_tests` as the primary execution
+  path.
+- Enable local shell execution by default.
+
+Consequences:
+
+- Local execution is powerful and trusted: commands run on the host machine with
+  the current user's environment and permissions.
+- Filesystem permissions do not constrain arbitrary shell commands; governance
+  comes from explicit mode/profile selection and role prompts.
+- A future sandbox profile can use the same agent-facing `execute` contract
+  without changing specialist workflows.

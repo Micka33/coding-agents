@@ -14,14 +14,17 @@ from coding_agents.paths import validate_artifacts_dir
 
 AgentMode = Literal["shaping", "implementation"]
 CheckpointerBackend = Literal["memory", "sqlite", "postgres"]
+ExecutionBackend = Literal["none", "local"]
 
 DEFAULT_MODEL = "openai:gpt-5.4"
 DEFAULT_THREAD_ID = "development-agent-team"
 DEFAULT_ARTIFACTS_DIR = "docs/agent-workflow"
 DEFAULT_CHECKPOINTER_BACKEND: CheckpointerBackend = "sqlite"
+DEFAULT_EXECUTION_BACKEND: ExecutionBackend = "none"
 DEFAULT_SQLITE_CHECKPOINT_PATH = ".coding-agents/checkpoints.sqlite"
 DEFAULT_SCOUT_REASONING_EFFORT = "medium"
 REASONING_EFFORT_ENV = "CODING_AGENTS_REASONING_EFFORT"
+EXECUTION_BACKEND_ENV = "CODING_AGENTS_EXECUTION"
 SCOUT_MODEL_ENV = "CODING_AGENTS_SCOUT_MODEL"
 SCOUT_REASONING_EFFORT_ENV = "CODING_AGENTS_SCOUT_REASONING_EFFORT"
 CHECKPOINTER_BACKEND_ENV = "CODING_AGENTS_CHECKPOINTER"
@@ -44,6 +47,7 @@ class AgentTeamConfig:
     checkpointer_backend: CheckpointerBackend | None = None
     sqlite_checkpoint_path: str | Path | None = None
     postgres_checkpoint_url: str | None = None
+    execution_backend: ExecutionBackend | None = None
     skills: tuple[str, ...] = field(default_factory=tuple)
     memory: tuple[str, ...] = field(default_factory=tuple)
     implementation_write_paths: tuple[str, ...] = field(default_factory=tuple)
@@ -89,10 +93,26 @@ class AgentTeamConfig:
             raise ValueError("checkpointer backend must be one of: memory, sqlite, postgres")
         return backend
 
+    def resolved_execution_backend(self) -> ExecutionBackend:
+        """Return the configured command execution backend."""
+
+        backend = (
+            self.execution_backend
+            or os.environ.get(EXECUTION_BACKEND_ENV)
+            or DEFAULT_EXECUTION_BACKEND
+        )
+        if backend not in {"none", "local"}:
+            raise ValueError("execution backend must be one of: none, local")
+        return backend
+
     def resolved_sqlite_checkpoint_path(self) -> Path:
         """Return the configured SQLite checkpoint path."""
 
-        raw_path = self.sqlite_checkpoint_path or os.environ.get(SQLITE_CHECKPOINT_PATH_ENV) or DEFAULT_SQLITE_CHECKPOINT_PATH
+        raw_path = (
+            self.sqlite_checkpoint_path
+            or os.environ.get(SQLITE_CHECKPOINT_PATH_ENV)
+            or DEFAULT_SQLITE_CHECKPOINT_PATH
+        )
         path = Path(raw_path)
         if path.is_absolute():
             return path

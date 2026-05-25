@@ -4,7 +4,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from coding_agents.safe_filesystem import SafeFilesystemBackend
+from deepagents.middleware.filesystem import supports_execution
+
+from coding_agents.safe_filesystem import SafeFilesystemBackend, SafeLocalShellBackend
 
 
 class SafeFilesystemBackendTests(unittest.TestCase):
@@ -102,6 +104,22 @@ class SafeFilesystemBackendTests(unittest.TestCase):
         self.assertNotIn("/public.env", [entry["path"] for entry in entries])
         self.assertEqual(glob_matches, [])
         self.assertEqual(grep_matches, [])
+
+    def test_local_shell_backend_supports_execute_and_keeps_safe_filesystem(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            secret = root / ".env"
+            secret.write_text("TOKEN=secret\n", encoding="utf-8")
+            backend = SafeLocalShellBackend(root_dir=root, virtual_mode=True)
+
+            execute_result = backend.execute("printf local-ok")
+            read_result = backend.read("/.env")
+
+        self.assertTrue(supports_execution(backend))
+        self.assertEqual(execute_result.exit_code, 0)
+        self.assertEqual(execute_result.output, "local-ok")
+        self.assertIsNotNone(read_result.error)
+        self.assertIn("sensitive", read_result.error)
 
 
 if __name__ == "__main__":

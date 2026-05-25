@@ -14,11 +14,13 @@ from coding_agents.config import (
     CHECKPOINTER_BACKEND_ENV,
     DEFAULT_ARTIFACTS_DIR,
     DEFAULT_CHECKPOINTER_BACKEND,
+    DEFAULT_EXECUTION_BACKEND,
     DEFAULT_MODEL,
     DEFAULT_SCOUT_REASONING_EFFORT,
     DEFAULT_SQLITE_CHECKPOINT_PATH,
-    POSTGRES_CHECKPOINT_URL_ENV,
     DEFAULT_THREAD_ID,
+    EXECUTION_BACKEND_ENV,
+    POSTGRES_CHECKPOINT_URL_ENV,
     REASONING_EFFORT_ENV,
     SCOUT_MODEL_ENV,
     SCOUT_REASONING_EFFORT_ENV,
@@ -26,6 +28,7 @@ from coding_agents.config import (
     AgentMode,
     AgentTeamConfig,
     CheckpointerBackend,
+    ExecutionBackend,
 )
 from coding_agents.env import load_dotenv_file
 from coding_agents.messages import conversation_transcript, last_message_text
@@ -52,9 +55,26 @@ def main(argv: Iterable[str] | None = None) -> int:
             or os.environ.get(SCOUT_REASONING_EFFORT_ENV)
             or DEFAULT_SCOUT_REASONING_EFFORT
         )
-        checkpointer_backend = args.checkpointer or os.environ.get(CHECKPOINTER_BACKEND_ENV) or DEFAULT_CHECKPOINTER_BACKEND
-        sqlite_checkpoint_path = args.sqlite_checkpoint_path or os.environ.get(SQLITE_CHECKPOINT_PATH_ENV) or DEFAULT_SQLITE_CHECKPOINT_PATH
-        postgres_checkpoint_url = args.postgres_checkpoint_url or os.environ.get(POSTGRES_CHECKPOINT_URL_ENV) or os.environ.get("DATABASE_URL")
+        checkpointer_backend = (
+            args.checkpointer
+            or os.environ.get(CHECKPOINTER_BACKEND_ENV)
+            or DEFAULT_CHECKPOINTER_BACKEND
+        )
+        execution_backend = (
+            args.execution
+            or os.environ.get(EXECUTION_BACKEND_ENV)
+            or DEFAULT_EXECUTION_BACKEND
+        )
+        sqlite_checkpoint_path = (
+            args.sqlite_checkpoint_path
+            or os.environ.get(SQLITE_CHECKPOINT_PATH_ENV)
+            or DEFAULT_SQLITE_CHECKPOINT_PATH
+        )
+        postgres_checkpoint_url = (
+            args.postgres_checkpoint_url
+            or os.environ.get(POSTGRES_CHECKPOINT_URL_ENV)
+            or os.environ.get("DATABASE_URL")
+        )
 
         if args.init_artifacts:
             created = ensure_agent_workflow_files(args.root, artifacts_dir)
@@ -79,6 +99,7 @@ def main(argv: Iterable[str] | None = None) -> int:
             checkpointer_backend=checkpointer_backend,
             sqlite_checkpoint_path=sqlite_checkpoint_path,
             postgres_checkpoint_url=postgres_checkpoint_url,
+            execution_backend=execution_backend,
             implementation_write_paths=tuple(args.write_paths),
             debug=args.debug,
             initialize_artifacts=args.init_artifacts,
@@ -97,6 +118,7 @@ def main(argv: Iterable[str] | None = None) -> int:
     if scout_reasoning_effort:
         print(f"Scout: {scout_model} ({scout_reasoning_effort})")
     print(f"Checkpointer: {agent.checkpointer_handle.backend} ({agent.checkpointer_handle.location})")
+    print(f"Execution: {execution_backend}")
     print(f"Thread: {args.thread_id}")
     print("Type /exit to quit, /help for commands.")
     _print_restored_conversation(agent, args.thread_id)
@@ -185,6 +207,16 @@ def _parse_args(argv: Iterable[str] | None) -> argparse.Namespace:
         help="Checkpoint backend for conversation memory.",
     )
     parser.add_argument(
+        "--execution",
+        choices=["none", "local"],
+        default=None,
+        type=_execution_backend,
+        help=(
+            "Command execution backend. Use 'local' only for trusted implementation "
+            "runs because commands execute on this machine."
+        ),
+    )
+    parser.add_argument(
         "--sqlite-checkpoint-path",
         default=None,
         help="SQLite checkpoint file path for the sqlite backend.",
@@ -234,6 +266,12 @@ def _checkpointer_backend(value: str) -> CheckpointerBackend:
     return value  # type: ignore[return-value]
 
 
+def _execution_backend(value: str) -> ExecutionBackend:
+    if value not in {"none", "local"}:
+        raise argparse.ArgumentTypeError("execution must be none or local")
+    return value  # type: ignore[return-value]
+
+
 def _artifacts_dir(value: str) -> str:
     try:
         return validate_artifacts_dir(value)
@@ -252,6 +290,7 @@ Workflow:
   - shaping mode is the default
   - implementation mode requires readiness-gate.yaml approved for full_implementation
   - implementation writes require explicit --write-path allowlists
+  - local command execution requires --execution local in implementation mode
   - workflow artifacts live in {artifacts_dir}
 """.strip()
     )

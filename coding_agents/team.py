@@ -19,7 +19,7 @@ from coding_agents.permissions import filesystem_permissions
 from coding_agents.prompts import engineering_manager_prompt, implementation_subagents
 from coding_agents.readiness import assert_readiness_approved
 from coding_agents.resident_agents import create_resident_agent_team
-from coding_agents.safe_filesystem import SafeFilesystemBackend
+from coding_agents.safe_filesystem import SafeFilesystemBackend, SafeLocalShellBackend
 from coding_agents.scout import create_scout_subagent
 from coding_agents.tools import default_tools
 
@@ -67,6 +67,8 @@ def create_development_team_agent(config: AgentTeamConfig | None = None) -> Deve
     implementation_enabled = config.mode == "implementation"
     if implementation_enabled:
         assert_readiness_approved(root_dir, artifacts_dir)
+    elif config.resolved_execution_backend() != "none":
+        raise ValueError("command execution is only available in implementation mode")
 
     disable_default_general_purpose_subagent(config.resolved_model())
     model = _resolve_model(config)
@@ -96,13 +98,15 @@ def create_development_team_agent(config: AgentTeamConfig | None = None) -> Deve
     if implementation_enabled:
         subagents.extend(implementation_subagents(shared_tools))
 
+    backend = _resolve_backend(config, root_dir)
+
     manager_graph = create_deep_agent(
         name="engineering-manager",
         model=model,
         tools=manager_tools,
         system_prompt=engineering_manager_prompt(config.mode, artifacts_dir),
         subagents=subagents,
-        backend=SafeFilesystemBackend(root_dir=root_dir, virtual_mode=True),
+        backend=backend,
         permissions=filesystem_permissions(
             config.mode,
             artifacts_dir,
@@ -115,6 +119,15 @@ def create_development_team_agent(config: AgentTeamConfig | None = None) -> Deve
         debug=config.debug,
     )
     return DevelopmentTeamAgent(manager_graph, checkpointer_handle)
+
+
+def _resolve_backend(config: AgentTeamConfig, root_dir: Path) -> SafeFilesystemBackend:
+    """Return the filesystem/execution backend for the manager graph."""
+
+    execution_backend = config.resolved_execution_backend()
+    if execution_backend == "local":
+        return SafeLocalShellBackend(root_dir=root_dir, virtual_mode=True)
+    return SafeFilesystemBackend(root_dir=root_dir, virtual_mode=True)
 
 
 def _resolve_model(config: AgentTeamConfig) -> str | BaseChatModel:

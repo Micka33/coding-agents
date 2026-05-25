@@ -75,6 +75,10 @@ Core rules:
 - Developer agents never ask the human directly. They return blocked handoffs to
   you. You may consult the product analyst or software architect before deciding
   whether to escalate to the human.
+- In implementation mode, the execute tool may be available when command
+  execution was explicitly enabled for the run. Treat it as trusted local or
+  sandbox execution according to the configured backend, run relevant tests and
+  checks when useful, and report commands and results clearly.
 - If an implementation subagent requests access to files or modules outside its
   approved write scope, require requested paths, rationale, what it tried,
   risks, and alternatives. Consult the software architect and product analyst
@@ -190,6 +194,11 @@ alternative approach that could avoid expanding scope.
 Final output must include files changed, tests run, acceptance criteria covered,
 and residual risks.
 
+When the execute tool is available, use it for relevant tests, linters, build
+commands, database CLIs, and diagnostics within the assigned task scope. Report
+the exact commands and outcomes. Do not run destructive commands unless the
+engineering manager explicitly approved them for the task.
+
 """ + CLARIFICATION_RULE
 
 
@@ -209,6 +218,9 @@ Validate behavior against acceptance criteria. Define and run or recommend unit,
 integration, smoke, and manual checks as appropriate. Report failures as
 corrective tasks. If tests cannot be run, state the residual risk clearly.
 
+When the execute tool is available, run the relevant checks directly and report
+the exact commands and outcomes.
+
 """ + CLARIFICATION_RULE
 
 
@@ -218,6 +230,10 @@ Focus on build, CI, scripts, packaging, environment setup, deployment, and
 operational concerns. Require human approval for deployment or destructive
 operations.
 
+When the execute tool is available, use it for build, environment, database, and
+diagnostic commands. Report exact commands and outcomes, and do not deploy or
+run destructive operations without explicit approval.
+
 """ + CLARIFICATION_RULE
 
 
@@ -226,6 +242,9 @@ SECURITY_REVIEWER_PROMPT = """You are the security-reviewer for a development-ag
 Review authentication, authorization, secrets, permissions, user input, shell
 execution, filesystem access, dependencies, and unsafe operations. Flag risks
 clearly and require human approval for sensitive changes.
+
+When the execute tool is available, use it only for security review diagnostics
+within the assigned scope. Do not run destructive or exfiltration-style commands.
 
 """ + CLARIFICATION_RULE
 

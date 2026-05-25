@@ -33,6 +33,9 @@ Status: draft
 - The V0 Python API must be limited to the first-party integration surface: `AgentTeamConfig` and `create_development_team_agent`.
 - All other package modules and symbols must be treated as internal unless later promoted by an explicit decision.
 - The system must expose Tavily-backed `web_search` and `fetch_url` tools when configured.
+- The system must support explicit local command execution for trusted
+  implementation runs, while keeping shaping mode, scout, and resident
+  product/architecture agents without general shell execution.
 - Artifact templates must be available for the expected workflow documents.
 
 ### Readiness and governance

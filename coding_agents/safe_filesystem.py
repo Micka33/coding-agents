@@ -3,13 +3,23 @@
 from __future__ import annotations
 
 import os
+import subprocess
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Iterator
 
 import wcmatch.glob as wcglob
 from deepagents.backends import FilesystemBackend
-from deepagents.backends.protocol import FileInfo, GlobResult, GrepMatch, GrepResult, LsResult
+from deepagents.backends.protocol import (
+    ExecuteResponse,
+    FileInfo,
+    GlobResult,
+    GrepMatch,
+    GrepResult,
+    LsResult,
+    SandboxBackendProtocol,
+)
 
 _WCMATCH_FLAGS = wcglob.BRACE | wcglob.GLOBSTAR
 _SENSITIVE_SUFFIXES = {".key", ".pem", ".p12", ".pfx"}
@@ -263,6 +273,114 @@ class SafeFilesystemBackend(FilesystemBackend):
             except OSError:
                 return True
         return False
+
+
+class SafeLocalShellBackend(SafeFilesystemBackend, SandboxBackendProtocol):
+    """Safe filesystem backend plus explicit host shell execution.
+
+    Filesystem tools keep the symlink and sensitive-path protections from
+    `SafeFilesystemBackend`. The `execute` tool is intentionally a trusted local
+    escape hatch: commands run through the host shell with the current user's
+    permissions and are not constrained by filesystem permissions.
+    """
+
+    def __init__(
+        self,
+        root_dir: str | Path | None = None,
+        virtual_mode: bool | None = True,
+        max_file_size_mb: int = 10,
+        *,
+        timeout: int = 120,
+        max_output_bytes: int = 100_000,
+        env: dict[str, str] | None = None,
+        inherit_env: bool = True,
+    ) -> None:
+        if timeout <= 0:
+            raise ValueError(f"timeout must be positive, got {timeout}")
+        if max_output_bytes <= 0:
+            raise ValueError(f"max_output_bytes must be positive, got {max_output_bytes}")
+
+        super().__init__(
+            root_dir=root_dir,
+            virtual_mode=virtual_mode,
+            max_file_size_mb=max_file_size_mb,
+        )
+        self._default_timeout = timeout
+        self._max_output_bytes = max_output_bytes
+        self._env = os.environ.copy() if inherit_env else {}
+        if env is not None:
+            self._env.update(env)
+        self._sandbox_id = f"local-{uuid.uuid4().hex[:8]}"
+
+    @property
+    def id(self) -> str:
+        """Return the local execution backend identifier."""
+
+        return self._sandbox_id
+
+    def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
+        """Execute a shell command directly on the host machine."""
+
+        if not command or not isinstance(command, str):
+            return ExecuteResponse(
+                output="Error: Command must be a non-empty string.",
+                exit_code=1,
+                truncated=False,
+            )
+
+        effective_timeout = timeout if timeout is not None else self._default_timeout
+        if effective_timeout <= 0:
+            raise ValueError(f"timeout must be positive, got {effective_timeout}")
+
+        try:
+            completed = subprocess.run(
+                command,
+                check=False,
+                shell=True,
+                capture_output=True,
+                stdin=subprocess.DEVNULL,
+                text=True,
+                timeout=effective_timeout,
+                env=self._env,
+                cwd=str(self.cwd),
+            )
+        except subprocess.TimeoutExpired:
+            return ExecuteResponse(
+                output=f"Error: Command timed out after {effective_timeout} seconds.",
+                exit_code=124,
+                truncated=False,
+            )
+        except Exception as exc:  # pragma: no cover - defensive command boundary
+            return ExecuteResponse(
+                output=f"Error executing command ({type(exc).__name__}): {exc}",
+                exit_code=1,
+                truncated=False,
+            )
+
+        output_parts: list[str] = []
+        if completed.stdout:
+            output_parts.append(completed.stdout)
+        if completed.stderr:
+            output_parts.extend(
+                f"[stderr] {line}"
+                for line in completed.stderr.rstrip().splitlines()
+            )
+        output = "\n".join(output_parts) if output_parts else "<no output>"
+
+        truncated = False
+        if len(output) > self._max_output_bytes:
+            output = output[: self._max_output_bytes].rstrip()
+            output += f"\n\n... Output truncated at {self._max_output_bytes} bytes."
+            truncated = True
+
+        if completed.returncode != 0:
+            output = f"{output.rstrip()}\n\nExit code: {completed.returncode}"
+
+        return ExecuteResponse(
+            output=output,
+            exit_code=completed.returncode,
+            truncated=truncated,
+        )
 
 
 def _virtual_relative_path(key: str) -> Path:

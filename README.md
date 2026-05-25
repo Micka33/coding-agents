@@ -43,6 +43,7 @@ CODING_AGENTS_SCOUT_MODEL=openai:gpt-5.5
 CODING_AGENTS_SCOUT_REASONING_EFFORT=medium
 CODING_AGENTS_CHECKPOINTER=sqlite
 CODING_AGENTS_SQLITE_CHECKPOINT_PATH=.coding-agents/checkpoints.sqlite
+CODING_AGENTS_EXECUTION=none
 ```
 
 When an OpenAI model is used with `CODING_AGENTS_REASONING_EFFORT`, the module
@@ -102,6 +103,17 @@ Use implementation mode only after the readiness gate has been approved:
 uv run python main.py --mode implementation
 ```
 
+Enable local command execution for trusted implementation runs:
+
+```bash
+uv run python main.py --mode implementation --execution local
+```
+
+Local execution exposes Deep Agents' `execute` tool to the implementation
+manager graph and implementation specialists. Commands run on this machine with
+the current user's environment and permissions. Scout, shaping mode, and
+resident product/architecture agents remain without general shell execution.
+
 ## Python API
 
 ```python
@@ -112,6 +124,7 @@ with create_development_team_agent(
         model="openai:gpt-5.5",
         mode="shaping",
         checkpointer_backend="sqlite",
+        execution_backend="none",
     )
 ) as agent:
     result = agent.invoke(

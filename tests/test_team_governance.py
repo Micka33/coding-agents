@@ -45,6 +45,10 @@ def patched_team_construction():
         patch("coding_agents.team.create_scout_subagent", return_value={"name": "scout"}) as create_scout_subagent,
         patch("coding_agents.team.implementation_subagents", return_value=[{"name": "developer"}]) as implementation_subagents,
         patch("coding_agents.team.SafeFilesystemBackend", return_value="backend") as filesystem_backend,
+        patch(
+            "coding_agents.team.SafeLocalShellBackend",
+            return_value="local-backend",
+        ) as local_shell_backend,
         patch("coding_agents.team.create_deep_agent", return_value="graph") as create_deep_agent,
     ):
         yield {
@@ -57,6 +61,7 @@ def patched_team_construction():
             "create_scout_subagent": create_scout_subagent,
             "implementation_subagents": implementation_subagents,
             "filesystem_backend": filesystem_backend,
+            "local_shell_backend": local_shell_backend,
             "create_deep_agent": create_deep_agent,
             "checkpointer_handle": checkpointer_handle,
         }
@@ -80,6 +85,7 @@ class TeamGovernanceTests(unittest.TestCase):
             self.assertEqual(agent.graph, "graph")
             patched["implementation_subagents"].assert_not_called()
             kwargs = patched["create_deep_agent"].call_args.kwargs
+            self.assertEqual(kwargs["backend"], "backend")
             self.assertEqual(kwargs["subagents"], [{"name": "scout"}])
             patched["disable_general_purpose"].assert_has_calls([call("test:model"), call("model")])
             self.assertEqual(
@@ -178,6 +184,51 @@ class TeamGovernanceTests(unittest.TestCase):
                 _check_fs_permission(kwargs["permissions"], "write", "/README.md"),
                 "deny",
             )
+            self.assertEqual(kwargs["backend"], "backend")
+
+    def test_implementation_local_execution_uses_local_shell_backend(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            gate_dir = root / "docs/agent-workflow"
+            gate_dir.mkdir(parents=True)
+            (gate_dir / "readiness-gate.yaml").write_text(APPROVED_GATE, encoding="utf-8")
+            config = AgentTeamConfig(
+                root_dir=root,
+                mode="implementation",
+                model="test:model",
+                scout_model="test:scout",
+                checkpointer_backend="memory",
+                execution_backend="local",
+                implementation_write_paths=("coding_agents/config.py",),
+                initialize_artifacts=False,
+            )
+
+            with patched_team_construction() as patched:
+                create_development_team_agent(config)
+
+            patched["filesystem_backend"].assert_not_called()
+            patched["local_shell_backend"].assert_called_once_with(
+                root_dir=root.resolve(),
+                virtual_mode=True,
+            )
+            kwargs = patched["create_deep_agent"].call_args.kwargs
+            self.assertEqual(kwargs["backend"], "local-backend")
+
+    def test_shaping_rejects_local_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = AgentTeamConfig(
+                root_dir=Path(tmp),
+                mode="shaping",
+                checkpointer_backend="memory",
+                execution_backend="local",
+                initialize_artifacts=True,
+            )
+
+            with patch("coding_agents.team.create_deep_agent") as create_deep_agent:
+                with self.assertRaisesRegex(ValueError, "implementation mode"):
+                    create_development_team_agent(config)
+
+            create_deep_agent.assert_not_called()
 
     def test_resident_agents_disable_default_general_purpose_subagent(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -240,6 +291,11 @@ class TeamGovernanceTests(unittest.TestCase):
         )
 
         self.assertEqual(args.write_paths, ["coding_agents/config.py", "tests/"])
+
+    def test_cli_accepts_execution_backend(self) -> None:
+        args = _parse_args(["--execution", "local"])
+
+        self.assertEqual(args.execution, "local")
 
     def test_cli_readiness_startup_error_includes_gate_and_write_scope_hint(self) -> None:
         stderr = io.StringIO()
