@@ -267,7 +267,7 @@ Validation evidence as of 2026-05-25:
 - Automated validation passed with `uv run --project / python -m unittest discover -s tests`.
 - Result: exit code 0, `Ran 64 tests in 0.297s`, `OK`.
 
-### DEC-0005: Tighten implementation-mode write scopes
+### DEC-0005: Tighten implementation-mode write protections
 
 Decision status: approved
 
@@ -275,24 +275,21 @@ Implementation status: implemented / statically inspected and tested
 
 Context:
 
-Mode-aware permissions are present. The limited governance implementation now
-uses task-scoped implementation write allowlists, literal-only write paths, safe
-filesystem path handling, and readiness-gate write protections. Broad writes were
-removed from the implementation-mode permission model, and local unittest
-validation passed on 2026-05-25.
+Mode-aware permissions are present. The governance implementation now uses
+repo-wide implementation writes by default after machine-readable readiness
+approval, while protecting the machine-readable readiness gate and secret-like
+paths. Literal `--write-path` restrictions remain available for narrower runs,
+and local unittest validation passed on 2026-05-25.
 
 Decision:
 
-Require task-scoped write allowlists for implementation work. Each developer task
-brief must identify files or modules in scope, files or modules out of scope,
-constraints, acceptance criteria, and the write permissions granted before work
-is delegated.
-
-Allowlists may use exact files or literal existing directories. Glob patterns are
-not accepted for implementation write scopes in the limited DEC-0005 enforcement
-because they are harder to reason about safely. Directories require explicit
-justification in the task brief. Tests and documentation related to a task are in
-scope only when the task brief names them explicitly.
+Allow repo-wide implementation writes by default after the readiness gate records
+full approval. Each developer task brief must still identify files or modules in
+scope, files or modules out of scope, constraints, and acceptance criteria before
+work is delegated. `--write-path` can restrict a run to exact files or literal
+existing directories when a narrower execution profile is useful. Glob patterns
+are not accepted for explicit write restrictions because they are harder to
+reason about safely.
 
 Implementation subagents may request access to additional files or modules, but
 must do so through the engineering manager with a concise justification, the
@@ -302,19 +299,21 @@ manager may consult the software architect and product analyst before approving
 the expansion, rejecting it, suggesting an alternate solution, splitting the task,
 or escalating to the human.
 
-Cross-cutting work should be split into smaller scoped tasks by default. A broad
-scope is allowed only with explicit approval and documented rationale.
+Cross-cutting work should still be split into smaller scoped tasks by default.
 
 Options considered:
 
-- Broad implementation-mode write access.
+- Repo-wide implementation-mode write access after readiness approval.
 - Role-scoped write profiles.
-- Task-scoped write allowlists.
+- Optional task-scoped write restrictions.
 
 Selected option:
 
-- Task-scoped write allowlists, with exact files preferred and literal existing
-  directories allowed only with justification; glob patterns are disallowed.
+- Repo-wide implementation writes by default after machine-readable readiness
+  approval, with protected denies for `readiness-gate.yaml` and secret-like
+  paths.
+- Optional `--write-path` restrictions, with exact files preferred and literal
+  existing directories allowed; glob patterns are disallowed.
 - Manager-mediated scope expansion requests, with product/architecture
   consultation when the request may change scope, boundaries, or tradeoffs.
 - Cross-cutting tasks split by default unless a broad scope is explicitly
@@ -322,36 +321,36 @@ Selected option:
 
 Rejected options:
 
-- Broad write access, because it weakens governance and makes review harder.
+- No implementation writes without explicit `--write-path`, because it prevents
+  the approved manager from autonomously executing the implementation backlog.
 - Role-only scoping, because two tasks owned by the same role may still require
   different boundaries.
 
 Rationale:
 
-Task-scoped write permissions align implementation authority with the approved
-brief and reduce accidental cross-cutting changes. This complements DEC-0004:
-the readiness gate controls whether implementation may start, while task-scoped
-allowlists control what an implementation agent may change after authorization.
+The readiness gate is the human trust boundary. After it records full approval,
+the manager should be able to execute the implementation backlog autonomously.
+Task scoping is still enforced through briefs, review, tests, and optional
+`--write-path` restrictions rather than requiring the human to enumerate paths at
+CLI startup.
 
 Consequences:
 
-- Task briefs become permission inputs, not just planning documents.
-- The engineering manager must validate scopes before delegation.
+- Task briefs remain required planning and review inputs.
+- The engineering manager must validate scope before delegation.
 - Subagents can request additional access, but cannot grant it to themselves.
 - Scope expansion decisions must be documented when they change product,
   architecture, planning, or delivery context.
-- Tests and docs are not automatically writable unless named by the task brief.
-- Some implementation tasks may need to be split when their write scopes overlap
-  too broadly.
-- Permission enforcement supports exact file and literal existing-directory
-  allowlists plus denied out-of-scope paths; glob allowlists are intentionally
-  rejected in the limited implementation.
+- Tests and docs may be updated as needed for the assigned task, while protected
+  readiness/secret paths remain denied.
+- Permission enforcement supports repo-wide default writes, optional exact-file
+  and literal existing-directory restrictions, and denied protected paths.
 
 Validation evidence as of 2026-05-25:
 
-- Scout-backed static inspection reports task-scoped write allowlists,
-  literal-only write scopes, safe path checks, and protected readiness/secret
-  path handling.
+- Scout-backed static inspection reports repo-wide implementation writes after
+  gate approval, optional literal write restrictions, safe path checks, and
+  protected readiness/secret path handling.
 - Automated validation passed with `uv run --project / python -m unittest discover -s tests`.
 - Result: exit code 0, `Ran 64 tests in 0.297s`, `OK`.
 
@@ -359,13 +358,13 @@ Scope clarification for the limited DEC-0004/DEC-0005 corrective pass:
 
 The following security and correctness fixes are in scope for the limited
 DEC-0004/DEC-0005 implementation authorization because they close bypasses of the
-readiness gate, artifact integrity, or task-scoped write permissions:
+readiness gate, artifact integrity, or write protections:
 
 - Remove `scout.execute` from scout tool registration rather than trying to validate arbitrary shell commands in this pass.
 - Normalize and compare protected paths using case-insensitive deny checks for
   reserved targets such as `readiness-gate.yaml`, `.env`, and private key files.
 - Reject symlink components for artifact directories, workflow artifact files,
-  runtime filesystem-tool aliases, and write-scope paths, then verify containment
+  runtime filesystem-tool aliases, and explicit write-restriction paths, then verify containment
   after resolving the final path where applicable.
 - Validate `artifacts_dir` by resolved containment, not only by string prefix, and
   fail closed on symlink relocation.
@@ -432,7 +431,7 @@ Consequences:
 - The future web UI should use the same package runtime decision unless a later
   architecture decision splits runtimes deliberately.
 
-### DEC-0007: Explicit command execution profiles
+### DEC-0007: Default local command execution profiles
 
 Decision status: approved
 
@@ -448,15 +447,17 @@ them.
 
 Decision:
 
-Add an explicit command execution profile. The default remains `none`. A trusted
-implementation run may opt into `local`, which exposes Deep Agents' `execute`
-tool to the engineering-manager graph and implementation specialists.
+Add an explicit command execution profile. Shaping and implementation runs
+default to `local`, which exposes Deep Agents' `execute` tool to the
+engineering-manager graph. In implementation mode it also exposes `execute` to
+implementation specialists. The human can pass `--execution none` to disable
+command execution for a run.
 
 Selected option:
 
-- Add `--execution local` / `execution_backend="local"` for implementation mode.
-- Keep shaping mode, scout, and resident product/architecture agents without
-  general shell execution.
+- Default shaping and implementation modes to `execution_backend="local"`.
+- Keep scout and resident product/architecture agents without general shell
+  execution.
 - Preserve safe filesystem handling for file tools even when local shell
   execution is enabled.
 
@@ -465,22 +466,23 @@ Rejected options:
 - Reintroduce scout shell execution.
 - Add command-specific wrappers such as `run_tests` as the primary execution
   path.
-- Enable local shell execution by default.
+- Require users to opt into local shell execution on every run.
 
 Consequences:
 
 - Local execution is powerful and trusted: commands run on the host machine with
   the current user's environment and permissions.
 - Filesystem permissions do not constrain arbitrary shell commands; governance
-  comes from explicit mode/profile selection and role prompts.
+  comes from explicit mode selection, the readiness gate, role prompts, and the
+  option to disable execution with `--execution none`.
 - A future sandbox profile can use the same agent-facing `execute` contract
   without changing specialist workflows.
 
 Validation evidence as of 2026-05-25:
 
-- Scout-backed static inspection reports shaping mode rejects local command
-  execution, implementation mode can opt into local execution, and scout still has
-  no `execute` tool.
+- Scout-backed static inspection reports shaping and implementation modes default
+  to local execution for the manager graph, implementation specialists receive
+  execution only in implementation mode, and scout still has no `execute` tool.
 - Automated validation passed with `uv run --project / python -m unittest discover -s tests`.
 - Result: exit code 0, `Ran 64 tests in 0.297s`, `OK`.
 
@@ -488,7 +490,7 @@ Validation evidence as of 2026-05-25:
 
 Decision status: approved
 
-Implementation status: approved for implementation entry; machine-readable gate recording pending
+Implementation status: approved for implementation entry; machine-readable gate recorded
 
 Context:
 
@@ -501,7 +503,7 @@ Approve entry into broad implementation mode for bounded, task-scoped tasks. Mis
 Selected option:
 
 - Proceed with bounded implementation tasks after the machine-readable readiness gate records `full_implementation` approval.
-- Require each task to have a complete brief, explicit ownership, files/modules in scope, constraints, acceptance criteria, and task-scoped write permissions.
+- Require each task to have a complete brief, explicit ownership, files/modules in scope, constraints, and acceptance criteria.
 - Keep CI and DEC-0006 visible as blockers before delivery-ready, release-ready, production-ready, or external distribution claims.
 
 Rejected options:
@@ -517,7 +519,7 @@ The governance controls needed to safely bound implementation work have passing 
 Consequences:
 
 - Broad implementation work is approved only for bounded, task-scoped tasks.
-- Runtime implementation mode still requires `readiness-gate.yaml` to record `approved: true`, `approval_scope: full_implementation`, approver, and date. Current agent tool permissions denied updating that YAML file.
+- Runtime implementation mode is enabled by `readiness-gate.yaml`, which records `approved: true`, `approval_scope: full_implementation`, approver, and date.
 - CI remains a P0 release-readiness follow-up.
 - DEC-0006 remains a release-readiness follow-up.
 - No artifact may claim release readiness, production readiness, or external distribution readiness until release blockers are cleared or explicitly accepted.

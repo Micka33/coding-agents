@@ -43,7 +43,7 @@ class FilesystemPermissionsTests(unittest.TestCase):
             )
         )
 
-    def test_implementation_without_write_paths_denies_all_writes(self) -> None:
+    def test_implementation_without_write_paths_allows_repo_wide_writes_except_protected_paths(self) -> None:
         permissions = filesystem_permissions("implementation")
 
         self.assertEqual(_check_fs_permission(permissions, "read", "/coding_agents/config.py"), "allow")
@@ -57,13 +57,21 @@ class FilesystemPermissionsTests(unittest.TestCase):
         )
         self.assertEqual(
             _check_fs_permission(permissions, "write", "/docs/agent-workflow/readiness-gate.md"),
-            "deny",
+            "allow",
         )
         self.assertEqual(
             _check_fs_permission(permissions, "write", "/coding_agents/config.py"),
+            "allow",
+        )
+        self.assertEqual(
+            _check_fs_permission(permissions, "write", "/.env"),
             "deny",
         )
-        self.assertFalse(
+        self.assertEqual(
+            _check_fs_permission(permissions, "write", "/service/private.key"),
+            "deny",
+        )
+        self.assertTrue(
             any(
                 rule.mode == "allow" and "write" in rule.operations and "/**" in rule.paths
                 for rule in permissions
@@ -102,12 +110,13 @@ class FilesystemPermissionsTests(unittest.TestCase):
         self.assertEqual(permissions[-1].mode, "deny")
         self.assertEqual(permissions[-1].paths, ["/**"])
 
-    def test_readiness_gate_write_deny_wins_over_implementation_allowlist(self) -> None:
+    def test_protected_write_denies_win_over_implementation_allowlists(self) -> None:
         permissions = filesystem_permissions(
             "implementation",
             implementation_write_paths=(
                 "docs/agent-workflow/readiness-gate.yaml",
                 "docs/agent-workflow/READINESS-GATE.YAML",
+                ".env",
             ),
         )
 
@@ -119,6 +128,7 @@ class FilesystemPermissionsTests(unittest.TestCase):
             _check_fs_permission(permissions, "write", "/docs/agent-workflow/READINESS-GATE.YAML"),
             "deny",
         )
+        self.assertEqual(_check_fs_permission(permissions, "write", "/.env"), "deny")
 
         directory_permissions = filesystem_permissions(
             "implementation",
@@ -165,7 +175,7 @@ class FilesystemPermissionsTests(unittest.TestCase):
     def test_repo_wide_implementation_write_path_is_invalid(self) -> None:
         for path in ("/**", "/", ".", "./", "*", "*/", "/*", "**/*"):
             with self.subTest(path=path):
-                with self.assertRaisesRegex(ValueError, "repo-wide writes are not allowed"):
+                with self.assertRaisesRegex(ValueError, "omit --write-path"):
                     filesystem_permissions("implementation", implementation_write_paths=(path,))
 
     def test_glob_and_traversal_implementation_write_paths_are_invalid(self) -> None:

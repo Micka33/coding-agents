@@ -14,9 +14,8 @@ implementation work can be planned against reality rather than the old
 placeholders.
 
 The human decision maker approved broad implementation mode on 2026-05-25 for
-bounded, task-scoped tasks. Runtime implementation still requires the
-machine-readable `readiness-gate.yaml` to record that approval; the current agent
-write attempt was denied by tool permissions.
+bounded, task-scoped tasks. The machine-readable `readiness-gate.yaml` records
+that approval.
 
 ## Constraints
 
@@ -26,8 +25,10 @@ write attempt was denied by tool permissions.
 - Provide a path to shared or production deployments.
 - Do not rely on documentation alone when the human asks where implementation
   stands; use codebase reconnaissance.
-- Assign implementation work only after the machine-readable readiness gate records
-  full approval and each task has a bounded brief with explicit write scope.
+- Assign implementation work only after the machine-readable readiness gate
+  records full approval and each task has a bounded brief. CLI write restrictions
+  are optional controls for especially narrow runs, not a prerequisite for
+  broad implementation mode.
 - CI and DEC-0006 are release-readiness blockers, not implementation-entry blockers,
   by human decision on 2026-05-25.
 
@@ -43,8 +44,8 @@ write attempt was denied by tool permissions.
 | Checkpointers | SQLite, Postgres, and memory options exist | Implemented | SQLite is the local durable default; Postgres supports shared/production deployment; memory is useful for tests. |
 | Scout subagent | Present | Implemented | Used for codebase reconnaissance before status, readiness, progress, or gap analysis answers. |
 | Tavily tools | `web_search` and `fetch_url` available | Implemented | Used when current external documentation or source verification is needed. |
-| Workflow artifacts | Files exist under `/docs/agent-workflow/` and have been reconciled with observed V0 state | Approved for implementation entry | Core artifacts capture the 2026-05-25 human approval for bounded, task-scoped implementation entry; machine-readable YAML recording remains pending by permitted process. |
-| Permissions by mode | Mode concept exists with hardened enforcement | Implemented / statically inspected and tested | Scout-backed static inspection reports shaping writes are explicit workflow-artifact files only; implementation writes require task-scoped literal paths and safe filesystem handling. |
+| Workflow artifacts | Files exist under `/docs/agent-workflow/` and have been reconciled with observed V0 state | Approved for implementation entry | Core artifacts and the machine-readable gate capture the 2026-05-25 human approval for bounded implementation entry. |
+| Permissions by mode | Mode concept exists with hardened enforcement | Implemented / statically inspected and tested | Shaping writes are explicit workflow-artifact files only; implementation writes are repo-wide by default after gate approval except protected readiness/secret paths, with optional `--write-path` restrictions for narrower runs. |
 | Implementation subagent prompts/wiring | Developer/reviewer/QA/devops/security/writer wiring exists | Implemented / statically inspected and tested; gated | Scout-backed static inspection reports runtime construction gates implementation subagents behind machine-readable readiness approval. |
 | Readiness gate enforcement | Machine-readable guard exists | Implemented / statically inspected and tested | `readiness-gate.yaml` defaults unapproved and implementation mode fails closed unless full approval metadata is present; local unittest validation passed on 2026-05-25. |
 | Tests and CI | `unittest` suite present; CI not observed | Tests passing locally; CI missing | Local validation passed with `uv run --project / python -m unittest discover -s tests`; result: exit code 0, `Ran 64 tests in 0.297s`, `OK`. |
@@ -55,15 +56,14 @@ write attempt was denied by tool permissions.
 Current evidence combines scout-backed static inspection and local test execution:
 
 - Scout-backed inspection confirms the readiness guard, implementation subagent
-  gating, task-scoped write allowlists, safe path checks, protected readiness/secret
-  paths, and no-shell scout behavior are present in code.
+  gating, optional write restrictions, safe path checks, protected
+  readiness/secret paths, and no-shell scout behavior are present in code.
 - Automated validation passed on 2026-05-25 with `uv run --project / python -m unittest discover -s tests`.
 - Result: exit code 0, `Ran 64 tests in 0.297s`, `OK`.
 - This supports `implemented / statically inspected and tested` for DEC-0004,
   DEC-0005, and DEC-0007 governance controls.
-- Human approval for broad implementation mode was recorded in Markdown artifacts
-  on 2026-05-25, but `readiness-gate.yaml` still requires update by a permitted
-  process before runtime implementation mode will pass.
+- Human approval for broad implementation mode is recorded in Markdown artifacts
+  and `readiness-gate.yaml`.
 
 ## Current Architecture
 
@@ -90,11 +90,10 @@ Current evidence combines scout-backed static inspection and local test executio
   decisions. In the hardened V0 implementation, scout has no shell/`execute` tool
   and `grep` is Python literal search.
 - Implementation-mode agents are available for developer, code review, QA,
-  DevOps, security, and documentation work, but should only be activated after
-  readiness approval.
-- Local command execution is an explicit implementation-mode profile. When
-  enabled, the manager graph and implementation specialists receive the Deep
-  Agents `execute` tool against the host machine; scout, shaping mode, and
+  DevOps, security, and documentation work after readiness approval.
+- Local command execution is enabled by default for shaping and implementation
+  runs. In implementation mode, the manager graph and implementation specialists
+  receive the Deep Agents `execute` tool against the host machine; scout and
   resident product/architecture agents remain without general shell execution.
 - `/docs/agent-workflow/` remains the durable source of truth for product,
   architecture, planning, readiness, and decision artifacts.
@@ -156,24 +155,26 @@ interpretation and should not make product or architecture decisions.
 
 Developer and review subagents require a complete task brief, explicit files or
 modules in scope, files or modules out of scope, constraints, and acceptance
-criteria. Their write scopes should be task-scoped rather than broad.
+criteria. Implementation permissions are broad after gate approval, so bounded
+task briefs and review discipline carry the primary scoping responsibility.
 
 ### Artifact and Permission Contract
 
 During shaping mode, writes are limited to explicit workflow artifact files under
 `/docs/agent-workflow/`; the machine-readable readiness gate is not writable by
-agent tools. During implementation mode, write permissions are explicitly granted
-per task and only after machine-readable readiness approval. Implementation write
-scopes use literal exact files or existing directories, not globs.
+agent tools. During implementation mode, write permissions are repo-wide by
+default after machine-readable readiness approval, except for protected
+readiness/secret paths. `--write-path` remains available to restrict a run to
+literal exact files or existing directories, not globs.
 
 ## Gaps
 
 | Gap | Status | Impact | Proposed response |
 | --- | --- | --- | --- |
 | Product artifacts approved for implementation entry | Approved | Problem, users, MVP, non-goals, and acceptance criteria are documented and accepted by the human decision maker for bounded implementation entry. | Keep scope bounded and update artifacts when decisions change. |
-| Readiness gate enforcement validated locally | Implemented / statically inspected and tested; YAML recording pending | Scout-backed inspection reports the DEC-0004 guard is implemented and fails closed; local unittest suite passed on 2026-05-25; human approval is recorded in Markdown artifacts but not yet in YAML. | Update `readiness-gate.yaml` through a permitted process before runtime implementation mode. |
+| Readiness gate enforcement validated locally | Implemented / statically inspected and tested; approved | Scout-backed inspection reports the DEC-0004 guard is implemented and fails closed before approval; local unittest suite passed on 2026-05-25; human approval is recorded in `readiness-gate.yaml`. | Continue to keep the machine-readable gate protected from agent writes. |
 | Tests and CI status | Tests passing locally; CI missing / release blocker | Local validation passed with `uv run --project / python -m unittest discover -s tests`; result: exit code 0, `Ran 64 tests in 0.297s`, `OK`; CI is still missing. | Add CI before release readiness. |
-| Implementation write-scope enforcement validated locally | Implemented / statically inspected and tested | Scout-backed inspection reports DEC-0005 literal write scopes and safe filesystem protections are implemented; local unittest suite passed on 2026-05-25. | Use bounded task briefs and explicit write scopes for every implementation task. |
+| Implementation write protections validated locally | Implemented / statically inspected and tested | Repo-wide implementation writes are allowed by default after gate approval while `readiness-gate.yaml` and secret-like paths remain protected; optional literal `--write-path` restrictions are tested. | Use bounded task briefs for every implementation task and optional write restrictions when useful. |
 | Python `>=3.14` adoption risk | Release blocker / risky | Runtime files currently use Python `>=3.14`; DEC-0006 requires compatibility review before release readiness but not before implementation entry. | Ratify the runtime floor or lower it before release readiness. |
 | Top-level docs may lag workflow decisions | Follow-up | README and `docs/development-agent-team-architecture.md` may need updates after workflow decisions are finalized. | Update after readiness/gate decisions are finalized or explicit docs scope is reopened. |
 
@@ -182,7 +183,7 @@ scopes use literal exact files or existing directories, not globs.
 | Risk | Severity | Mitigation |
 | --- | --- | --- |
 | Documentation and code drift | High | Require scout reconnaissance for status/gap questions and update artifacts when decisions change. |
-| Machine-readable gate recording pending | High | Record the 2026-05-25 human approval in `readiness-gate.yaml` through a permitted process before runtime implementation mode. |
+| Repo-wide implementation write access after approval | High | Keep tasks bounded through manager briefs, acceptance criteria, review, tests, and protected file denies. |
 | CI missing after local validation | High | Add CI before release readiness so validation is repeatable. |
 | Python `>=3.14` runtime floor limits adoption | Medium | Perform compatibility review and ratify or adjust the supported Python range. |
 | SQLite treated as source of truth | Medium | Keep decisions and requirements in versioned artifacts; treat checkpoint files as working memory only. |
@@ -198,7 +199,7 @@ scopes use literal exact files or existing directories, not globs.
 - DEC-0003: Ratify reusable Python package plus CLI as the V0 delivery shape —
   approved with a minimal first-party API boundary and CLI-only user entrypoint for V0.
 - DEC-0004: Machine-enforce readiness before implementation mode — approved; implemented / statically inspected and tested.
-- DEC-0005: Tighten implementation-mode write scopes — approved; implemented / statically inspected and tested with literal-only write scopes and safe filesystem protections.
+- DEC-0005: Tighten implementation-mode write protections — approved; implemented / statically inspected and tested with protected readiness/secret paths plus optional literal write restrictions.
 - DEC-0006: Ratify or adjust the Python runtime floor — approved; Python `>=3.14` remains an unresolved release risk until compatibility review ratifies or changes it.
-- DEC-0007: Explicit command execution profiles — approved; implemented / statically inspected and tested.
-- DEC-0008: Approve broad implementation entry for bounded task-scoped work — approved by the human decision maker on 2026-05-25; machine-readable gate recording pending by permitted process.
+- DEC-0007: Default local command execution profiles — approved; implemented / statically inspected and tested.
+- DEC-0008: Approve broad implementation entry for bounded task-scoped work — approved by the human decision maker on 2026-05-25 and recorded in the machine-readable gate.

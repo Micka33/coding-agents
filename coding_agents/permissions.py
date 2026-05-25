@@ -45,6 +45,7 @@ SENSITIVE_READ_DENY_PATHS = [
     f"/**/{_case_insensitive_literal_pattern('id_rsa')}",
     f"/**/{_case_insensitive_literal_pattern('id_ed25519')}",
 ]
+SENSITIVE_WRITE_DENY_PATHS = SENSITIVE_READ_DENY_PATHS
 SHAPING_WRITABLE_ARTIFACT_FILENAMES = (
     "product-brief.md",
     "requirements.md",
@@ -74,6 +75,7 @@ def filesystem_permissions(
             FilesystemPermission(operations=["read"], paths=SENSITIVE_READ_DENY_PATHS, mode="deny"),
             FilesystemPermission(operations=["read"], paths=["/**"], mode="allow"),
             FilesystemPermission(operations=["write"], paths=readiness_gate_deny_paths, mode="deny"),
+            FilesystemPermission(operations=["write"], paths=SENSITIVE_WRITE_DENY_PATHS, mode="deny"),
         ]
         write_paths = normalize_implementation_write_paths(
             implementation_write_paths,
@@ -87,7 +89,9 @@ def filesystem_permissions(
                     mode="allow",
                 )
             )
-        permissions.append(FilesystemPermission(operations=["write"], paths=["/**"], mode="deny"))
+            permissions.append(FilesystemPermission(operations=["write"], paths=["/**"], mode="deny"))
+        else:
+            permissions.append(FilesystemPermission(operations=["write"], paths=["/**"], mode="allow"))
         return permissions
 
     return [
@@ -112,4 +116,3 @@ def _shaping_artifact_write_paths(artifact_root: str) -> list[str]:
         f"{artifact_root}/{filename}"
         for filename in SHAPING_WRITABLE_ARTIFACT_FILENAMES
     ]
-

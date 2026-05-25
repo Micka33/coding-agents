@@ -53,12 +53,10 @@ V0 MVP is a single-feature-stream development-agent workflow with:
 - Code exists largely as a Python package and CLI under `coding_agents/`.
 - Core agent roles and web tools are represented.
 - Workflow artifacts have been moved from placeholders to an implementation-entry-approved baseline.
-- Broad implementation mode is approved for bounded, task-scoped tasks, but runtime activation still requires the machine-readable readiness gate to be updated by a permitted process.
+- Broad implementation mode is approved for bounded, task-scoped tasks, and the machine-readable readiness gate records that approval.
 
 ## Open Questions / Deferred Decisions
 
 - Which Python runtime range will be ratified by the DEC-0006 compatibility review before release readiness.
-- Which permitted process or human edit will record the approval in `readiness-gate.yaml`, since current agent write permissions denied that update.
 - Which automated tests and CI checks are required before V0 can be considered delivery-ready or production-ready.
-- How the approved implementation-mode task-scoped write allowlists will be implemented and verified.
-- How the approved coded readiness guard will be implemented and bootstrapped before broader implementation work.
+- How repo-wide implementation writes after gate approval should be reviewed, constrained by briefs, or optionally restricted for especially narrow runs.

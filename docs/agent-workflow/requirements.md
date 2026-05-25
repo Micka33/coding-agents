@@ -33,20 +33,20 @@ Status: approved for implementation entry
 - The V0 Python API must be limited to the first-party integration surface: `AgentTeamConfig` and `create_development_team_agent`.
 - All other package modules and symbols must be treated as internal unless later promoted by an explicit decision.
 - The system must expose Tavily-backed `web_search` and `fetch_url` tools when configured.
-- The system must support explicit local command execution for trusted
-  implementation runs, while keeping shaping mode, scout, and resident
-  product/architecture agents without general shell execution.
+- The system must support local command execution by default for trusted shaping
+  and implementation runs, while keeping scout and resident product/architecture
+  agents without general shell execution.
 - Artifact templates must be available for the expected workflow documents.
 
 ### Readiness and governance
 
-- The readiness gate must remain closed until explicit human approval is recorded; broad implementation entry was approved by the human decision maker on 2026-05-25 for bounded, task-scoped tasks, and runtime activation still requires machine-readable YAML recording.
+- The readiness gate must remain closed until explicit human approval is recorded; broad implementation entry was approved by the human decision maker on 2026-05-25 for bounded, task-scoped tasks, and `readiness-gate.yaml` records that approval.
 - The system must document whether each readiness condition is satisfied, partial, blocked, or deferred.
 - Implementation-mode tasks must have bounded ownership, scope, constraints, and acceptance criteria before assignment.
 - Test execution evidence is required before marking DEC-0004/DEC-0005 enforcement as tested or using that enforcement as evidence for broad implementation readiness; local evidence was recorded on 2026-05-25 with `uv run --project / python -m unittest discover -s tests` (`Ran 64 tests`, `OK`).
 - Missing CI blocks release readiness and delivery-ready claims. It does not block entry into broad implementation mode because local test evidence exists, task-scoped implementation work is approved, and the human explicitly accepted CI as a release-readiness follow-up on 2026-05-25.
 - DEC-0006 Python runtime compatibility review blocks release readiness, not implementation entry, by human decision on 2026-05-25.
-- Runtime implementation mode requires the machine-readable `readiness-gate.yaml` to record approval; if agent write permissions deny that update, implementation remains fail-closed until a permitted process updates the YAML gate.
+- Runtime implementation mode requires the machine-readable `readiness-gate.yaml` to record approval.
 
 ## Non-Functional Requirements
 
@@ -56,7 +56,7 @@ Status: approved for implementation entry
 - Operability: CLI and checkpointing options must be understandable to an operator from docs; V0 must not require an external distribution channel.
 - Testability: core workflow behavior should be covered by tests before V0 is represented as delivery-ready or production-ready; if tests require repository code changes, that work needs gate approval or an explicit shaping exception.
 - Compatibility: the Python version requirement must be reviewed because `>=3.14` may limit adoption.
-- Least privilege: implementation-mode write access should be scoped by task and role.
+- Least privilege: shaping writes remain tightly scoped; implementation-mode writes are repo-wide by default only after gate approval, with protected readiness/secret paths denied and optional explicit write restrictions for narrower runs.
 
 ## Edge Cases
 
@@ -76,9 +76,9 @@ Documentation alignment is acceptable when:
 - `requirements.md` captures functional requirements, non-functional requirements, edge cases, and acceptance criteria for V0.
 - `prioritization.md` identifies MVP priorities, deferred work, risks, and sequencing.
 - `task-breakdown.md` lists implementation and quality tasks with dependencies, owner role, acceptance criteria, and current readiness status.
-- `readiness-gate.md` explicitly states that broad implementation entry is human-approved for bounded, task-scoped work, while machine-readable YAML recording is still pending due current tool permissions.
-- Known gaps are visible: missing CI, pending machine-readable gate recording, DEC-0006 Python `>=3.14` adoption risk, and release-readiness validation still pending.
+- `readiness-gate.md` explicitly states that broad implementation entry is human-approved for bounded, task-scoped work and machine-readable YAML recording is complete.
+- Known gaps are visible: missing CI, DEC-0006 Python `>=3.14` adoption risk, and release-readiness validation still pending.
 - DEC-0003 records that V0 is local/repository use only, has CLI as the only user-facing entrypoint, and limits the Python public API to `AgentTeamConfig` plus `create_development_team_agent`.
 - Implementation mode must fail closed unless DEC-0004 machine-readable readiness enforcement records full approval with approver/date metadata; the required scope is `full_implementation`.
-- Implementation writes must be task-scoped per DEC-0005 using exact files or literal existing directories only; glob/root/traversal/symlink scopes are rejected.
+- Implementation writes are repo-wide by default after gate approval while protected readiness/secret paths are denied; optional `--write-path` restrictions must use exact files or literal existing directories only, with glob/root/traversal/symlink scopes rejected.
 - No artifact claims production readiness, delivery readiness, release readiness, or external distribution readiness until release blockers are cleared or explicitly accepted.

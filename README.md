@@ -110,23 +110,29 @@ default:
 uv run python main.py --mode shaping
 ```
 
-Disable local command execution when you want a read/write-only shaping session:
+Implementation mode also enables local command execution by default after
+readiness approval:
+
+```bash
+uv run python main.py --mode implementation
+```
+
+Disable local command execution when you want a read/write-only session:
 
 ```bash
 uv run python main.py --mode shaping --execution none
+uv run python main.py --mode implementation --execution none
 ```
 
-Enable local command execution for implementation runs after readiness approval:
-
-```bash
-uv run python main.py --mode implementation --execution local
-```
-
-Local execution exposes Deep Agents' `execute` tool to the implementation
-manager graph and implementation specialists. In shaping mode, it exposes
-`execute` to the engineering manager for validation, diagnostics, and evidence
-gathering only. Commands run on this machine with the current user's environment
-and permissions while filesystem writes remain governed by mode permissions.
+Local execution exposes Deep Agents' `execute` tool to the engineering-manager
+graph. In implementation mode it also exposes `execute` to implementation
+specialists. In shaping mode, execution is for validation, diagnostics, and
+evidence gathering only. Commands run on this machine with the current user's
+environment and permissions while filesystem writes remain governed by mode
+permissions. Implementation mode has repo-wide write access by default after
+readiness approval, except for protected files such as the machine-readable
+readiness gate and secret-like paths. Use repeated `--write-path` arguments only
+when you want to restrict an implementation run to specific files or directories.
 Scout and resident product/architecture agents remain without general shell
 execution.
 

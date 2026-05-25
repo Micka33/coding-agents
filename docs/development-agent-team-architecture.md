@@ -223,8 +223,8 @@ Responsibilities:
 - add or update tests when appropriate
 - return a concise handoff with files changed, tests run, and remaining risks
 
-Multiple developer agents may work in parallel only when their write scopes are
-disjoint.
+Multiple developer agents may work in parallel only when their assigned task
+scopes are disjoint enough to avoid conflicting changes.
 
 ### code-reviewer
 
@@ -641,11 +641,11 @@ Developer agents should not ask the human questions directly by default. When a
 developer is blocked, it should return a blocked handoff to the engineering
 manager with the proposed question and the reason it is blocking.
 
-If a developer or other implementation subagent needs access to files or modules
-outside its approved write scope, it must request expanded access from the
+If a developer or other implementation subagent needs to work on files or
+modules outside its assigned task scope, it must request expanded scope from the
 engineering manager. The request must identify the requested paths, why the
 current scope is insufficient, what it tried, risks of granting or denying the
-access, and any alternative designs. The engineering manager may consult the
+scope expansion, and any alternative designs. The engineering manager may consult the
 software architect and product analyst to decide whether the request is
 technically and product-wise justified, whether the task should be split, or
 whether another solution should be proposed.
@@ -829,18 +829,17 @@ The scout has no shell or `execute` tool in the hardened V0 implementation. Scou
 execution must not be reintroduced for scout without a separate approved design
 and security review.
 
-Shaping mode uses local command execution by default so the engineering manager
-can run validation, diagnostics, and evidence-gathering commands before a
-readiness decision. The human can disable this with `--execution none`.
-Implementation mode defaults to no command execution unless a trusted run opts in
-with an explicit execution backend. The initial supported backend is `local`,
-which exposes Deep Agents' `execute` tool to the engineering-manager graph. In
-implementation mode it also exposes execution to implementation specialists. In
-shaping mode, the engineering manager must not use execution to implement changes
-or approve the readiness gate. Local commands run on the host machine with the
-current user's environment and permissions while filesystem writes remain
-governed by mode permissions. Scout and resident product/architecture agents do
-not receive general command execution.
+Shaping and implementation modes use local command execution by default. The
+human can disable this with `--execution none`. The initial supported backend is
+`local`, which exposes Deep Agents' `execute` tool to the engineering-manager
+graph. In implementation mode it also exposes execution to implementation
+specialists. In shaping mode, the engineering manager must not use execution to
+implement changes or approve the readiness gate. Local commands run on the host
+machine with the current user's environment and permissions while filesystem
+writes remain governed by mode permissions. Scout and resident
+product/architecture agents do not receive general command execution.
+Agents must not use `execute` to bypass filesystem-tool protections, read or
+write secret-like files, or modify the machine-readable readiness gate.
 
 Agents should use web tools when current external information, documentation, or
 source verification is needed. Any summary that depends on web results should

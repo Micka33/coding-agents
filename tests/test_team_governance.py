@@ -195,6 +195,72 @@ class TeamGovernanceTests(unittest.TestCase):
                 _check_fs_permission(kwargs["permissions"], "write", "/README.md"),
                 "deny",
             )
+            patched["local_shell_backend"].assert_called_once_with(
+                root_dir=root.resolve(),
+                virtual_mode=True,
+            )
+            patched["composite_backend"].assert_called_once_with(
+                default="local-backend",
+                routes={"/": "backend"},
+            )
+            self.assertEqual(kwargs["backend"], "composite-backend")
+
+    def test_implementation_defaults_to_local_execution_and_repo_wide_writes_after_readiness(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            gate_dir = root / "docs/agent-workflow"
+            gate_dir.mkdir(parents=True)
+            (gate_dir / "readiness-gate.yaml").write_text(APPROVED_GATE, encoding="utf-8")
+            config = AgentTeamConfig(
+                root_dir=root,
+                mode="implementation",
+                model="test:model",
+                scout_model="test:scout",
+                checkpointer_backend="memory",
+                initialize_artifacts=False,
+            )
+
+            with patched_team_construction() as patched:
+                create_development_team_agent(config)
+
+            kwargs = patched["create_deep_agent"].call_args.kwargs
+            self.assertEqual(kwargs["backend"], "composite-backend")
+            self.assertEqual(
+                _check_fs_permission(kwargs["permissions"], "write", "/coding_agents/config.py"),
+                "allow",
+            )
+            self.assertEqual(
+                _check_fs_permission(kwargs["permissions"], "write", "/README.md"),
+                "allow",
+            )
+            self.assertEqual(
+                _check_fs_permission(kwargs["permissions"], "write", "/docs/agent-workflow/readiness-gate.yaml"),
+                "deny",
+            )
+            self.assertEqual(_check_fs_permission(kwargs["permissions"], "write", "/.env"), "deny")
+
+    def test_implementation_execution_can_be_disabled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            gate_dir = root / "docs/agent-workflow"
+            gate_dir.mkdir(parents=True)
+            (gate_dir / "readiness-gate.yaml").write_text(APPROVED_GATE, encoding="utf-8")
+            config = AgentTeamConfig(
+                root_dir=root,
+                mode="implementation",
+                model="test:model",
+                scout_model="test:scout",
+                checkpointer_backend="memory",
+                execution_backend="none",
+                initialize_artifacts=False,
+            )
+
+            with patched_team_construction() as patched:
+                create_development_team_agent(config)
+
+            patched["local_shell_backend"].assert_not_called()
+            patched["composite_backend"].assert_not_called()
+            kwargs = patched["create_deep_agent"].call_args.kwargs
             self.assertEqual(kwargs["backend"], "backend")
 
     def test_implementation_local_execution_uses_composite_backend(self) -> None:
@@ -389,6 +455,7 @@ class TeamGovernanceTests(unittest.TestCase):
         output = stderr.getvalue()
         self.assertIn("readiness-gate.yaml", output)
         self.assertIn("full_implementation", output)
+        self.assertIn("repo-wide", output)
         self.assertIn("--write-path", output)
 
     def test_cli_startup_error_redacts_secret_patterns(self) -> None:

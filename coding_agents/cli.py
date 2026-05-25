@@ -190,7 +190,8 @@ def _parse_args(argv: Iterable[str] | None) -> argparse.Namespace:
         action="append",
         default=[],
         help=(
-            "Repository-relative implementation write allowlist path. Repeat for multiple paths. "
+            "Repository-relative implementation write restriction path. Repeat for multiple paths. "
+            "Omit to allow repo-wide implementation writes except protected files. "
             "Directories must end with '/' to include descendants."
         ),
     )
@@ -212,8 +213,8 @@ def _parse_args(argv: Iterable[str] | None) -> argparse.Namespace:
         default=None,
         type=_execution_backend,
         help=(
-            "Command execution backend. Shaping defaults to 'local'; implementation "
-            "defaults to 'none'. Use 'none' to disable command execution because "
+            "Command execution backend. Shaping and implementation default to 'local'. "
+            "Use 'none' to disable command execution because "
             "local commands execute on this machine."
         ),
     )
@@ -290,8 +291,9 @@ Commands:
 Workflow:
   - shaping mode is the default
   - implementation mode requires readiness-gate.yaml approved for full_implementation
-  - implementation writes require explicit --write-path allowlists
-  - shaping mode uses local command execution by default; use --execution none to disable it
+  - implementation writes are repo-wide by default except protected files
+  - use --write-path to restrict implementation writes
+  - shaping and implementation use local command execution by default; use --execution none to disable it
   - workflow artifacts live in {artifacts_dir}
 """.strip()
     )
@@ -323,7 +325,8 @@ def _print_startup_error(exc: Exception, model: str) -> None:
         print(
             "Hint: implementation mode requires docs/agent-workflow/readiness-gate.yaml "
             "with approved: true, approval_scope: full_implementation, and non-empty "
-            "approved_by/approved_date. Write access also requires --write-path allowlists.",
+            "approved_by/approved_date. After approval, implementation has repo-wide "
+            "write access except protected files; use --write-path only to restrict it.",
             file=sys.stderr,
         )
         return

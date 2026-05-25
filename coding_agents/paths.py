@@ -72,9 +72,11 @@ def normalize_implementation_write_paths(
 
     Each input is interpreted as either an exact repository path or, when it ends
     in '/', a literal directory whose descendants are included. Glob syntax and
-    repo-wide/root-equivalent values are rejected. Root validation defaults to
-    the current working directory; existing components must not be symlinks and
-    resolved targets/parents must remain under the repository root.
+    repo-wide/root-equivalent values are rejected because omitting
+    implementation write paths is how callers request the default repo-wide
+    implementation scope. Root validation defaults to the current working
+    directory; existing components must not be symlinks and resolved
+    targets/parents must remain under the repository root.
     """
 
     normalized: list[str] = []
@@ -95,7 +97,7 @@ def normalize_implementation_write_path(
     normalized = _strip_leading_current_dirs(normalized)
     if normalized in _REPO_WIDE_WRITE_VALUES:
         raise PathValidationError(
-            "implementation write paths must be task-scoped; repo-wide writes are not allowed"
+            "implementation write paths must be narrower than the repository root; omit --write-path for the default repo-wide implementation scope"
         )
     if normalized.startswith("/") or _has_windows_anchor(raw):
         raise PathValidationError(

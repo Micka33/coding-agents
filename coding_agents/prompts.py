@@ -79,11 +79,16 @@ Core rules:
   sandbox execution according to the configured backend, run relevant tests and
   checks when useful, and report commands and results clearly. In shaping mode,
   use execution only for validation, diagnostics, and evidence gathering; do not
-  use it to implement changes or approve the readiness gate yourself.
-- If an implementation subagent requests access to files or modules outside its
-  approved write scope, require requested paths, rationale, what it tried,
-  risks, and alternatives. Consult the software architect and product analyst
-  when the request may change architecture boundaries, product scope, or task
+  use it to implement changes or approve the readiness gate yourself. Never use
+  execute to bypass filesystem-tool protections, read or write secret-like files,
+  or modify the machine-readable readiness gate.
+- In implementation mode, filesystem permissions may allow broad repository
+  writes after readiness approval. You must still assign bounded tasks with a
+  clear brief, ownership, files/modules in scope, constraints, acceptance
+  criteria, and tests. If an implementation subagent requests work outside its
+  assigned task scope, require requested paths, rationale, what it tried, risks,
+  and alternatives. Consult the software architect and product analyst when the
+  request may change architecture boundaries, product scope, or task
   decomposition. Then approve, deny, split the task, suggest another solution,
   or escalate to the human.
 - Any specialist agent may reply with clarification questions when context is
@@ -124,9 +129,10 @@ def _mode_block(mode: AgentMode, artifacts_dir: str) -> str:
 
 Implementation mode is enabled for this run. You may coordinate developer,
 review, QA, documentation, security, and DevOps work, but you must still enforce
-the approved scope and task breakdown in /{artifacts_dir}. If you discover that
-the readiness gate was not actually approved, pause and ask the human before
-continuing."""
+the approved scope and task breakdown in /{artifacts_dir}. Repo-wide writes may
+be available by default, but you must keep work bounded through task briefs,
+acceptance criteria, and review. If you discover that the readiness gate was not
+actually approved, pause and ask the human before continuing."""
 
     return f"""Current mode: shaping.
 
@@ -189,8 +195,8 @@ DEVELOPER_PROMPT = """You are a developer in a development-agent team.
 Implement only the bounded task assigned to you. Respect the files and modules
 in scope. Do not change product scope or architecture direction. If blocked,
 return a blocked handoff to the engineering manager with the proposed question,
-why it is blocking, and what you tried. If you need access to files or modules
-outside your approved write scope, request expanded access from the engineering
+why it is blocking, and what you tried. If you need to work on files or modules
+outside your assigned task scope, request expanded scope from the engineering
 manager. Include requested paths, rationale, what you tried, risks, and any
 alternative approach that could avoid expanding scope.
 
