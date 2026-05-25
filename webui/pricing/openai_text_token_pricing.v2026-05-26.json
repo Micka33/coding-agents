@@ -1,0 +1,199 @@
+{
+  "schema_version": 1,
+  "pricing_version": "openai-text-token-pricing-2026-05-26-user-provided",
+  "captured_at": "2026-05-26",
+  "source": {
+    "kind": "user_provided_pricing_excerpt",
+    "note": "Pricing copied into the Codex thread by the user. This file intentionally stores only rows present in that excerpt."
+  },
+  "currency": "USD",
+  "token_unit": "1M tokens",
+  "default_tier": "standard",
+  "estimation_notes": [
+    "Token prices are expressed as USD per 1M tokens.",
+    "Cached input rates set to null mean no cached-input discount was listed in the provided pricing row.",
+    "Reasoning tokens are treated as part of output tokens unless a future pricing version says otherwise.",
+    "Regional processing endpoints apply a 10% uplift for the listed model families."
+  ],
+  "regional_processing_uplift": {
+    "uplift_multiplier": 1.1,
+    "models": [
+      "gpt-5.5",
+      "gpt-5.5-pro",
+      "gpt-5.4",
+      "gpt-5.4-mini",
+      "gpt-5.4-nano",
+      "gpt-5.4-pro"
+    ]
+  },
+  "tiers": {
+    "standard": {
+      "text_models": {
+        "gpt-5.5": { "display_name": "gpt-5.5 (<272K context length)", "input_usd_per_1m": 5, "cached_input_usd_per_1m": 0.5, "output_usd_per_1m": 30, "context_note": "<272K context length" },
+        "gpt-5.5-pro": { "display_name": "gpt-5.5-pro (<272K context length)", "input_usd_per_1m": 30, "cached_input_usd_per_1m": null, "output_usd_per_1m": 180, "context_note": "<272K context length" },
+        "gpt-5.4": { "display_name": "gpt-5.4 (<272K context length)", "input_usd_per_1m": 2.5, "cached_input_usd_per_1m": 0.25, "output_usd_per_1m": 15, "context_note": "<272K context length" },
+        "gpt-5.4-mini": { "input_usd_per_1m": 0.75, "cached_input_usd_per_1m": 0.075, "output_usd_per_1m": 4.5 },
+        "gpt-5.4-nano": { "input_usd_per_1m": 0.2, "cached_input_usd_per_1m": 0.02, "output_usd_per_1m": 1.25 },
+        "gpt-5.4-pro": { "display_name": "gpt-5.4-pro (<272K context length)", "input_usd_per_1m": 30, "cached_input_usd_per_1m": null, "output_usd_per_1m": 180, "context_note": "<272K context length" },
+        "gpt-5.2": { "input_usd_per_1m": 1.75, "cached_input_usd_per_1m": 0.175, "output_usd_per_1m": 14 },
+        "gpt-5.2-pro": { "input_usd_per_1m": 21, "cached_input_usd_per_1m": null, "output_usd_per_1m": 168 },
+        "gpt-5.1": { "input_usd_per_1m": 1.25, "cached_input_usd_per_1m": 0.125, "output_usd_per_1m": 10 },
+        "gpt-5": { "input_usd_per_1m": 1.25, "cached_input_usd_per_1m": 0.125, "output_usd_per_1m": 10 },
+        "gpt-5-mini": { "input_usd_per_1m": 0.25, "cached_input_usd_per_1m": 0.025, "output_usd_per_1m": 2 },
+        "gpt-5-nano": { "input_usd_per_1m": 0.05, "cached_input_usd_per_1m": 0.005, "output_usd_per_1m": 0.4 },
+        "gpt-5-pro": { "input_usd_per_1m": 15, "cached_input_usd_per_1m": null, "output_usd_per_1m": 120 },
+        "gpt-4.1": { "input_usd_per_1m": 2, "cached_input_usd_per_1m": 0.5, "output_usd_per_1m": 8 },
+        "gpt-4.1-mini": { "input_usd_per_1m": 0.4, "cached_input_usd_per_1m": 0.1, "output_usd_per_1m": 1.6 },
+        "gpt-4.1-nano": { "input_usd_per_1m": 0.1, "cached_input_usd_per_1m": 0.025, "output_usd_per_1m": 0.4 },
+        "gpt-4o": { "input_usd_per_1m": 2.5, "cached_input_usd_per_1m": 1.25, "output_usd_per_1m": 10 },
+        "gpt-4o-2024-05-13": { "input_usd_per_1m": 5, "cached_input_usd_per_1m": null, "output_usd_per_1m": 15 },
+        "gpt-4o-mini": { "input_usd_per_1m": 0.15, "cached_input_usd_per_1m": 0.075, "output_usd_per_1m": 0.6 },
+        "o1": { "input_usd_per_1m": 15, "cached_input_usd_per_1m": 7.5, "output_usd_per_1m": 60 },
+        "o1-pro": { "input_usd_per_1m": 150, "cached_input_usd_per_1m": null, "output_usd_per_1m": 600 },
+        "o3-pro": { "input_usd_per_1m": 20, "cached_input_usd_per_1m": null, "output_usd_per_1m": 80 },
+        "o3": { "input_usd_per_1m": 2, "cached_input_usd_per_1m": 0.5, "output_usd_per_1m": 8 },
+        "o4-mini": { "input_usd_per_1m": 1.1, "cached_input_usd_per_1m": 0.275, "output_usd_per_1m": 4.4 },
+        "o3-mini": { "input_usd_per_1m": 1.1, "cached_input_usd_per_1m": 0.55, "output_usd_per_1m": 4.4 },
+        "o1-mini": { "input_usd_per_1m": 1.1, "cached_input_usd_per_1m": 0.55, "output_usd_per_1m": 4.4 },
+        "gpt-4-turbo-2024-04-09": { "input_usd_per_1m": 10, "cached_input_usd_per_1m": null, "output_usd_per_1m": 30 },
+        "gpt-4-0125-preview": { "input_usd_per_1m": 10, "cached_input_usd_per_1m": null, "output_usd_per_1m": 30 },
+        "gpt-4-1106-preview": { "input_usd_per_1m": 10, "cached_input_usd_per_1m": null, "output_usd_per_1m": 30 },
+        "gpt-4-1106-vision-preview": { "input_usd_per_1m": 10, "cached_input_usd_per_1m": null, "output_usd_per_1m": 30 },
+        "gpt-4-0613": { "input_usd_per_1m": 30, "cached_input_usd_per_1m": null, "output_usd_per_1m": 60 },
+        "gpt-4-0314": { "input_usd_per_1m": 30, "cached_input_usd_per_1m": null, "output_usd_per_1m": 60 },
+        "gpt-4-32k": { "input_usd_per_1m": 60, "cached_input_usd_per_1m": null, "output_usd_per_1m": 120 },
+        "gpt-3.5-turbo": { "input_usd_per_1m": 0.5, "cached_input_usd_per_1m": null, "output_usd_per_1m": 1.5 },
+        "gpt-3.5-turbo-0125": { "input_usd_per_1m": 0.5, "cached_input_usd_per_1m": null, "output_usd_per_1m": 1.5 },
+        "gpt-3.5-turbo-1106": { "input_usd_per_1m": 1, "cached_input_usd_per_1m": null, "output_usd_per_1m": 2 },
+        "gpt-3.5-turbo-0613": { "input_usd_per_1m": 1.5, "cached_input_usd_per_1m": null, "output_usd_per_1m": 2 },
+        "gpt-3.5-0301": { "input_usd_per_1m": 1.5, "cached_input_usd_per_1m": null, "output_usd_per_1m": 2 },
+        "gpt-3.5-turbo-instruct": { "input_usd_per_1m": 1.5, "cached_input_usd_per_1m": null, "output_usd_per_1m": 2 },
+        "gpt-3.5-turbo-16k-0613": { "input_usd_per_1m": 3, "cached_input_usd_per_1m": null, "output_usd_per_1m": 4 },
+        "davinci-002": { "input_usd_per_1m": 2, "cached_input_usd_per_1m": null, "output_usd_per_1m": 2 },
+        "babbage-002": { "input_usd_per_1m": 0.4, "cached_input_usd_per_1m": null, "output_usd_per_1m": 0.4 }
+      },
+      "specialized_text_models": {
+        "o3-deep-research": { "category": "deep_research", "input_usd_per_1m": 10, "cached_input_usd_per_1m": 2.5, "output_usd_per_1m": 40, "notes": ["Web search tool call charges also apply."] },
+        "o4-mini-deep-research": { "category": "deep_research", "input_usd_per_1m": 2, "cached_input_usd_per_1m": 0.5, "output_usd_per_1m": 8, "notes": ["Web search tool call charges also apply."] },
+        "computer-use-preview": { "category": "computer_use", "input_usd_per_1m": 3, "cached_input_usd_per_1m": null, "output_usd_per_1m": 12 },
+        "text-embedding-3-small": { "category": "embedding", "input_usd_per_1m": 0.02, "cached_input_usd_per_1m": null, "output_usd_per_1m": null },
+        "text-embedding-3-large": { "category": "embedding", "input_usd_per_1m": 0.13, "cached_input_usd_per_1m": null, "output_usd_per_1m": null },
+        "text-embedding-ada-002": { "category": "embedding", "input_usd_per_1m": 0.1, "cached_input_usd_per_1m": null, "output_usd_per_1m": null },
+        "omni-moderation-latest": { "category": "moderation", "input_usd_per_1m": 0, "cached_input_usd_per_1m": null, "output_usd_per_1m": null },
+        "text-moderation-latest": { "category": "moderation", "input_usd_per_1m": 0, "cached_input_usd_per_1m": null, "output_usd_per_1m": null }
+      }
+    },
+    "batch": {
+      "text_models": {
+        "gpt-5.5": { "display_name": "gpt-5.5 (<272K context length)", "input_usd_per_1m": 2.5, "cached_input_usd_per_1m": 0.25, "output_usd_per_1m": 15, "context_note": "<272K context length" },
+        "gpt-5.5-pro": { "display_name": "gpt-5.5-pro (<272K context length)", "input_usd_per_1m": 15, "cached_input_usd_per_1m": null, "output_usd_per_1m": 90, "context_note": "<272K context length" },
+        "gpt-5.4": { "display_name": "gpt-5.4 (<272K context length)", "input_usd_per_1m": 1.25, "cached_input_usd_per_1m": 0.13, "output_usd_per_1m": 7.5, "context_note": "<272K context length" },
+        "gpt-5.4-mini": { "input_usd_per_1m": 0.375, "cached_input_usd_per_1m": 0.0375, "output_usd_per_1m": 2.25 },
+        "gpt-5.4-nano": { "input_usd_per_1m": 0.1, "cached_input_usd_per_1m": 0.01, "output_usd_per_1m": 0.625 },
+        "gpt-5.4-pro": { "display_name": "gpt-5.4-pro (<272K context length)", "input_usd_per_1m": 15, "cached_input_usd_per_1m": null, "output_usd_per_1m": 90, "context_note": "<272K context length" },
+        "gpt-5.2": { "input_usd_per_1m": 0.875, "cached_input_usd_per_1m": 0.0875, "output_usd_per_1m": 7 },
+        "gpt-5.2-pro": { "input_usd_per_1m": 10.5, "cached_input_usd_per_1m": null, "output_usd_per_1m": 84 },
+        "gpt-5.1": { "input_usd_per_1m": 0.625, "cached_input_usd_per_1m": 0.0625, "output_usd_per_1m": 5 },
+        "gpt-5": { "input_usd_per_1m": 0.625, "cached_input_usd_per_1m": 0.0625, "output_usd_per_1m": 5 },
+        "gpt-5-mini": { "input_usd_per_1m": 0.125, "cached_input_usd_per_1m": 0.0125, "output_usd_per_1m": 1 },
+        "gpt-5-nano": { "input_usd_per_1m": 0.025, "cached_input_usd_per_1m": 0.0025, "output_usd_per_1m": 0.2 },
+        "gpt-5-pro": { "input_usd_per_1m": 7.5, "cached_input_usd_per_1m": null, "output_usd_per_1m": 60 },
+        "gpt-4.1": { "input_usd_per_1m": 1, "cached_input_usd_per_1m": null, "output_usd_per_1m": 4 },
+        "gpt-4.1-mini": { "input_usd_per_1m": 0.2, "cached_input_usd_per_1m": null, "output_usd_per_1m": 0.8 },
+        "gpt-4.1-nano": { "input_usd_per_1m": 0.05, "cached_input_usd_per_1m": null, "output_usd_per_1m": 0.2 },
+        "gpt-4o": { "input_usd_per_1m": 1.25, "cached_input_usd_per_1m": null, "output_usd_per_1m": 5 },
+        "gpt-4o-2024-05-13": { "input_usd_per_1m": 2.5, "cached_input_usd_per_1m": null, "output_usd_per_1m": 7.5 },
+        "gpt-4o-mini": { "input_usd_per_1m": 0.075, "cached_input_usd_per_1m": null, "output_usd_per_1m": 0.3 },
+        "o1": { "input_usd_per_1m": 7.5, "cached_input_usd_per_1m": null, "output_usd_per_1m": 30 },
+        "o1-pro": { "input_usd_per_1m": 75, "cached_input_usd_per_1m": null, "output_usd_per_1m": 300 },
+        "o3-pro": { "input_usd_per_1m": 10, "cached_input_usd_per_1m": null, "output_usd_per_1m": 40 },
+        "o3": { "input_usd_per_1m": 1, "cached_input_usd_per_1m": null, "output_usd_per_1m": 4 },
+        "o4-mini": { "input_usd_per_1m": 0.55, "cached_input_usd_per_1m": null, "output_usd_per_1m": 2.2 },
+        "o3-mini": { "input_usd_per_1m": 0.55, "cached_input_usd_per_1m": null, "output_usd_per_1m": 2.2 },
+        "o1-mini": { "input_usd_per_1m": 0.55, "cached_input_usd_per_1m": null, "output_usd_per_1m": 2.2 },
+        "gpt-4-turbo-2024-04-09": { "input_usd_per_1m": 5, "cached_input_usd_per_1m": null, "output_usd_per_1m": 15 },
+        "gpt-4-0125-preview": { "input_usd_per_1m": 5, "cached_input_usd_per_1m": null, "output_usd_per_1m": 15 },
+        "gpt-4-1106-preview": { "input_usd_per_1m": 5, "cached_input_usd_per_1m": null, "output_usd_per_1m": 15 },
+        "gpt-4-1106-vision-preview": { "input_usd_per_1m": 5, "cached_input_usd_per_1m": null, "output_usd_per_1m": 15 },
+        "gpt-4-0613": { "input_usd_per_1m": 15, "cached_input_usd_per_1m": null, "output_usd_per_1m": 30 },
+        "gpt-4-0314": { "input_usd_per_1m": 15, "cached_input_usd_per_1m": null, "output_usd_per_1m": 30 },
+        "gpt-4-32k": { "input_usd_per_1m": 30, "cached_input_usd_per_1m": null, "output_usd_per_1m": 60 },
+        "gpt-3.5-turbo-0125": { "input_usd_per_1m": 0.25, "cached_input_usd_per_1m": null, "output_usd_per_1m": 0.75 },
+        "gpt-3.5-turbo-1106": { "input_usd_per_1m": 1, "cached_input_usd_per_1m": null, "output_usd_per_1m": 2 },
+        "gpt-3.5-turbo-0613": { "input_usd_per_1m": 1.5, "cached_input_usd_per_1m": null, "output_usd_per_1m": 2 },
+        "gpt-3.5-0301": { "input_usd_per_1m": 1.5, "cached_input_usd_per_1m": null, "output_usd_per_1m": 2 },
+        "gpt-3.5-turbo-16k-0613": { "input_usd_per_1m": 1.5, "cached_input_usd_per_1m": null, "output_usd_per_1m": 2 },
+        "davinci-002": { "input_usd_per_1m": 1, "cached_input_usd_per_1m": null, "output_usd_per_1m": 1 },
+        "babbage-002": { "input_usd_per_1m": 0.2, "cached_input_usd_per_1m": null, "output_usd_per_1m": 0.2 }
+      }
+    },
+    "flex": {
+      "text_models": {
+        "gpt-5.5": { "display_name": "gpt-5.5 (<272K context length)", "input_usd_per_1m": 2.5, "cached_input_usd_per_1m": 0.25, "output_usd_per_1m": 15, "context_note": "<272K context length" },
+        "gpt-5.5-pro": { "display_name": "gpt-5.5-pro (<272K context length)", "input_usd_per_1m": 15, "cached_input_usd_per_1m": null, "output_usd_per_1m": 90, "context_note": "<272K context length" },
+        "gpt-5.4": { "display_name": "gpt-5.4 (<272K context length)", "input_usd_per_1m": 1.25, "cached_input_usd_per_1m": 0.13, "output_usd_per_1m": 7.5, "context_note": "<272K context length" },
+        "gpt-5.4-mini": { "input_usd_per_1m": 0.375, "cached_input_usd_per_1m": 0.0375, "output_usd_per_1m": 2.25 },
+        "gpt-5.4-nano": { "input_usd_per_1m": 0.1, "cached_input_usd_per_1m": 0.01, "output_usd_per_1m": 0.625 },
+        "gpt-5.4-pro": { "display_name": "gpt-5.4-pro (<272K context length)", "input_usd_per_1m": 15, "cached_input_usd_per_1m": null, "output_usd_per_1m": 90, "context_note": "<272K context length" },
+        "gpt-5.2": { "input_usd_per_1m": 0.875, "cached_input_usd_per_1m": 0.0875, "output_usd_per_1m": 7 },
+        "gpt-5.1": { "input_usd_per_1m": 0.625, "cached_input_usd_per_1m": 0.0625, "output_usd_per_1m": 5 },
+        "gpt-5": { "input_usd_per_1m": 0.625, "cached_input_usd_per_1m": 0.0625, "output_usd_per_1m": 5 },
+        "gpt-5-mini": { "input_usd_per_1m": 0.125, "cached_input_usd_per_1m": 0.0125, "output_usd_per_1m": 1 },
+        "gpt-5-nano": { "input_usd_per_1m": 0.025, "cached_input_usd_per_1m": 0.0025, "output_usd_per_1m": 0.2 },
+        "o3": { "input_usd_per_1m": 1, "cached_input_usd_per_1m": 0.25, "output_usd_per_1m": 4 },
+        "o4-mini": { "input_usd_per_1m": 0.55, "cached_input_usd_per_1m": 0.138, "output_usd_per_1m": 2.2 }
+      }
+    },
+    "priority": {
+      "text_models": {
+        "gpt-5.5": { "display_name": "gpt-5.5 (<272K context length)", "input_usd_per_1m": 12.5, "cached_input_usd_per_1m": 1.25, "output_usd_per_1m": 75, "context_note": "<272K context length" },
+        "gpt-5.4": { "display_name": "gpt-5.4 (<272K context length)", "input_usd_per_1m": 5, "cached_input_usd_per_1m": 0.5, "output_usd_per_1m": 30, "context_note": "<272K context length" },
+        "gpt-5.4-mini": { "input_usd_per_1m": 1.5, "cached_input_usd_per_1m": 0.15, "output_usd_per_1m": 9 },
+        "gpt-5.2": { "input_usd_per_1m": 3.5, "cached_input_usd_per_1m": 0.35, "output_usd_per_1m": 28 },
+        "gpt-5.1": { "input_usd_per_1m": 2.5, "cached_input_usd_per_1m": 0.25, "output_usd_per_1m": 20 },
+        "gpt-5": { "input_usd_per_1m": 2.5, "cached_input_usd_per_1m": 0.25, "output_usd_per_1m": 20 },
+        "gpt-5-mini": { "input_usd_per_1m": 0.45, "cached_input_usd_per_1m": 0.045, "output_usd_per_1m": 3.6 },
+        "gpt-4.1": { "input_usd_per_1m": 3.5, "cached_input_usd_per_1m": 0.875, "output_usd_per_1m": 14 },
+        "gpt-4.1-mini": { "input_usd_per_1m": 0.7, "cached_input_usd_per_1m": 0.175, "output_usd_per_1m": 2.8 },
+        "gpt-4.1-nano": { "input_usd_per_1m": 0.2, "cached_input_usd_per_1m": 0.05, "output_usd_per_1m": 0.8 },
+        "gpt-4o": { "input_usd_per_1m": 4.25, "cached_input_usd_per_1m": 2.125, "output_usd_per_1m": 17 },
+        "gpt-4o-2024-05-13": { "input_usd_per_1m": 8.75, "cached_input_usd_per_1m": null, "output_usd_per_1m": 26.25 },
+        "gpt-4o-mini": { "input_usd_per_1m": 0.25, "cached_input_usd_per_1m": 0.125, "output_usd_per_1m": 1 },
+        "o3": { "input_usd_per_1m": 3.5, "cached_input_usd_per_1m": 0.875, "output_usd_per_1m": 14 },
+        "o4-mini": { "input_usd_per_1m": 2, "cached_input_usd_per_1m": 0.5, "output_usd_per_1m": 8 }
+      }
+    }
+  },
+  "tool_pricing": {
+    "web_search_preview_reasoning": {
+      "display_name": "Web search preview (reasoning models, including gpt-5 and o-series)",
+      "usd_per_1k_calls": 10,
+      "search_content_tokens": "billed_at_model_rates"
+    },
+    "web_search_preview_non_reasoning": {
+      "display_name": "Web search preview (non-reasoning models)",
+      "usd_per_1k_calls": 25,
+      "search_content_tokens": "free"
+    },
+    "containers": {
+      "display_name": "Hosted Shell and Code Interpreter",
+      "billing_unit": "20-minute session per container",
+      "sizes": {
+        "1GB": { "usd_per_session": 0.03 },
+        "4GB": { "usd_per_session": 0.12 },
+        "16GB": { "usd_per_session": 0.48 },
+        "64GB": { "usd_per_session": 1.92 }
+      }
+    },
+    "file_search": {
+      "storage_usd_per_gb_day": 0.1,
+      "free_storage_gb": 1,
+      "tool_call_usd_per_1k_calls": 2.5,
+      "note": "File search tool call pricing applies to the Responses API only."
+    },
+    "agent_kit_upload_storage": {
+      "usd_per_gb_day": 0.1,
+      "free_storage_gb_per_account_per_month": 1
+    }
+  }
+}

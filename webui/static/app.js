@@ -11,7 +11,7 @@ import {
 import { renderRunDrawer } from "./drawer.js";
 import { renderLayout } from "./layouts.js";
 import { handleDetailsToggle } from "./messageList.js";
-import { resetColumnSelection, resetRunState, setFormatMarkdown, state } from "./state.js";
+import { resetColumnSelection, resetRunState, setFormatMarkdown, setTheme, state } from "./state.js";
 import { capturePinnedScrollers, formatTime, restorePinnedScrollers } from "./utils.js";
 
 const els = collectElements();
@@ -55,6 +55,11 @@ function init() {
 
   els.markdownToggle.addEventListener("change", () => {
     setFormatMarkdown(els.markdownToggle.checked);
+    render();
+  });
+
+  els.themeToggle.addEventListener("change", () => {
+    setTheme(els.themeToggle.checked ? "dark" : "light");
     render();
   });
 

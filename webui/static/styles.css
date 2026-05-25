@@ -1,4 +1,86 @@
 :root,
+[data-theme="dark"] {
+  color-scheme: dark;
+  --app-background: #111315;
+  --app-background-wash-start: rgba(34, 38, 43, 0.82);
+  --app-background-wash-end: rgba(17, 19, 21, 0.96);
+  --app-text: #e9eef3;
+  --app-text-muted: #9da8b5;
+  --app-border: #343a42;
+  --app-shadow: 0 18px 44px rgba(0, 0, 0, 0.42);
+  --app-backdrop: rgba(0, 0, 0, 0.52);
+
+  --chrome-background: rgba(17, 19, 21, 0.9);
+
+  --panel-background: #181b1f;
+  --panel-header-background: #1f2328;
+  --panel-soft-background: #262c33;
+
+  --control-background: #1b1f24;
+  --control-hover-background: #252b32;
+  --control-hover-border: #505a66;
+  --control-active-background: #d8e3ed;
+  --control-active-text: #111315;
+  --control-selected-background: #173140;
+  --control-selected-border: rgba(92, 166, 211, 0.5);
+  --control-disabled-background: #252b32;
+  --control-accent: #5ca6d3;
+
+  --role-manager-accent: #5ca6d3;
+  --role-product-accent: #76c99f;
+  --role-architect-accent: #d9aa5c;
+  --role-tool-accent: #a3adb9;
+  --role-resident-accent: #e29b4f;
+  --role-disposable-accent: #b58af1;
+
+  --status-error-text: #ff9292;
+  --link-text: #8ac9f7;
+
+  --message-background: #1b1f24;
+  --message-human-background: #182333;
+  --message-tool-background: #1e2024;
+  --message-event-text: #b3bdc9;
+  --message-event-summary-text: #98a3af;
+  --message-selected-border: rgba(181, 138, 241, 0.62);
+  --message-selected-outline: 0 0 0 2px rgba(181, 138, 241, 0.18);
+  --message-selected-container-border: rgba(181, 138, 241, 0.42);
+  --message-selected-container-background: rgba(181, 138, 241, 0.12);
+
+  --markdown-code-background: #252b32;
+  --markdown-pre-background: #15191d;
+  --markdown-quote-border: #505c68;
+
+  --disclosure-background: #1c2025;
+  --task-hover-background: rgba(181, 138, 241, 0.16);
+  --task-payload-border: rgba(181, 138, 241, 0.3);
+  --tool-call-resident-border: rgba(226, 155, 79, 0.5);
+  --tool-call-resident-background: #2a2118;
+  --tool-call-disposable-border: rgba(181, 138, 241, 0.48);
+  --tool-call-disposable-background: #241d2d;
+  --tool-call-generic-background: #1d2329;
+
+  --token-background: #26323b;
+  --token-command-text: #c5d0dc;
+  --badge-resident-text: #ffc176;
+  --badge-resident-background: #382617;
+  --badge-disposable-text: #d9c0ff;
+  --badge-disposable-background: #30233e;
+
+  --preformatted-background: #0c1014;
+  --preformatted-text: #dbeafe;
+
+  --timeline-time-background: #171b20;
+
+  --drawer-background: #181b1f;
+  --drawer-header-background: #1f2328;
+  --drawer-toolbar-background: #181b1f;
+  --drawer-shadow: -18px 0 44px rgba(0, 0, 0, 0.48);
+
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+}
+
 [data-theme="light"] {
   color-scheme: light;
   --app-background: #f5f7fa;
@@ -75,10 +157,6 @@
   --drawer-header-background: #fbfcfe;
   --drawer-toolbar-background: #ffffff;
   --drawer-shadow: -18px 0 44px rgba(22, 33, 43, 0.16);
-
-  font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-    sans-serif;
 }
 
 * {

@@ -4,6 +4,14 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Historique agents</title>
+    <script>
+      try {
+        const theme = localStorage.getItem("agent-history:theme");
+        document.documentElement.dataset.theme = theme === "light" ? "light" : "dark";
+      } catch {
+        document.documentElement.dataset.theme = "dark";
+      }
+    </script>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
@@ -36,6 +44,10 @@
         <label class="switch">
           <input id="markdownToggle" type="checkbox" checked />
           <span>Markdown</span>
+        </label>
+        <label class="switch">
+          <input id="themeToggle" type="checkbox" checked />
+          <span>Thème sombre</span>
         </label>
         <label class="field search-field">
           <span>Filtre</span>

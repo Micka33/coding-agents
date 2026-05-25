@@ -237,7 +237,7 @@ function renderToolCall(call, result, message, agent, index, context) {
     <details class="tool-call generic-tool" data-detail-key="${escapeAttr(detailKey)}">
       <summary>
         <span class="call-heading">
-          <span class="call-name" title="${escapeAttr(display.title)}">${escapeHtml(display.label)}</span>
+          ${renderToolCallDisplay(display)}
           ${pathSummary}
           <span class="badge">outil</span>
         </span>
@@ -265,16 +265,40 @@ function toolCallDisplay(call) {
     const pattern = formatInlineValue(args.pattern || args.query || "");
     const target = formatGrepTarget(args.path, args.glob);
     const label = `grep ${pattern || "<pattern>"} in ${target}`;
-    return { isSpecific: true, label, title: label };
+    return { isSpecific: true, kind: "grep", pattern: pattern || "<pattern>", target, title: label };
   }
 
   if (normalizedName === "execute") {
     const command = oneLine(args.command || args.cmd || args.shell || "");
     const label = command ? `execute ${command}` : "execute";
-    return { isSpecific: true, label, title: command || label };
+    return { isSpecific: true, kind: "execute", command, title: command || label };
   }
 
-  return { isSpecific: false, label: name, title: name };
+  return { isSpecific: false, kind: "default", label: name, title: name };
+}
+
+function renderToolCallDisplay(display) {
+  if (display.kind === "grep") {
+    return `
+      <span class="tool-summary tool-summary-grep" title="${escapeAttr(display.title)}">
+        <span class="tool-summary-action">grep</span>
+        <span class="tool-summary-token tool-summary-pattern">${escapeHtml(display.pattern)}</span>
+        <span class="tool-summary-muted">in</span>
+        <span class="tool-summary-token tool-summary-target">${escapeHtml(display.target)}</span>
+      </span>
+    `;
+  }
+
+  if (display.kind === "execute") {
+    return `
+      <span class="tool-summary tool-summary-execute" title="${escapeAttr(display.title)}">
+        <span class="tool-summary-action">execute</span>
+        <span class="tool-summary-command">${escapeHtml(display.command || "commande vide")}</span>
+      </span>
+    `;
+  }
+
+  return `<span class="call-name" title="${escapeAttr(display.title)}">${escapeHtml(display.label)}</span>`;
 }
 
 function toolCallArgs(call) {

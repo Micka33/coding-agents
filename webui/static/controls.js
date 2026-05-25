@@ -11,6 +11,7 @@ export function collectElements() {
     syncToggle: document.querySelector("#syncToggle"),
     liveToggle: document.querySelector("#liveToggle"),
     markdownToggle: document.querySelector("#markdownToggle"),
+    themeToggle: document.querySelector("#themeToggle"),
     searchInput: document.querySelector("#searchInput"),
     refreshButton: document.querySelector("#refreshButton"),
     status: document.querySelector("#status"),
@@ -45,6 +46,7 @@ export function renderControls(els, state, agents, columnOptions) {
   els.syncToggle.checked = state.syncScroll;
   els.liveToggle.checked = state.live;
   els.markdownToggle.checked = state.formatMarkdown;
+  els.themeToggle.checked = state.theme === "dark";
   renderColumnPicker(els, state, columnOptions);
 }
 

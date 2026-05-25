@@ -1,4 +1,5 @@
 const preferences = loadPreferences();
+applyTheme(preferences.theme);
 
 export const state = {
   data: null,
@@ -8,6 +9,7 @@ export const state = {
   syncScroll: false,
   live: true,
   formatMarkdown: preferences.formatMarkdown,
+  theme: preferences.theme,
   search: "",
   loading: false,
   pollTimer: null,
@@ -37,10 +39,35 @@ export function setFormatMarkdown(enabled) {
   savePreference("formatMarkdown", state.formatMarkdown);
 }
 
+export function setTheme(theme) {
+  state.theme = normalizeTheme(theme);
+  applyTheme(state.theme);
+  savePreference("theme", state.theme);
+}
+
 function loadPreferences() {
   return {
     formatMarkdown: loadBooleanPreference("formatMarkdown", true),
+    theme: loadThemePreference(),
   };
+}
+
+function applyTheme(theme) {
+  if (typeof document === "undefined") return;
+  document.documentElement.dataset.theme = normalizeTheme(theme);
+}
+
+function loadThemePreference() {
+  try {
+    const value = localStorage.getItem(preferenceKey("theme"));
+    return normalizeTheme(value);
+  } catch {
+    return "dark";
+  }
+}
+
+function normalizeTheme(theme) {
+  return theme === "light" ? "light" : "dark";
 }
 
 function loadBooleanPreference(key, fallback) {
