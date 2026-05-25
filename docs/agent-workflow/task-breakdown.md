@@ -49,7 +49,7 @@ This task breakdown therefore separates:
 | SHAPE-002 | Replace requirements placeholders with acceptance criteria | product-analyst | SHAPE-001 | `requirements.md` documents functional requirements, non-functional requirements, edge cases, and core acceptance criteria | completed |
 | SHAPE-003 | Prioritize MVP and deferred work | product-analyst + engineering-manager | SHAPE-001, SHAPE-002 | `prioritization.md` identifies candidate scope, MVP cut, deferred work, and rationale | completed |
 | ARCH-001 | Ratify or revise proposed architecture decisions | software-architect + engineering-manager + human | Updated `decision-log.md` | DEC-0003 through DEC-0006 are approved, revised, or explicitly deferred | completed |
-| PLAN-001 | Run a scout-backed code/docs gap check before readiness approval | engineering-manager + scout | Updated artifacts | `code-docs-gap-check.md` separates codebase facts from documentation claims and updates artifacts for material mismatches | completed |
+| PLAN-001 | Reconcile observed code facts into official readiness artifacts | engineering-manager + scout | Updated artifacts | `architecture-brief.md`, `decision-log.md`, `readiness-gate.md`, and this task breakdown separate observed code facts from readiness claims and record material mismatches | completed |
 | PLAN-002 | Prepare readiness approval packet | engineering-manager | SHAPE-001 through SHAPE-003, ARCH-001, PLAN-001 | Human can review clear go/no-go status, unresolved questions, risks, and proposed implementation tasks | pending |
 
 ## Proposed Implementation and Quality Tasks
@@ -90,10 +90,10 @@ implementation mode, or add new scout command capabilities.
 ## Implementation Ordering Recommendation
 
 1. Review and validate the draft product, requirements, and prioritization artifacts.
-2. Use the completed scout-backed gap analysis in `code-docs-gap-check.md` as the current code/docs baseline.
+2. Use the current baseline recorded in `architecture-brief.md`, `decision-log.md`, `readiness-gate.md`, and this task breakdown.
 3. Use the completed local test validation for DEC-0004/DEC-0005 enforcement as readiness evidence.
 4. Seek explicit human authorization before any broader implementation mode or feature work.
-5. Rerun the scout-backed gap check if code changes before readiness approval.
+5. Rerun scout-backed reconnaissance and update the official artifacts if code changes before readiness approval.
 6. Add CI before release readiness.
 7. Run the DEC-0006 Python runtime compatibility review before release readiness.
 8. Update user-facing documentation after behavior and runtime support are stable.

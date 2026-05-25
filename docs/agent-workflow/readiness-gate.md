@@ -58,14 +58,14 @@ claiming V0 is delivery-ready unless explicitly accepted as risks.
 | Automated tests | Passing locally | `uv run --project / python -m unittest discover -s tests` exited 0 with `Ran 64 tests in 0.297s`, `OK`; CI remains missing. |
 | CI | Missing | No repeatable validation before merge/release. |
 | Python runtime support decision | Approved review / unresolved runtime | DEC-0006 requires compatibility review before release readiness; Python `>=3.14` is not final. |
-| Scout-backed code/docs gap check | Completed | PLAN-001 completed in `code-docs-gap-check.md`; final readiness should rerun if code changes before approval. |
+| Official code/docs baseline | Completed | PLAN-001 reconciled observed code facts into `architecture-brief.md`, `decision-log.md`, `readiness-gate.md`, and `task-breakdown.md`; final readiness should refresh those artifacts if code changes before approval. |
 
 ## Minimum Required Before Gate Approval
 
 1. Human review of `product-brief.md`, `requirements.md`, `prioritization.md`,
    and `task-breakdown.md`; approve, revise, or explicitly defer open items.
 2. Use the completed DEC-0004/DEC-0005/DEC-0007 local validation evidence as the governance baseline.
-3. Use the completed PLAN-001 scout-backed gap check as the current baseline; rerun it if code changes before approval.
+3. Use the official code/docs baseline in `architecture-brief.md`, `decision-log.md`, `readiness-gate.md`, and `task-breakdown.md`; refresh it if code changes before approval.
 4. Confirm whether missing CI and the DEC-0006 runtime review are blockers for implementation entry or only for release readiness.
 5. Record explicit human approval if the gate is accepted.
 
