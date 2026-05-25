@@ -1,19 +1,81 @@
-:root {
+:root,
+[data-theme="light"] {
   color-scheme: light;
-  --bg: #f5f7fa;
-  --surface: #ffffff;
-  --surface-soft: #edf2f7;
-  --ink: #16212b;
-  --muted: #657384;
-  --line: #d7dee8;
-  --manager: #28648f;
-  --product: #2c7658;
-  --architect: #8b5a1f;
-  --tool: #5f6570;
-  --resident: #b66b13;
-  --disposable: #7546a3;
-  --danger: #a83c3c;
-  --shadow: 0 14px 40px rgba(22, 33, 43, 0.08);
+  --app-background: #f5f7fa;
+  --app-background-wash-start: rgba(255, 255, 255, 0.9);
+  --app-background-wash-end: rgba(245, 247, 250, 0.94);
+  --app-text: #16212b;
+  --app-text-muted: #657384;
+  --app-border: #d7dee8;
+  --app-shadow: 0 14px 40px rgba(22, 33, 43, 0.08);
+  --app-backdrop: rgba(22, 33, 43, 0.22);
+
+  --chrome-background: rgba(255, 255, 255, 0.92);
+
+  --panel-background: #ffffff;
+  --panel-header-background: #fbfcfe;
+  --panel-soft-background: #edf2f7;
+
+  --control-background: #ffffff;
+  --control-hover-background: #f8fafc;
+  --control-hover-border: #aeb8c6;
+  --control-active-background: #16212b;
+  --control-active-text: #ffffff;
+  --control-selected-background: #eef6fb;
+  --control-selected-border: rgba(40, 100, 143, 0.42);
+  --control-disabled-background: #edf2f7;
+  --control-accent: #28648f;
+
+  --role-manager-accent: #28648f;
+  --role-product-accent: #2c7658;
+  --role-architect-accent: #8b5a1f;
+  --role-tool-accent: #5f6570;
+  --role-resident-accent: #b66b13;
+  --role-disposable-accent: #7546a3;
+
+  --status-error-text: #a83c3c;
+  --link-text: #275f8f;
+
+  --message-background: #ffffff;
+  --message-human-background: #f8fbff;
+  --message-tool-background: #fbfbfc;
+  --message-event-text: #475569;
+  --message-event-summary-text: #64748b;
+  --message-selected-border: rgba(117, 70, 163, 0.58);
+  --message-selected-outline: 0 0 0 2px rgba(117, 70, 163, 0.12);
+  --message-selected-container-border: rgba(117, 70, 163, 0.35);
+  --message-selected-container-background: rgba(117, 70, 163, 0.06);
+
+  --markdown-code-background: #eef2f6;
+  --markdown-pre-background: #f7f9fb;
+  --markdown-quote-border: #b6c6d5;
+
+  --disclosure-background: #fbfcfe;
+  --task-hover-background: rgba(117, 70, 163, 0.08);
+  --task-payload-border: rgba(117, 70, 163, 0.18);
+  --tool-call-resident-border: rgba(182, 107, 19, 0.42);
+  --tool-call-resident-background: #fff8ef;
+  --tool-call-disposable-border: rgba(117, 70, 163, 0.35);
+  --tool-call-disposable-background: #fbf8ff;
+  --tool-call-generic-background: #f8fafc;
+
+  --token-background: #eef4f8;
+  --token-command-text: #304052;
+  --badge-resident-text: #7b4306;
+  --badge-resident-background: #ffe4bd;
+  --badge-disposable-text: #563177;
+  --badge-disposable-background: #eee1fb;
+
+  --preformatted-background: #101820;
+  --preformatted-text: #edf7ff;
+
+  --timeline-time-background: #f8fafc;
+
+  --drawer-background: #ffffff;
+  --drawer-header-background: #fbfcfe;
+  --drawer-toolbar-background: #ffffff;
+  --drawer-shadow: -18px 0 44px rgba(22, 33, 43, 0.16);
+
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
@@ -26,10 +88,10 @@
 body {
   min-height: 100vh;
   margin: 0;
-  color: var(--ink);
+  color: var(--app-text);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(245, 247, 250, 0.94)),
-    var(--bg);
+    linear-gradient(180deg, var(--app-background-wash-start), var(--app-background-wash-end)),
+    var(--app-background);
 }
 
 button,
@@ -47,8 +109,8 @@ select {
   gap: 16px 24px;
   align-items: end;
   padding: 18px clamp(16px, 3vw, 32px) 14px;
-  border-bottom: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.92);
+  border-bottom: 1px solid var(--app-border);
+  background: var(--chrome-background);
   backdrop-filter: blur(14px);
 }
 
@@ -66,7 +128,7 @@ select {
 
 .title-block p {
   margin: 0;
-  color: var(--muted);
+  color: var(--app-text-muted);
   font-size: 0.88rem;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -90,7 +152,7 @@ select {
 
 .column-picker-label {
   flex: 0 0 auto;
-  color: var(--muted);
+  color: var(--app-text-muted);
   font-size: 0.78rem;
   font-weight: 720;
   text-transform: uppercase;
@@ -111,17 +173,17 @@ select {
   max-width: min(260px, 100%);
   min-height: 32px;
   padding: 0 10px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--app-border);
   border-radius: 8px;
-  color: var(--muted);
-  background: var(--surface);
+  color: var(--app-text-muted);
+  background: var(--control-background);
   cursor: pointer;
 }
 
 .agent-chip.active {
-  border-color: rgba(40, 100, 143, 0.42);
-  color: var(--ink);
-  background: #eef6fb;
+  border-color: var(--control-selected-border);
+  color: var(--app-text);
+  background: var(--control-selected-background);
 }
 
 .agent-chip-name {
@@ -134,13 +196,13 @@ select {
 
 .agent-chip-count {
   flex: 0 0 auto;
-  color: var(--muted);
+  color: var(--app-text-muted);
   font-size: 0.72rem;
   white-space: nowrap;
 }
 
 .empty-chip {
-  color: var(--muted);
+  color: var(--app-text-muted);
   font-size: 0.82rem;
 }
 
@@ -150,7 +212,7 @@ select {
   align-items: center;
   gap: 8px;
   min-height: 38px;
-  color: var(--muted);
+  color: var(--app-text-muted);
   font-size: 0.82rem;
 }
 
@@ -164,10 +226,10 @@ select {
   min-height: 38px;
   min-width: 160px;
   padding: 0 10px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--app-border);
   border-radius: 8px;
-  color: var(--ink);
-  background: var(--surface);
+  color: var(--app-text);
+  background: var(--control-background);
 }
 
 .search-field input {
@@ -176,15 +238,15 @@ select {
 
 .switch {
   padding: 0 10px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--app-border);
   border-radius: 8px;
-  background: var(--surface);
+  background: var(--control-background);
 }
 
 .switch input {
   width: 16px;
   height: 16px;
-  accent-color: var(--manager);
+  accent-color: var(--control-accent);
 }
 
 .segmented {
@@ -192,16 +254,16 @@ select {
   grid-template-columns: 1fr 1fr;
   overflow: hidden;
   min-height: 38px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--app-border);
   border-radius: 8px;
-  background: var(--surface);
+  background: var(--control-background);
 }
 
 .segmented button,
 .refresh-button {
   min-height: 38px;
   border: 0;
-  color: var(--muted);
+  color: var(--app-text-muted);
   background: transparent;
   cursor: pointer;
 }
@@ -211,32 +273,32 @@ select {
 }
 
 .segmented button.active {
-  color: #fff;
-  background: var(--ink);
+  color: var(--control-active-text);
+  background: var(--control-active-background);
 }
 
 .refresh-button {
   padding: 0 14px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--app-border);
   border-radius: 8px;
-  background: var(--surface);
+  background: var(--control-background);
 }
 
 .refresh-button:hover,
 .segmented button:hover {
-  color: var(--ink);
+  color: var(--app-text);
 }
 
 .status {
   grid-column: 1 / -1;
   min-height: 18px;
-  color: var(--muted);
+  color: var(--app-text-muted);
   font-size: 0.82rem;
   text-align: right;
 }
 
 .status.error {
-  color: var(--danger);
+  color: var(--status-error-text);
 }
 
 .app-shell {
@@ -258,10 +320,10 @@ select {
 .single-chat {
   min-height: 0;
   overflow: hidden;
-  border: 1px solid var(--line);
+  border: 1px solid var(--app-border);
   border-radius: 8px;
-  background: var(--surface);
-  box-shadow: var(--shadow);
+  background: var(--panel-background);
+  box-shadow: var(--app-shadow);
 }
 
 .lane {
@@ -286,8 +348,8 @@ select {
   justify-content: space-between;
   gap: 12px;
   padding: 12px 14px;
-  border-bottom: 1px solid var(--line);
-  background: #fbfcfe;
+  border-bottom: 1px solid var(--app-border);
+  background: var(--panel-header-background);
 }
 
 .lane-title {
@@ -307,7 +369,7 @@ select {
 .lane-title p {
   margin: 3px 0 0;
   overflow: hidden;
-  color: var(--muted);
+  color: var(--app-text-muted);
   font-size: 0.78rem;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -337,8 +399,8 @@ select {
 .stat {
   padding: 3px 7px;
   border-radius: 999px;
-  color: var(--muted);
-  background: var(--surface-soft);
+  color: var(--app-text-muted);
+  background: var(--panel-soft-background);
   font-size: 0.74rem;
   white-space: nowrap;
 }
@@ -359,7 +421,7 @@ select {
   place-items: center;
   min-height: 180px;
   padding: 24px;
-  color: var(--muted);
+  color: var(--app-text-muted);
   text-align: center;
 }
 
@@ -370,10 +432,10 @@ select {
 .message,
 .message-card {
   padding: 11px 12px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--app-border);
   border-left-width: 4px;
   border-radius: 8px;
-  background: var(--surface);
+  background: var(--message-background);
 }
 
 .message-card {
@@ -382,27 +444,27 @@ select {
 
 .message.manager,
 .message-card.manager {
-  border-left-color: var(--manager);
+  border-left-color: var(--role-manager-accent);
 }
 
 .message.product,
 .message-card.product {
-  border-left-color: var(--product);
+  border-left-color: var(--role-product-accent);
 }
 
 .message.architect,
 .message-card.architect {
-  border-left-color: var(--architect);
+  border-left-color: var(--role-architect-accent);
 }
 
 .message.human,
 .message-card.human {
-  background: #f8fbff;
+  background: var(--message-human-background);
 }
 
 .message.tool {
-  border-left-color: var(--tool);
-  background: #fbfbfc;
+  border-left-color: var(--role-tool-accent);
+  background: var(--message-tool-background);
 }
 
 .message.event-shell {
@@ -414,16 +476,16 @@ select {
 
 .message.selected-run-source,
 .message-card.selected-run-source {
-  border-color: rgba(117, 70, 163, 0.58);
-  border-left-color: var(--disposable);
-  box-shadow: 0 0 0 2px rgba(117, 70, 163, 0.12);
+  border-color: var(--message-selected-border);
+  border-left-color: var(--role-disposable-accent);
+  box-shadow: var(--message-selected-outline);
 }
 
 .message.event-shell.selected-run-source {
   padding: 6px;
-  border: 1px solid rgba(117, 70, 163, 0.35);
+  border: 1px solid var(--message-selected-container-border);
   border-radius: 8px;
-  background: rgba(117, 70, 163, 0.06);
+  background: var(--message-selected-container-background);
   box-shadow: none;
 }
 
@@ -434,7 +496,7 @@ select {
 
 .message.event-shell > .text-block,
 .message.event-shell .thinking-body .text-block {
-  color: #475569;
+  color: var(--message-event-text);
 }
 
 .message.event-shell details.thinking {
@@ -445,12 +507,12 @@ select {
 .message.event-shell details.thinking summary {
   justify-content: flex-start;
   padding: 0 0 5px;
-  color: #64748b;
+  color: var(--message-event-summary-text);
 }
 
 .message.event-shell details.thinking[open] summary {
   border-bottom: 0;
-  color: #64748b;
+  color: var(--message-event-summary-text);
 }
 
 .message.event-shell .thinking-body {
@@ -477,7 +539,7 @@ select {
 
 .timestamp {
   flex: 0 0 auto;
-  color: var(--muted);
+  color: var(--app-text-muted);
   font-size: 0.76rem;
   white-space: nowrap;
 }
@@ -527,7 +589,7 @@ select {
 .markdown-body code {
   padding: 0.12em 0.32em;
   border-radius: 5px;
-  background: #eef2f6;
+  background: var(--markdown-code-background);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 0.86em;
 }
@@ -535,9 +597,9 @@ select {
 .markdown-body pre {
   overflow: auto;
   padding: 9px 10px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--app-border);
   border-radius: 8px;
-  background: #f7f9fb;
+  background: var(--markdown-pre-background);
   white-space: pre;
 }
 
@@ -549,8 +611,8 @@ select {
 
 .markdown-body blockquote {
   padding-left: 10px;
-  border-left: 3px solid #b6c6d5;
-  color: var(--muted);
+  border-left: 3px solid var(--markdown-quote-border);
+  color: var(--app-text-muted);
 }
 
 .markdown-body table {
@@ -563,13 +625,13 @@ select {
 .markdown-body th,
 .markdown-body td {
   padding: 5px 7px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--app-border);
   text-align: left;
   vertical-align: top;
 }
 
 .markdown-body a {
-  color: #275f8f;
+  color: var(--link-text);
   text-decoration-thickness: 1px;
   text-underline-offset: 2px;
 }
@@ -581,9 +643,9 @@ select {
 details.thinking,
 .tool-call {
   margin-top: 8px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--app-border);
   border-radius: 8px;
-  background: #fbfcfe;
+  background: var(--disclosure-background);
 }
 
 details.thinking summary,
@@ -594,7 +656,7 @@ details.task-call-payload summary {
   justify-content: space-between;
   gap: 10px;
   padding: 8px 10px;
-  color: var(--muted);
+  color: var(--app-text-muted);
   cursor: pointer;
   font-size: 0.83rem;
 }
@@ -602,8 +664,8 @@ details.task-call-payload summary {
 details.thinking[open] summary,
 details.tool-call[open] summary,
 details.task-call-payload[open] summary {
-  border-bottom: 1px solid var(--line);
-  color: var(--ink);
+  border-bottom: 1px solid var(--app-border);
+  color: var(--app-text);
 }
 
 .thinking-body,
@@ -612,13 +674,13 @@ details.task-call-payload[open] summary {
 }
 
 .tool-call.resident-agent {
-  border-color: rgba(182, 107, 19, 0.42);
-  background: #fff8ef;
+  border-color: var(--tool-call-resident-border);
+  background: var(--tool-call-resident-background);
 }
 
 .tool-call.disposable-agent {
-  border-color: rgba(117, 70, 163, 0.35);
-  background: #fbf8ff;
+  border-color: var(--tool-call-disposable-border);
+  background: var(--tool-call-disposable-background);
 }
 
 .tool-result {
@@ -626,7 +688,7 @@ details.task-call-payload[open] summary {
 }
 
 .tool-call.generic-tool {
-  background: #f8fafc;
+  background: var(--tool-call-generic-background);
 }
 
 .task-call-header {
@@ -646,23 +708,23 @@ details.task-call-payload[open] summary {
   padding: 0 8px;
   border: 0;
   border-radius: 8px;
-  color: var(--ink);
+  color: var(--app-text);
   background: transparent;
   cursor: pointer;
   text-align: left;
 }
 
 .task-open-button:hover {
-  background: rgba(117, 70, 163, 0.08);
+  background: var(--task-hover-background);
 }
 
 .task-open-button:disabled {
-  color: var(--muted);
+  color: var(--app-text-muted);
   cursor: default;
 }
 
 .task-call-payload {
-  border-top: 1px solid rgba(117, 70, 163, 0.18);
+  border-top: 1px solid var(--task-payload-border);
 }
 
 .call-heading {
@@ -686,9 +748,63 @@ details.task-call-payload[open] summary {
   min-width: 0;
   overflow: hidden;
   font-weight: 700;
-  color: var(--ink);
+  color: var(--app-text);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.tool-summary {
+  display: inline-flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.tool-summary-action {
+  flex: 0 0 auto;
+  font-weight: 750;
+  color: var(--app-text);
+}
+
+.tool-summary-token,
+.tool-summary-command {
+  min-width: 0;
+  overflow: hidden;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-summary-token {
+  padding: 2px 7px;
+  border-radius: 999px;
+  color: var(--app-text);
+  background: var(--token-background);
+  font-size: 0.72rem;
+}
+
+.tool-summary-pattern {
+  flex: 0 1 22ch;
+}
+
+.tool-summary-target {
+  flex: 1 1 auto;
+}
+
+.tool-summary-command {
+  flex: 1 1 auto;
+  color: var(--token-command-text);
+  font-size: 0.76rem;
+  font-weight: 500;
+}
+
+.tool-summary-muted {
+  flex: 0 0 auto;
+  color: var(--app-text-muted);
+  font-size: 0.76rem;
 }
 
 .call-path {
@@ -697,8 +813,8 @@ details.task-call-payload[open] summary {
   overflow: hidden;
   padding: 2px 7px;
   border-radius: 999px;
-  color: var(--ink);
-  background: #eef4f8;
+  color: var(--app-text);
+  background: var(--token-background);
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 0.72rem;
   text-overflow: ellipsis;
@@ -709,19 +825,19 @@ details.task-call-payload[open] summary {
   flex: 0 0 auto;
   padding: 2px 7px;
   border-radius: 999px;
-  color: var(--muted);
-  background: var(--surface-soft);
+  color: var(--app-text-muted);
+  background: var(--panel-soft-background);
   font-size: 0.72rem;
 }
 
 .badge.resident {
-  color: #7b4306;
-  background: #ffe4bd;
+  color: var(--badge-resident-text);
+  background: var(--badge-resident-background);
 }
 
 .badge.disposable {
-  color: #563177;
-  background: #eee1fb;
+  color: var(--badge-disposable-text);
+  background: var(--badge-disposable-background);
 }
 
 .run-actions {
@@ -733,17 +849,17 @@ details.task-call-payload[open] summary {
 }
 
 .run-metrics {
-  color: var(--muted);
+  color: var(--app-text-muted);
   font-size: 0.78rem;
 }
 
 .mini-button,
 .icon-button {
   min-height: 30px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--app-border);
   border-radius: 8px;
-  color: var(--ink);
-  background: var(--surface);
+  color: var(--app-text);
+  background: var(--control-background);
   cursor: pointer;
 }
 
@@ -765,14 +881,14 @@ details.task-call-payload[open] summary {
 
 .mini-button:hover,
 .icon-button:hover {
-  border-color: #aeb8c6;
-  background: #f8fafc;
+  border-color: var(--control-hover-border);
+  background: var(--control-hover-background);
 }
 
 .mini-button:disabled {
-  color: var(--muted);
+  color: var(--app-text-muted);
   cursor: default;
-  background: var(--surface-soft);
+  background: var(--control-disabled-background);
 }
 
 .tool-section + .tool-section {
@@ -781,7 +897,7 @@ details.task-call-payload[open] summary {
 
 .tool-section h3 {
   margin: 0 0 6px;
-  color: var(--muted);
+  color: var(--app-text-muted);
   font-size: 0.78rem;
   font-weight: 740;
   text-transform: uppercase;
@@ -793,20 +909,20 @@ details.task-call-payload[open] summary {
   margin: 0;
   overflow: auto;
   padding: 10px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--app-border);
   border-radius: 8px;
-  background: #101820;
-  color: #edf7ff;
+  background: var(--preformatted-background);
+  color: var(--preformatted-text);
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 0.79rem;
 }
 
 .timeline-scroll {
   height: 100%;
-  border: 1px solid var(--line);
+  border: 1px solid var(--app-border);
   border-radius: 8px;
-  background: var(--surface);
-  box-shadow: var(--shadow);
+  background: var(--panel-background);
+  box-shadow: var(--app-shadow);
 }
 
 .timeline-grid {
@@ -827,26 +943,26 @@ details.task-call-payload[open] summary {
 }
 
 .time-header {
-  border-right: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
-  background: #fbfcfe;
+  border-right: 1px solid var(--app-border);
+  border-bottom: 1px solid var(--app-border);
+  background: var(--panel-header-background);
 }
 
 .timeline-agent-header {
-  border-right: 1px solid var(--line);
+  border-right: 1px solid var(--app-border);
 }
 
 .time-cell,
 .timeline-cell {
   min-width: 0;
   padding: 10px;
-  border-right: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
+  border-right: 1px solid var(--app-border);
+  border-bottom: 1px solid var(--app-border);
 }
 
 .time-cell {
-  color: var(--muted);
-  background: #f8fafc;
+  color: var(--app-text-muted);
+  background: var(--timeline-time-background);
   font-size: 0.74rem;
   text-align: right;
   white-space: pre-line;
@@ -865,7 +981,7 @@ details.task-call-payload[open] summary {
   position: fixed;
   inset: 0;
   z-index: 30;
-  background: rgba(22, 33, 43, 0.22);
+  background: var(--app-backdrop);
 }
 
 .run-drawer {
@@ -877,9 +993,9 @@ details.task-call-payload[open] summary {
   grid-template-rows: auto auto minmax(0, 1fr);
   width: min(720px, 92vw);
   height: 100vh;
-  border-left: 1px solid var(--line);
-  background: var(--surface);
-  box-shadow: -18px 0 44px rgba(22, 33, 43, 0.16);
+  border-left: 1px solid var(--app-border);
+  background: var(--drawer-background);
+  box-shadow: var(--drawer-shadow);
 }
 
 .drawer-header {
@@ -888,8 +1004,8 @@ details.task-call-payload[open] summary {
   justify-content: space-between;
   gap: 14px;
   padding: 16px;
-  border-bottom: 1px solid var(--line);
-  background: #fbfcfe;
+  border-bottom: 1px solid var(--app-border);
+  background: var(--drawer-header-background);
 }
 
 .drawer-toolbar {
@@ -898,8 +1014,8 @@ details.task-call-payload[open] summary {
   align-items: center;
   gap: 10px;
   padding: 12px 16px;
-  border-bottom: 1px solid var(--line);
-  background: #fff;
+  border-bottom: 1px solid var(--app-border);
+  background: var(--drawer-toolbar-background);
 }
 
 .drawer-body {
