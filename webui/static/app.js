@@ -80,7 +80,6 @@ async function loadState(options = {}) {
   state.loading = true;
 
   const preserveScroll = options.preserveScroll !== false;
-  const pinned = preserveScroll ? capturePinnedScrollers() : new Map();
   const firstLoad = state.data === null || !preserveScroll;
   const previousThreadId = state.data?.activeThreadId || null;
 
@@ -96,6 +95,7 @@ async function loadState(options = {}) {
 
     await refreshSelectedAgentRuns(Boolean(options.refreshRuns));
     await refreshOpenRuns(Boolean(options.refreshRuns));
+    const pinned = preserveScroll ? capturePinnedScrollers() : new Map();
     render({ pinned, firstLoad });
 
     const generated = payload.generatedAt?.epochMs

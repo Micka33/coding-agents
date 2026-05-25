@@ -28,6 +28,7 @@ export function capturePinnedScrollers() {
     const key = element.dataset.scrollKey;
     if (!key) return;
     pinned.set(key, {
+      contentSignature: scrollContentSignature(element),
       nearBottom: isNearBottom(element),
       scrollTop: element.scrollTop,
     });
@@ -40,12 +41,16 @@ export function restorePinnedScrollers(pinned, firstLoad = false) {
     document.querySelectorAll(".scroll-region").forEach((element) => {
       const key = element.dataset.scrollKey;
       const previous = pinned.get(key);
+      if (previous && scrollContentSignature(element) === previous.contentSignature) return;
+      if (previous && didScrollAfterCapture(element, previous)) return;
+
       const shouldPin = firstLoad || !previous || previous.nearBottom;
       if (shouldPin) {
         scrollRegionToBottom(element);
       } else {
         restoreScrollRegion(element, previous);
       }
+      if (previous) previous.appliedScrollTop = element.scrollTop;
     });
   };
   requestAnimationFrame(() => {
@@ -70,6 +75,24 @@ export function scrollRegionToBottom(element) {
 
 export function isNearBottom(element) {
   return element.scrollHeight - element.clientHeight - element.scrollTop < 90;
+}
+
+function didScrollAfterCapture(element, previous) {
+  const expectedScrollTop = previous.appliedScrollTop ?? previous.scrollTop;
+  return Math.abs(element.scrollTop - expectedScrollTop) > 2;
+}
+
+function scrollContentSignature(element) {
+  const children = Array.from(element.children);
+  const firstKey = children[0]?.dataset.messageKey || children[0]?.dataset.rowKey || "";
+  const lastKey = children.at(-1)?.dataset.messageKey || children.at(-1)?.dataset.rowKey || "";
+  return [
+    element.scrollHeight,
+    element.clientHeight,
+    children.length,
+    firstKey,
+    lastKey,
+  ].join(":");
 }
 
 export function formatTime(epochMs) {
