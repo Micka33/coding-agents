@@ -1,5 +1,5 @@
 import { buildTimelineRows } from "./data.js";
-import { reconcileMessageList } from "./messageList.js";
+import { renderMessagePane, replacePanePart } from "./panes.js";
 import { directChildren, escapeAttr, escapeHtml, formatTimelineTime, htmlToElement, insertChildAt } from "./utils.js";
 
 export function renderLayout(els, agents, resultMaps, state, context) {
@@ -38,9 +38,10 @@ function renderSingle(els, agents, resultMaps, state, context) {
   `,
   );
   const section = els.app.querySelector(".single-chat");
-  updateLaneHeader(section, agent, "single-header");
-  reconcileMessageList(section.querySelector(".message-list"), agent, resultMaps.get(agent.id), context, {
+  renderMessagePane(section, agent, resultMaps.get(agent.id), context, {
+    scrollKey: `single:${agent.id}`,
     showEmpty: true,
+    updateChrome: (root) => updateLaneHeader(root, agent, "single-header"),
   });
 }
 
@@ -85,10 +86,11 @@ function reconcileLanes(board, agents, resultMaps, context) {
     let lane = existing.get(agent.id);
     if (!lane) lane = htmlToElement(renderLaneShell(agent));
 
-    updateLaneHeader(lane, agent, "lane-header");
-    const list = lane.querySelector(".message-list");
-    list.dataset.scrollKey = `lane:${agent.id}`;
-    reconcileMessageList(list, agent, resultMaps.get(agent.id), context, { showEmpty: true });
+    renderMessagePane(lane, agent, resultMaps.get(agent.id), context, {
+      scrollKey: `lane:${agent.id}`,
+      showEmpty: true,
+      updateChrome: (root) => updateLaneHeader(root, agent, "lane-header"),
+    });
     insertChildAt(board, lane, index);
   });
 }
@@ -104,10 +106,7 @@ function renderLaneShell(agent) {
 }
 
 function updateLaneHeader(container, agent, className) {
-  const current = container.querySelector(`.${className}`);
-  const next = htmlToElement(renderLaneHeader(agent, className));
-  if (current) current.replaceWith(next);
-  else container.prepend(next);
+  replacePanePart(container, `.${className}`, renderLaneHeader(agent, className));
 }
 
 function renderLaneHeader(agent, className) {
@@ -225,8 +224,8 @@ function updateTimelineRow(rowElement, row, agents, resultMaps, context) {
       cell.dataset.agentId = agent.id;
     }
 
-    const maps = resultMaps.get(agent.id);
-    reconcileMessageList(cell, agent, maps, context, {
+    renderMessagePane(cell, agent, resultMaps.get(agent.id), context, {
+      listSelector: null,
       messages: row.byAgent.get(agent.id) || [],
       showEmpty: false,
     });

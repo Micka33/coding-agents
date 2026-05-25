@@ -29,6 +29,7 @@ export function capturePinnedScrollers() {
     if (!key) return;
     pinned.set(key, {
       contentSignature: scrollContentSignature(element),
+      element,
       nearBottom: isNearBottom(element),
       scrollTop: element.scrollTop,
     });
@@ -41,7 +42,11 @@ export function restorePinnedScrollers(pinned, firstLoad = false) {
     document.querySelectorAll(".scroll-region").forEach((element) => {
       const key = element.dataset.scrollKey;
       const previous = pinned.get(key);
-      if (previous && scrollContentSignature(element) === previous.contentSignature) return;
+      if (
+        previous &&
+        previous.element === element &&
+        scrollContentSignature(element) === previous.contentSignature
+      ) return;
       if (previous && didScrollAfterCapture(element, previous)) return;
 
       const shouldPin = firstLoad || !previous || previous.nearBottom;
