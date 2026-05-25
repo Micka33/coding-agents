@@ -75,35 +75,83 @@ function renderMessage(message, agent, maps, context) {
   const speaker = speakerLabel(message, agent);
   const time = message.timestamp?.epochMs ? formatTime(message.timestamp.epochMs) : "";
   const accent = agent.accent || agent.id;
-  const messageClass = [
-    "message",
-    accent,
-    message.type === "human" ? "human" : "",
-    message.type === "tool" ? "tool" : "",
-    messageContainsRun(message, context.activeRunId) ? "selected-run-source" : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
-
-  const blocks = message.blocks.map((block, index) => renderBlock(block, message, agent, index, context)).join("");
+  const selectedRunClass = messageContainsRun(message, context.activeRunId) ? "selected-run-source" : "";
+  const renderedBlocks = message.blocks
+    .map((block, index) => ({
+      html: renderBlock(block, message, agent, index, context),
+      internal: isInternalBlock(block),
+    }))
+    .filter((block) => block.html);
+  const internalBlocks = renderedBlocks.filter((block) => block.internal).map((block) => block.html).join("");
+  const cardBlocks = renderedBlocks.filter((block) => !block.internal).map((block) => block.html).join("");
   const calls = message.toolCalls
     .map((call, index) => renderToolCall(call, maps?.byToolCallId.get(call.id), message, agent, index, context))
     .join("");
-  const fallback = !blocks && !calls && message.contentText
+  const fallback = !renderedBlocks.length && !calls && message.contentText
     ? renderTextBlock(message.contentText, context)
     : "";
-
-  return `
-    <article class="${messageClass}" data-message-id="${escapeAttr(message.id)}" data-message-key="${escapeAttr(key)}" data-render-hash="${escapeAttr(signature)}" data-ts="${message.timestamp?.epochMs || ""}">
+  const internalBody = message.type === "tool"
+    ? renderToolResultMessage(message, agent)
+    : `${internalBlocks}${calls}`;
+  const cardBody = message.type === "tool" ? "" : `${cardBlocks}${fallback}`;
+  const header = `
       <div class="message-header">
         <div class="speaker">${escapeHtml(speaker)}</div>
         <time class="timestamp">${escapeHtml(time)}</time>
       </div>
-      ${blocks}
-      ${calls}
-      ${fallback}
+    `;
+  const card = cardBody
+    ? `
+      <div class="${messageCardClass(accent, message, selectedRunClass)}">
+        ${header}
+        ${cardBody}
+      </div>
+    `
+    : "";
+  const shellClass = internalBody ? (card ? " mixed-event" : " internal-event") : "";
+
+  if (shellClass) {
+    return `
+      <article class="message event-shell${shellClass}${selectedRunClass ? ` ${selectedRunClass}` : ""}" data-message-id="${escapeAttr(message.id)}" data-message-key="${escapeAttr(key)}" data-render-hash="${escapeAttr(signature)}" data-ts="${message.timestamp?.epochMs || ""}">
+        ${internalBody}
+        ${card}
+      </article>
+    `;
+  }
+
+  return `
+    <article class="${messageClass(accent, message, selectedRunClass)}" data-message-id="${escapeAttr(message.id)}" data-message-key="${escapeAttr(key)}" data-render-hash="${escapeAttr(signature)}" data-ts="${message.timestamp?.epochMs || ""}">
+      ${header}
+      ${cardBody}
     </article>
   `;
+}
+
+function messageClass(accent, message, selectedRunClass) {
+  return [
+    "message",
+    accent,
+    message.type === "human" ? "human" : "",
+    message.type === "tool" ? "tool" : "",
+    selectedRunClass,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function messageCardClass(accent, message, selectedRunClass) {
+  return [
+    "message-card",
+    accent,
+    message.type === "human" ? "human" : "",
+    selectedRunClass,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function isInternalBlock(block) {
+  return block.type === "reasoning" || block.phase === "commentary";
 }
 
 function renderBlock(block, message, agent, index, context) {
@@ -112,8 +160,8 @@ function renderBlock(block, message, agent, index, context) {
     if (!text) return "";
     const detailKey = `${messageKey(agent, message)}:reasoning:${index}`;
     return `
-      <details class="thinking" data-detail-key="${escapeAttr(detailKey)}">
-        <summary><span>Réflexion</span><span class="badge">collapsed</span></summary>
+      <details class="thinking" data-detail-key="${escapeAttr(detailKey)}" open>
+        <summary><span>Réflexion</span></summary>
         <div class="thinking-body">
           ${renderTextBlock(text, context)}
         </div>
@@ -136,6 +184,25 @@ function renderTextBlock(text, context, options = {}) {
       ${phase}
       <div class="markdown-body">${renderMarkdown(text)}</div>
     </div>
+  `;
+}
+
+function renderToolResultMessage(message, agent) {
+  const detailKey = `${messageKey(agent, message)}:tool-result`;
+  const resultText = message.contentText || message.blocks.map((block) => block.text || block.summary || "").filter(Boolean).join("\n");
+  const name = message.name || message.rawType || "résultat";
+  return `
+    <details class="tool-call generic-tool tool-result" data-detail-key="${escapeAttr(detailKey)}">
+      <summary>
+        <span class="call-heading">
+          <span class="call-name">Résultat ${escapeHtml(name)}</span>
+          <span class="badge">outil</span>
+        </span>
+      </summary>
+      <div class="tool-body">
+        <pre class="tool-pre">${escapeHtml(resultText || "Résultat vide.")}</pre>
+      </div>
+    </details>
   `;
 }
 

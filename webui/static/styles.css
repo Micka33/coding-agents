@@ -365,6 +365,10 @@ select {
 
 .message {
   margin: 0 0 12px;
+}
+
+.message,
+.message-card {
   padding: 11px 12px;
   border: 1px solid var(--line);
   border-left-width: 4px;
@@ -372,19 +376,27 @@ select {
   background: var(--surface);
 }
 
-.message.manager {
+.message-card {
+  margin: 0;
+}
+
+.message.manager,
+.message-card.manager {
   border-left-color: var(--manager);
 }
 
-.message.product {
+.message.product,
+.message-card.product {
   border-left-color: var(--product);
 }
 
-.message.architect {
+.message.architect,
+.message-card.architect {
   border-left-color: var(--architect);
 }
 
-.message.human {
+.message.human,
+.message-card.human {
   background: #f8fbff;
 }
 
@@ -393,10 +405,60 @@ select {
   background: #fbfbfc;
 }
 
-.message.selected-run-source {
+.message.event-shell {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.message.selected-run-source,
+.message-card.selected-run-source {
   border-color: rgba(117, 70, 163, 0.58);
   border-left-color: var(--disposable);
   box-shadow: 0 0 0 2px rgba(117, 70, 163, 0.12);
+}
+
+.message.event-shell.selected-run-source {
+  padding: 6px;
+  border: 1px solid rgba(117, 70, 163, 0.35);
+  border-radius: 8px;
+  background: rgba(117, 70, 163, 0.06);
+  box-shadow: none;
+}
+
+.message.event-shell > .tool-call:first-child,
+.message.event-shell > details.thinking:first-child {
+  margin-top: 0;
+}
+
+.message.event-shell > .text-block,
+.message.event-shell .thinking-body .text-block {
+  color: #475569;
+}
+
+.message.event-shell details.thinking {
+  border: 0;
+  background: transparent;
+}
+
+.message.event-shell details.thinking summary {
+  justify-content: flex-start;
+  padding: 0 0 5px;
+  color: #64748b;
+}
+
+.message.event-shell details.thinking[open] summary {
+  border-bottom: 0;
+  color: #64748b;
+}
+
+.message.event-shell .thinking-body {
+  padding: 0;
+}
+
+.message.mixed-event > .message-card {
+  margin-top: 8px;
 }
 
 .message-header {
@@ -557,6 +619,10 @@ details.task-call-payload[open] summary {
 .tool-call.disposable-agent {
   border-color: rgba(117, 70, 163, 0.35);
   background: #fbf8ff;
+}
+
+.tool-result {
+  margin-top: 0;
 }
 
 .tool-call.generic-tool {

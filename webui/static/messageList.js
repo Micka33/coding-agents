@@ -6,7 +6,7 @@ import {
   messageSignature,
   rememberDetailsState,
 } from "./messages.js";
-import { directChildren, htmlToElement } from "./utils.js";
+import { directChildren, htmlToElement, insertChildAt } from "./utils.js";
 
 export function handleDetailsToggle(event, openDetails) {
   const details = event.target;
@@ -41,7 +41,7 @@ export function reconcileMessageList(container, agent, maps, context, options = 
     return;
   }
 
-  messages.forEach((message) => {
+  messages.forEach((message, index) => {
     const key = messageKey(agent, message);
     const signature = messageSignature(message, maps, context);
     let element = existing.get(key);
@@ -56,6 +56,6 @@ export function reconcileMessageList(container, agent, maps, context, options = 
       element = replacement;
     }
 
-    container.appendChild(element);
+    insertChildAt(container, element, index);
   });
 }

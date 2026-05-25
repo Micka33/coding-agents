@@ -91,12 +91,14 @@ function scrollContentSignature(element) {
   const children = Array.from(element.children);
   const firstKey = children[0]?.dataset.messageKey || children[0]?.dataset.rowKey || "";
   const lastKey = children.at(-1)?.dataset.messageKey || children.at(-1)?.dataset.rowKey || "";
+  const firstHash = children[0]?.dataset.renderHash || "";
+  const lastHash = children.at(-1)?.dataset.renderHash || "";
   return [
-    element.scrollHeight,
-    element.clientHeight,
     children.length,
     firstKey,
+    firstHash,
     lastKey,
+    lastHash,
   ].join(":");
 }
 
