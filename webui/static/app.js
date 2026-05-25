@@ -15,6 +15,7 @@ import { resetColumnSelection, resetRunState, setFormatMarkdown, setPricingTier,
 import { capturePinnedScrollers, formatTime, restorePinnedScrollers } from "./utils.js";
 
 const els = collectElements();
+let pendingLoadOptions = null;
 
 init();
 
@@ -90,15 +91,28 @@ function schedulePolling() {
 }
 
 async function loadState(options = {}) {
-  if (state.loading) return;
+  if (state.loading) {
+    pendingLoadOptions = mergeLoadOptions(pendingLoadOptions, options);
+    return;
+  }
   state.loading = true;
 
   const preserveScroll = options.preserveScroll !== false;
   const firstLoad = state.data === null || !preserveScroll;
   const previousThreadId = state.data?.activeThreadId || null;
+  const requestedThreadId = state.selectedThreadId;
+  const requestedPricingTier = state.pricingTier;
 
   try {
-    const payload = await fetchState(state.selectedThreadId, state.pricingTier);
+    const payload = await fetchState(requestedThreadId, requestedPricingTier);
+    if (requestedThreadId !== state.selectedThreadId || requestedPricingTier !== state.pricingTier) {
+      pendingLoadOptions = mergeLoadOptions(pendingLoadOptions, {
+        ...options,
+        refreshRuns: true,
+      });
+      return;
+    }
+
     state.data = payload;
     state.selectedThreadId = payload.activeThreadId;
     state.pricingTier = payload.pricing?.tier || state.pricingTier;
@@ -121,7 +135,21 @@ async function loadState(options = {}) {
     setStatus(els, error.message, true);
   } finally {
     state.loading = false;
+    if (pendingLoadOptions) {
+      const nextOptions = pendingLoadOptions;
+      pendingLoadOptions = null;
+      queueMicrotask(() => loadState(nextOptions));
+    }
   }
+}
+
+function mergeLoadOptions(left, right) {
+  const merged = { ...(left || {}), ...(right || {}) };
+  merged.refreshRuns = Boolean(left?.refreshRuns || right?.refreshRuns);
+  if (left?.preserveScroll === false || right?.preserveScroll === false) {
+    merged.preserveScroll = false;
+  }
+  return merged;
 }
 
 function handlePricingTierChange() {
@@ -273,9 +301,14 @@ async function ensureTaskRunLoaded(runId, options = {}) {
   }
   if (state.taskRunPromises.has(runId)) return state.taskRunPromises.get(runId);
 
-  const promise = fetchTaskRun(state.selectedThreadId, runId, state.pricingTier)
+  const requestedThreadId = state.selectedThreadId;
+  const requestedPricingTier = state.pricingTier;
+  const promise = fetchTaskRun(requestedThreadId, runId, requestedPricingTier)
     .then((payload) => {
-      if (payload.activeThreadId === state.selectedThreadId) {
+      if (
+        payload.activeThreadId === state.selectedThreadId
+        && requestedPricingTier === state.pricingTier
+      ) {
         state.taskRunCache.set(runId, payload.run);
       }
       return payload.run;

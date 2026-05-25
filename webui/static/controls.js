@@ -100,5 +100,5 @@ function renderPricingTierSelect(els, state) {
   els.pricingTierSelect.innerHTML = tiers
     .map((tier) => `<option value="${escapeAttr(tier)}">${escapeHtml(tier)}</option>`)
     .join("");
-  els.pricingTierSelect.value = state.data?.pricing?.tier || state.pricingTier || "standard";
+  els.pricingTierSelect.value = state.pricingTier || state.data?.pricing?.tier || "standard";
 }
