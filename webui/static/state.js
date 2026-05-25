@@ -9,6 +9,7 @@ export const state = {
   loading: false,
   pollTimer: null,
   openDetails: new Map(),
+  selectedColumnIds: null,
   drawerRunId: null,
   activeRunId: null,
   tempRunIds: [],
@@ -22,4 +23,8 @@ export function resetRunState() {
   state.tempRunIds = [];
   state.taskRunCache = new Map();
   state.taskRunPromises = new Map();
+}
+
+export function resetColumnSelection() {
+  state.selectedColumnIds = null;
 }

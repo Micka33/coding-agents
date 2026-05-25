@@ -34,7 +34,14 @@ export function messageSignature(message, maps, context) {
       runStats: run?.stats || call.runStats,
     };
   });
-  return hashString(JSON.stringify({ message, relatedResults, activeRunId: context.activeRunId }));
+  return hashString(
+    JSON.stringify({
+      message,
+      relatedResults,
+      activeRunId: context.activeRunId,
+      tempRunIds: context.tempRunIds || [],
+    }),
+  );
 }
 
 export function captureDetailsState(root) {
@@ -174,12 +181,15 @@ function renderDisposableAgentCall(call, result, detailKey, context) {
   const resultText = result?.contentText || "Résultat pas encore disponible.";
   const run = call.runId ? context.taskRunById.get(call.runId) : null;
   const stats = call.runStats || run?.stats || {};
+  const isColumnOpen = Boolean(call.runId && context.tempRunIds?.includes(call.runId));
   const openAttrs = call.runId
     ? `data-action="open-run-drawer" data-run-id="${escapeAttr(call.runId)}"`
     : "disabled";
   const columnButton = call.runId
     ? `
-      <button class="mini-button" type="button" data-action="open-run-column" data-run-id="${escapeAttr(call.runId)}">Colonne</button>
+      <button class="mini-button" type="button" data-action="${isColumnOpen ? "close-run-column" : "open-run-column"}" data-run-id="${escapeAttr(call.runId)}">
+        ${isColumnOpen ? "Retirer" : "Colonne"}
+      </button>
     `
     : "";
 

@@ -5,6 +5,7 @@ export function collectElements() {
     app: document.querySelector("#app"),
     drawerRoot: document.querySelector("#drawerRoot"),
     dbPath: document.querySelector("#dbPath"),
+    columnPicker: document.querySelector("#columnPicker"),
     threadSelect: document.querySelector("#threadSelect"),
     agentSelect: document.querySelector("#agentSelect"),
     syncToggle: document.querySelector("#syncToggle"),
@@ -16,7 +17,7 @@ export function collectElements() {
   };
 }
 
-export function renderControls(els, state, agents) {
+export function renderControls(els, state, agents, columnOptions) {
   els.dbPath.textContent = state.data?.dbPath || "";
 
   const currentThreadOptions = state.data?.threads || [];
@@ -42,9 +43,37 @@ export function renderControls(els, state, agents) {
   if (els.syncToggle.disabled) state.syncScroll = false;
   els.syncToggle.checked = state.syncScroll;
   els.liveToggle.checked = state.live;
+  renderColumnPicker(els, state, columnOptions);
 }
 
 export function setStatus(els, text, isError = false) {
   els.status.textContent = text || "";
   els.status.classList.toggle("error", isError);
+}
+
+function renderColumnPicker(els, state, options) {
+  const selected = state.selectedColumnIds || new Set();
+  const chips = (options || [])
+    .map((option) => {
+      const active = selected.has(option.id);
+      const count = option.kind === "task-agent-group" ? `${option.runCount} runs` : `${option.stats?.messages || 0} msg`;
+      return `
+        <button
+          class="agent-chip ${active ? "active" : ""}"
+          type="button"
+          data-column-id="${escapeAttr(option.id)}"
+          aria-pressed="${active ? "true" : "false"}"
+          title="${escapeAttr(option.name)}"
+        >
+          <span class="agent-chip-name">${escapeHtml(option.name)}</span>
+          <span class="agent-chip-count">${escapeHtml(count)}</span>
+        </button>
+      `;
+    })
+    .join("");
+
+  els.columnPicker.innerHTML = `
+    <span class="column-picker-label">Colonnes</span>
+    <div class="agent-chips">${chips || `<span class="empty-chip">Aucun agent</span>`}</div>
+  `;
 }

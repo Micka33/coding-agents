@@ -80,6 +80,70 @@ select {
   gap: 10px;
 }
 
+.column-picker {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.column-picker-label {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 720;
+  text-transform: uppercase;
+}
+
+.agent-chips {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.agent-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: min(260px, 100%);
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.agent-chip.active {
+  border-color: rgba(40, 100, 143, 0.42);
+  color: var(--ink);
+  background: #eef6fb;
+}
+
+.agent-chip-name {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-chip-count {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.empty-chip {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
 .field,
 .switch {
   display: inline-flex;
@@ -176,7 +240,10 @@ select {
 }
 
 .app-shell {
-  height: calc(100vh - 135px);
+  height: calc(100vh - 180px);
+  min-height: 420px;
+  overflow-x: auto;
+  overflow-y: hidden;
   padding: 18px clamp(12px, 2vw, 28px) 22px;
 }
 
@@ -198,6 +265,7 @@ select {
 }
 
 .lane {
+  position: relative;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
 }
@@ -257,6 +325,13 @@ select {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.lane-close-button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
 }
 
 .stat {
@@ -695,6 +770,12 @@ details.task-call-payload[open] summary {
     justify-content: flex-start;
   }
 
+  .column-picker {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 7px;
+  }
+
   .status {
     text-align: left;
   }
@@ -727,7 +808,8 @@ details.task-call-payload[open] summary {
   .field,
   .switch,
   .segmented,
-  .refresh-button {
+  .refresh-button,
+  .agent-chip {
     min-width: 0;
     width: 100%;
   }

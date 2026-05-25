@@ -313,7 +313,7 @@ class CheckpointHistoryReader:
         ]
 
         for call, run in zip(task_calls, task_runs, strict=False):
-            target_agent = call.get("targetAgent") or run.get("targetAgent")
+            target_agent = run.get("targetAgent") or call.get("targetAgent")
             call["runId"] = run["id"]
             call["runCheckpointNs"] = run["checkpointNs"]
             call["runStats"] = run["stats"]

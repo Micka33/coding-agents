@@ -1,12 +1,140 @@
 import { prettyJson } from "./utils.js";
 
-export function visibleAgents(data, tempRunIds, taskRunCache) {
-  const agents = [...(data?.agents || [])];
+export function visibleAgents(data, selectedColumnIds, tempRunIds, taskRunCache) {
+  const selected = selectedColumnIds || new Set(defaultColumnIds(data));
+  const options = columnOptions(data);
+  const agents = [];
+
+  (data?.agents || []).forEach((agent) => {
+    if (selected.has(agent.id)) agents.push(agent);
+  });
+
+  options.forEach((option) => {
+    if (option.kind === "task-agent-group" && selected.has(option.id)) {
+      agents.push(taskAgentGroupAsAgent(option, taskRunCache));
+    }
+  });
+
   tempRunIds.forEach((runId) => {
     const run = taskRunCache.get(runId);
     if (run) agents.push(runAsAgent(run));
   });
   return agents;
+}
+
+export function columnOptions(data) {
+  const options = (data?.agents || []).map((agent) => ({
+    id: agent.id,
+    name: agent.name,
+    shortName: agent.shortName || agent.name,
+    kind: agent.kind || "resident",
+    stats: agent.stats || {},
+    runIds: [],
+    runCount: 0,
+  }));
+
+  const taskGroups = new Map();
+  (data?.taskRuns || []).forEach((run) => {
+    const agentName = taskAgentName(run);
+    const id = taskAgentColumnId(agentName);
+    if (!taskGroups.has(id)) {
+      taskGroups.set(id, {
+        id,
+        name: agentName,
+        shortName: agentName,
+        kind: "task-agent-group",
+        stats: emptyStats(),
+        runIds: [],
+        runCount: 0,
+      });
+    }
+    const option = taskGroups.get(id);
+    option.runIds.push(run.id);
+    option.runCount += 1;
+    option.stats = addStats(option.stats, run.stats || {});
+  });
+
+  return [...options, ...taskGroups.values()];
+}
+
+export function defaultColumnIds(data) {
+  return (data?.agents || []).map((agent) => agent.id);
+}
+
+export function reconcileSelectedColumnIds(data, selectedColumnIds) {
+  if (selectedColumnIds === null) return new Set(defaultColumnIds(data));
+  const available = new Set(columnOptions(data).map((option) => option.id));
+  return new Set([...selectedColumnIds].filter((id) => available.has(id)));
+}
+
+export function taskAgentColumnId(agentName) {
+  return `task-agent:${agentName || "agent"}`;
+}
+
+export function isTaskAgentColumnId(id) {
+  return String(id || "").startsWith("task-agent:");
+}
+
+export function selectedTaskRunIds(data, selectedColumnIds) {
+  const selected = selectedColumnIds || new Set(defaultColumnIds(data));
+  return columnOptions(data)
+    .filter((option) => option.kind === "task-agent-group" && selected.has(option.id))
+    .flatMap((option) => option.runIds);
+}
+
+function taskAgentGroupAsAgent(option, taskRunCache) {
+  const loadedRuns = option.runIds.map((runId) => taskRunCache.get(runId)).filter((run) => run?.messages);
+  const messages = loadedRuns.flatMap((run, index) => runMessagesWithSessionMarker(run, index));
+  const loadedCount = loadedRuns.length;
+  const runLabel = `${option.runCount} session${option.runCount > 1 ? "s" : ""}`;
+  const loadingLabel = loadedCount < option.runCount ? ` · ${loadedCount}/${option.runCount} chargées` : "";
+
+  return {
+    id: option.id,
+    name: option.name,
+    shortName: option.shortName || option.name,
+    threadId: `${runLabel}${loadingLabel}`,
+    messages,
+    kind: "task-agent-group",
+    accent: "disposable",
+    exists: true,
+    stats: option.stats,
+    runIds: option.runIds,
+  };
+}
+
+function runMessagesWithSessionMarker(run, index) {
+  const firstMessage = run.messages?.[0];
+  const marker = {
+    id: `${run.id}:session-marker`,
+    index: -1,
+    agentId: run.targetAgent || "agent",
+    type: "session",
+    name: `Session ${index + 1}`,
+    toolCallId: null,
+    contentText: run.preview || run.checkpointNs || run.id,
+    blocks: [
+      {
+        type: "text",
+        phase: run.shortName || run.targetAgent || "agent",
+        text: `${run.checkpointNs || run.id}\n${run.preview || ""}`.trim(),
+      },
+    ],
+    toolCalls: [],
+    timestamp: firstMessage?.timestamp || { iso: null, epochMs: null },
+    usage: null,
+    responseMetadata: null,
+    rawType: "SessionMarker",
+  };
+
+  return [
+    marker,
+    ...(run.messages || []).map((message) => ({
+      ...message,
+      id: `${run.id}:${message.id || message.index}`,
+      sourceRunId: run.id,
+    })),
+  ];
 }
 
 export function runAsAgent(run) {
@@ -20,6 +148,28 @@ export function runAsAgent(run) {
     kind: "disposable-run",
     accent: "disposable",
   };
+}
+
+function taskAgentName(run) {
+  return String(run.targetAgent || run.shortName || run.name || "agent").replace(/^Run\s+/i, "").trim() || "agent";
+}
+
+function emptyStats() {
+  return {
+    messages: 0,
+    toolCalls: 0,
+    residentAgentCalls: 0,
+    disposableAgentCalls: 0,
+    thinkingBlocks: 0,
+  };
+}
+
+function addStats(left, right) {
+  const stats = { ...emptyStats(), ...left };
+  Object.keys(emptyStats()).forEach((key) => {
+    stats[key] = (stats[key] || 0) + (right[key] || 0);
+  });
+  return stats;
 }
 
 export function buildTaskRunMap(data, taskRunCache) {

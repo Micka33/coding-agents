@@ -1,10 +1,17 @@
 import { fetchState, fetchTaskRun } from "./api.js";
 import { collectElements, renderControls, setStatus } from "./controls.js";
-import { buildResultMaps, buildTaskRunMap, visibleAgents } from "./data.js";
+import {
+  buildResultMaps,
+  buildTaskRunMap,
+  columnOptions,
+  reconcileSelectedColumnIds,
+  selectedTaskRunIds,
+  visibleAgents,
+} from "./data.js";
 import { renderRunDrawer } from "./drawer.js";
 import { renderLayout } from "./layouts.js";
 import { handleDetailsToggle } from "./messageList.js";
-import { resetRunState, state } from "./state.js";
+import { resetColumnSelection, resetRunState, state } from "./state.js";
 import { capturePinnedScrollers, formatTime, restorePinnedScrollers } from "./utils.js";
 
 const els = collectElements();
@@ -16,6 +23,7 @@ function init() {
   els.app.addEventListener("click", handleActionClick, true);
   els.drawerRoot.addEventListener("toggle", (event) => handleDetailsToggle(event, state.openDetails), true);
   els.drawerRoot.addEventListener("click", handleActionClick, true);
+  els.columnPicker.addEventListener("click", handleColumnPickerClick);
 
   els.viewButtons.forEach((button) => {
     button.addEventListener("click", () => {
@@ -26,6 +34,7 @@ function init() {
 
   els.threadSelect.addEventListener("change", () => {
     state.selectedThreadId = els.threadSelect.value;
+    resetColumnSelection();
     loadState({ preserveScroll: false });
   });
 
@@ -79,8 +88,13 @@ async function loadState(options = {}) {
     const payload = await fetchState(state.selectedThreadId);
     state.data = payload;
     state.selectedThreadId = payload.activeThreadId;
-    if (previousThreadId && previousThreadId !== payload.activeThreadId) resetRunState();
+    if (previousThreadId && previousThreadId !== payload.activeThreadId) {
+      resetRunState();
+      resetColumnSelection();
+    }
+    state.selectedColumnIds = reconcileSelectedColumnIds(payload, state.selectedColumnIds);
 
+    await refreshSelectedAgentRuns(Boolean(options.refreshRuns));
     await refreshOpenRuns(Boolean(options.refreshRuns));
     render({ pinned, firstLoad });
 
@@ -105,13 +119,22 @@ async function refreshOpenRuns(force) {
   );
 }
 
+async function refreshSelectedAgentRuns(force) {
+  const runIds = selectedTaskRunIds(state.data, state.selectedColumnIds).filter((runId) => {
+    return force || !state.taskRunCache.get(runId)?.messages;
+  });
+  if (!runIds.length) return;
+  await Promise.all(runIds.map((runId) => ensureTaskRunLoaded(runId, { force }).catch(() => null)));
+}
+
 function render(options = {}) {
   if (!state.data) return;
 
   const preserveScroll = options.preserveScroll !== false;
   const pinned = preserveScroll ? options.pinned || capturePinnedScrollers() : new Map();
   const firstLoad = options.firstLoad || !preserveScroll;
-  const agents = visibleAgents(state.data, state.tempRunIds, state.taskRunCache);
+  const optionsForColumns = columnOptions(state.data);
+  const agents = visibleAgents(state.data, state.selectedColumnIds, state.tempRunIds, state.taskRunCache);
 
   if (!agents.some((agent) => agent.id === state.selectedAgentId)) {
     state.selectedAgentId = agents[0]?.id || "manager";
@@ -122,13 +145,33 @@ function render(options = {}) {
     activeRunId: state.activeRunId,
     openDetails: state.openDetails,
     search: state.search,
+    tempRunIds: state.tempRunIds,
     taskRunById: buildTaskRunMap(state.data, state.taskRunCache),
   };
 
-  renderControls(els, state, agents);
+  renderControls(els, state, agents, optionsForColumns);
   renderLayout(els, agents, resultMaps, state, context);
   renderRunDrawer(els, state, context);
   restorePinnedScrollers(pinned, firstLoad);
+}
+
+async function handleColumnPickerClick(event) {
+  const button = event.target.closest("[data-column-id]");
+  if (!button) return;
+
+  const columnId = button.dataset.columnId;
+  const next = new Set(state.selectedColumnIds || []);
+  if (next.has(columnId)) next.delete(columnId);
+  else next.add(columnId);
+
+  state.selectedColumnIds = next;
+  if (!next.has(state.selectedAgentId)) {
+    state.selectedAgentId = [...next][0] || "";
+  }
+
+  render();
+  await refreshSelectedAgentRuns(false);
+  render();
 }
 
 async function handleActionClick(event) {

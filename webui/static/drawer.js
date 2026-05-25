@@ -30,6 +30,7 @@ function renderDrawerShell(run, state) {
   const title = run?.name || "Run agent";
   const stats = run?.stats || {};
   const isColumnOpen = state.tempRunIds.includes(state.drawerRunId);
+  const columnAction = isColumnOpen ? "close-run-column" : "open-run-column";
   const body = run?.messages
     ? `<div class="drawer-message-list message-list scroll-region" data-scroll-key="drawer:${escapeAttr(state.drawerRunId)}"></div>`
     : `<div class="empty-state">Chargement du run...</div>`;
@@ -45,8 +46,8 @@ function renderDrawerShell(run, state) {
         <button class="icon-button" type="button" data-action="close-run-drawer" title="Fermer" aria-label="Fermer">&times;</button>
       </header>
       <div class="drawer-toolbar">
-        <button class="mini-button" type="button" data-action="open-run-column" data-run-id="${escapeAttr(state.drawerRunId)}" ${isColumnOpen ? "disabled" : ""}>
-          ${isColumnOpen ? "Colonne ouverte" : "Ouvrir en colonne"}
+        <button class="mini-button" type="button" data-action="${columnAction}" data-run-id="${escapeAttr(state.drawerRunId)}">
+          ${isColumnOpen ? "Retirer la colonne" : "Ouvrir en colonne"}
         </button>
         <span class="run-metrics">${escapeHtml((stats.messages || 0) + " msg · " + (stats.toolCalls || 0) + " outils")}</span>
       </div>
