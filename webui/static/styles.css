@@ -455,6 +455,10 @@ details.tool-call[open] summary {
   min-width: 1000px;
 }
 
+.timeline-row {
+  display: contents;
+}
+
 .time-header,
 .timeline-agent-header {
   position: sticky;

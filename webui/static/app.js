@@ -8,6 +8,7 @@ const state = {
   search: "",
   loading: false,
   pollTimer: null,
+  openDetails: new Map(),
 };
 
 const els = {
@@ -26,6 +27,8 @@ const els = {
 init();
 
 function init() {
+  els.app.addEventListener("toggle", handleDetailsToggle, true);
+
   els.viewButtons.forEach((button) => {
     button.addEventListener("click", () => {
       state.view = button.dataset.view;
@@ -111,8 +114,9 @@ async function loadState(options = {}) {
 function render(options = {}) {
   if (!state.data) return;
 
-  const pinned = options.pinned || capturePinnedScrollers();
-  const firstLoad = options.firstLoad || false;
+  const preserveScroll = options.preserveScroll !== false;
+  const pinned = preserveScroll ? options.pinned || capturePinnedScrollers() : new Map();
+  const firstLoad = options.firstLoad || !preserveScroll;
 
   renderControls();
   const agents = state.data.agents;
@@ -127,6 +131,13 @@ function render(options = {}) {
   }
 
   restorePinnedScrollers(pinned, firstLoad);
+}
+
+function handleDetailsToggle(event) {
+  const details = event.target;
+  if (!(details instanceof HTMLDetailsElement)) return;
+  const key = details.dataset.detailKey;
+  if (key) state.openDetails.set(key, details.open);
 }
 
 function renderControls() {
@@ -158,35 +169,40 @@ function renderControls() {
 }
 
 function renderColumns(agents, resultMaps) {
-  els.app.innerHTML = `
-    <div class="columns-board">
-      ${agents.map((agent) => renderLane(agent, resultMaps.get(agent.id))).join("")}
-    </div>
-  `;
+  ensureAppLayout("columns", `<div class="columns-board"></div>`);
+  const board = els.app.querySelector(".columns-board");
+  reconcileLanes(board, agents, resultMaps);
 }
 
 function renderSingle(agents, resultMaps) {
   const agent = agents.find((candidate) => candidate.id === state.selectedAgentId) || agents[0];
   if (!agent) {
     els.app.innerHTML = `<div class="empty-state">Aucun agent trouvé.</div>`;
+    els.app.dataset.layoutKey = "empty";
     return;
   }
-  els.app.innerHTML = `
+  ensureAppLayout(
+    `single:${agent.id}`,
+    `
     <section class="single-chat">
       ${renderLaneHeader(agent, "single-header")}
       <div class="message-list scroll-region" data-scroll-key="single:${escapeAttr(agent.id)}">
-        ${renderMessageList(agent, resultMaps.get(agent.id))}
       </div>
     </section>
-  `;
+  `,
+  );
+  const section = els.app.querySelector(".single-chat");
+  updateLaneHeader(section, agent, "single-header");
+  reconcileMessageList(section.querySelector(".message-list"), agent, resultMaps.get(agent.id), {
+    showEmpty: true,
+  });
 }
 
-function renderLane(agent, maps) {
+function renderLaneShell(agent) {
   return `
-    <section class="lane">
+    <section class="lane" data-lane-id="${escapeAttr(agent.id)}">
       ${renderLaneHeader(agent, "lane-header")}
       <div class="message-list scroll-region" data-scroll-key="lane:${escapeAttr(agent.id)}">
-        ${renderMessageList(agent, maps)}
       </div>
     </section>
   `;
@@ -209,55 +225,197 @@ function renderLaneHeader(agent, className) {
   `;
 }
 
-function renderMessageList(agent, maps) {
-  const messages = renderableMessages(agent, maps);
-  if (!messages.length) {
-    return `<div class="empty-state">Aucun message à afficher.</div>`;
-  }
-  return messages.map((message) => renderMessage(message, agent, maps)).join("");
+function renderSyncedColumns(agents, resultMaps) {
+  ensureAppLayout(
+    "timeline",
+    `
+    <div class="timeline-scroll scroll-region" data-scroll-key="timeline">
+      <div class="timeline-grid"></div>
+    </div>
+  `,
+  );
+
+  const grid = els.app.querySelector(".timeline-grid");
+  reconcileTimelineHeaders(grid, agents);
+  const rows = buildTimelineRows(agents, resultMaps);
+  reconcileTimelineRows(grid, rows, agents, resultMaps);
 }
 
-function renderSyncedColumns(agents, resultMaps) {
-  const rows = buildTimelineRows(agents, resultMaps);
-  const header = `
-    <div class="time-header"></div>
-    ${agents
-      .map(
-        (agent) => `
-          <div class="timeline-agent-header">
-            <div class="lane-title">
-              <h2>${escapeHtml(agent.shortName || agent.name)}</h2>
-              <p>${escapeHtml(agent.threadId)}</p>
-            </div>
-          </div>
-        `,
-      )
-      .join("")}
-  `;
+function ensureAppLayout(layoutKey, markup) {
+  if (els.app.dataset.layoutKey === layoutKey) return;
+  els.app.innerHTML = markup;
+  els.app.dataset.layoutKey = layoutKey;
+}
 
-  const body = rows
-    .map((row) => {
-      const timeLabel = row.epochMs ? formatTimelineTime(row.epochMs) : "sans\ndate";
-      const cells = agents
-        .map((agent) => {
-          const maps = resultMaps.get(agent.id);
-          const messages = row.byAgent.get(agent.id) || [];
-          return `
-            <div class="timeline-cell">
-              ${messages.map((message) => renderMessage(message, agent, maps)).join("")}
-            </div>
-          `;
-        })
-        .join("");
-      return `<div class="time-cell">${escapeHtml(timeLabel)}</div>${cells}`;
-    })
-    .join("");
+function reconcileLanes(board, agents, resultMaps) {
+  const existing = new Map(
+    directChildren(board)
+      .filter((child) => child.classList.contains("lane") && child.dataset.laneId)
+      .map((child) => [child.dataset.laneId, child]),
+  );
+  const desiredIds = new Set(agents.map((agent) => agent.id));
 
-  els.app.innerHTML = `
-    <div class="timeline-scroll scroll-region" data-scroll-key="timeline">
-      <div class="timeline-grid">${header}${body}</div>
+  existing.forEach((lane, id) => {
+    if (!desiredIds.has(id)) lane.remove();
+  });
+
+  agents.forEach((agent, index) => {
+    let lane = existing.get(agent.id);
+    if (!lane) lane = htmlToElement(renderLaneShell(agent));
+
+    updateLaneHeader(lane, agent, "lane-header");
+    const list = lane.querySelector(".message-list");
+    list.dataset.scrollKey = `lane:${agent.id}`;
+    reconcileMessageList(list, agent, resultMaps.get(agent.id), { showEmpty: true });
+    insertChildAt(board, lane, index);
+  });
+}
+
+function updateLaneHeader(container, agent, className) {
+  const current = container.querySelector(`.${className}`);
+  const next = htmlToElement(renderLaneHeader(agent, className));
+  if (current) current.replaceWith(next);
+  else container.prepend(next);
+}
+
+function reconcileMessageList(container, agent, maps, options = {}) {
+  const messages = "messages" in options ? options.messages : renderableMessages(agent, maps);
+  const showEmpty = options.showEmpty !== false;
+  const existing = new Map(
+    directChildren(container)
+      .filter((child) => child.classList.contains("message") && child.dataset.messageKey)
+      .map((child) => [child.dataset.messageKey, child]),
+  );
+  const desiredKeys = new Set(messages.map((message) => messageKey(agent, message)));
+
+  directChildren(container)
+    .filter((child) => child.classList.contains("empty-state"))
+    .forEach((child) => child.remove());
+
+  existing.forEach((element, key) => {
+    if (!desiredKeys.has(key)) element.remove();
+  });
+
+  if (!messages.length) {
+    if (showEmpty) {
+      container.appendChild(htmlToElement(`<div class="empty-state">Aucun message à afficher.</div>`));
+    }
+    return;
+  }
+
+  messages.forEach((message) => {
+    const key = messageKey(agent, message);
+    const signature = messageSignature(message, maps);
+    let element = existing.get(key);
+
+    if (!element) {
+      element = createMessageElement(message, agent, maps);
+    } else if (element.dataset.renderHash !== signature) {
+      const openDetails = captureDetailsState(element);
+      rememberDetailsState(openDetails);
+      const replacement = createMessageElement(message, agent, maps, openDetails);
+      element.replaceWith(replacement);
+      element = replacement;
+    }
+
+    container.appendChild(element);
+  });
+}
+
+function reconcileTimelineHeaders(grid, agents) {
+  const headerKey = agents.map((agent) => agent.id).join("|");
+  if (grid.dataset.headerKey !== headerKey) {
+    directChildren(grid)
+      .filter((child) => !child.classList.contains("timeline-row"))
+      .forEach((child) => child.remove());
+    grid.prepend(
+      htmlToElement(`<div class="time-header" data-timeline-header="time"></div>`),
+      ...agents.map((agent) => htmlToElement(renderTimelineAgentHeader(agent))),
+    );
+    grid.dataset.headerKey = headerKey;
+    return;
+  }
+
+  agents.forEach((agent) => {
+    const header = directChildren(grid).find((child) => child.dataset.timelineAgentId === agent.id);
+    if (header) header.replaceWith(htmlToElement(renderTimelineAgentHeader(agent)));
+  });
+}
+
+function renderTimelineAgentHeader(agent) {
+  return `
+    <div class="timeline-agent-header" data-timeline-agent-id="${escapeAttr(agent.id)}">
+      <div class="lane-title">
+        <h2>${escapeHtml(agent.shortName || agent.name)}</h2>
+        <p>${escapeHtml(agent.threadId)}</p>
+      </div>
     </div>
   `;
+}
+
+function reconcileTimelineRows(grid, rows, agents, resultMaps) {
+  const existing = new Map(
+    directChildren(grid)
+      .filter((child) => child.classList.contains("timeline-row") && child.dataset.rowKey)
+      .map((child) => [child.dataset.rowKey, child]),
+  );
+  const desiredKeys = new Set(rows.map((row) => row.key));
+
+  existing.forEach((rowElement, key) => {
+    if (!desiredKeys.has(key)) rowElement.remove();
+  });
+
+  rows.forEach((row, index) => {
+    let rowElement = existing.get(row.key);
+    if (!rowElement) rowElement = createTimelineRow(row);
+
+    updateTimelineRow(rowElement, row, agents, resultMaps);
+    insertChildAt(grid, rowElement, agents.length + 1 + index);
+  });
+}
+
+function createTimelineRow(row) {
+  const element = document.createElement("div");
+  element.className = "timeline-row";
+  element.dataset.rowKey = row.key;
+
+  const timeCell = document.createElement("div");
+  timeCell.className = "time-cell";
+  element.appendChild(timeCell);
+  return element;
+}
+
+function updateTimelineRow(rowElement, row, agents, resultMaps) {
+  const timeLabel = row.epochMs ? formatTimelineTime(row.epochMs) : "sans\ndate";
+  const timeCell = rowElement.querySelector(".time-cell");
+  if (timeCell.textContent !== timeLabel) timeCell.textContent = timeLabel;
+
+  const existingCells = new Map(
+    directChildren(rowElement)
+      .filter((child) => child.classList.contains("timeline-cell") && child.dataset.agentId)
+      .map((child) => [child.dataset.agentId, child]),
+  );
+  const desiredIds = new Set(agents.map((agent) => agent.id));
+
+  existingCells.forEach((cell, id) => {
+    if (!desiredIds.has(id)) cell.remove();
+  });
+
+  agents.forEach((agent, index) => {
+    let cell = existingCells.get(agent.id);
+    if (!cell) {
+      cell = document.createElement("div");
+      cell.className = "timeline-cell";
+      cell.dataset.agentId = agent.id;
+    }
+
+    const maps = resultMaps.get(agent.id);
+    reconcileMessageList(cell, agent, maps, {
+      messages: row.byAgent.get(agent.id) || [],
+      showEmpty: false,
+    });
+    insertChildAt(rowElement, cell, index + 1);
+  });
 }
 
 function buildTimelineRows(agents, resultMaps) {
@@ -323,7 +481,43 @@ function renderableMessages(agent, maps) {
   });
 }
 
+function createMessageElement(message, agent, maps, openDetails = new Map()) {
+  const element = htmlToElement(renderMessage(message, agent, maps));
+  restoreDetailsState(element, openDetails);
+  return element;
+}
+
+function messageKey(agent, message) {
+  const scope = `${agent.id}:${agent.threadId || ""}`;
+  if (message.id) return `${scope}:${message.id}`;
+  return `${scope}:fallback:${hashString(
+    JSON.stringify([
+      message.timestamp?.epochMs || "",
+      message.type || "",
+      message.name || "",
+      message.rawType || "",
+      message.contentText || "",
+      (message.toolCalls || []).map((call) => call.id || call.name || ""),
+    ]),
+  )}`;
+}
+
+function messageSignature(message, maps) {
+  const relatedResults = (message.toolCalls || []).map((call) => {
+    const result = maps?.byToolCallId.get(call.id);
+    return {
+      callId: call.id,
+      resultId: result?.id,
+      resultText: result?.contentText,
+      resultTimestamp: result?.timestamp?.epochMs,
+    };
+  });
+  return hashString(JSON.stringify({ message, relatedResults }));
+}
+
 function renderMessage(message, agent, maps) {
+  const key = messageKey(agent, message);
+  const signature = messageSignature(message, maps);
   const speaker = speakerLabel(message, agent);
   const time = message.timestamp?.epochMs ? formatTime(message.timestamp.epochMs) : "";
   const accent = agent.accent || agent.id;
@@ -336,16 +530,16 @@ function renderMessage(message, agent, maps) {
     .filter(Boolean)
     .join(" ");
 
-  const blocks = message.blocks.map((block) => renderBlock(block)).join("");
+  const blocks = message.blocks.map((block, index) => renderBlock(block, message, agent, index)).join("");
   const calls = message.toolCalls
-    .map((call) => renderToolCall(call, maps?.byToolCallId.get(call.id)))
+    .map((call, index) => renderToolCall(call, maps?.byToolCallId.get(call.id), message, agent, index))
     .join("");
   const fallback = !blocks && !calls && message.contentText
     ? `<div class="text-block">${escapeHtml(message.contentText)}</div>`
     : "";
 
   return `
-    <article class="${messageClass}" data-message-id="${escapeAttr(message.id)}" data-ts="${message.timestamp?.epochMs || ""}">
+    <article class="${messageClass}" data-message-id="${escapeAttr(message.id)}" data-message-key="${escapeAttr(key)}" data-render-hash="${escapeAttr(signature)}" data-ts="${message.timestamp?.epochMs || ""}">
       <div class="message-header">
         <div class="speaker">${escapeHtml(speaker)}</div>
         <time class="timestamp">${escapeHtml(time)}</time>
@@ -357,12 +551,36 @@ function renderMessage(message, agent, maps) {
   `;
 }
 
-function renderBlock(block) {
+function captureDetailsState(root) {
+  const detailsState = new Map();
+  root.querySelectorAll("details[data-detail-key]").forEach((details) => {
+    detailsState.set(details.dataset.detailKey, details.open);
+  });
+  return detailsState;
+}
+
+function rememberDetailsState(detailsState) {
+  detailsState.forEach((open, key) => state.openDetails.set(key, open));
+}
+
+function restoreDetailsState(root, overrides = new Map()) {
+  root.querySelectorAll("details[data-detail-key]").forEach((details) => {
+    const key = details.dataset.detailKey;
+    if (overrides.has(key)) {
+      details.open = overrides.get(key);
+    } else if (state.openDetails.has(key)) {
+      details.open = state.openDetails.get(key);
+    }
+  });
+}
+
+function renderBlock(block, message, agent, index) {
   if (block.type === "reasoning") {
     const text = block.summary || block.text;
     if (!text) return "";
+    const detailKey = `${messageKey(agent, message)}:reasoning:${index}`;
     return `
-      <details class="thinking">
+      <details class="thinking" data-detail-key="${escapeAttr(detailKey)}">
         <summary><span>Réflexion</span><span class="badge">collapsed</span></summary>
         <div class="thinking-body">
           <div class="text-block">${escapeHtml(text)}</div>
@@ -378,11 +596,13 @@ function renderBlock(block) {
   `;
 }
 
-function renderToolCall(call, result) {
+function renderToolCall(call, result, message, agent, index) {
+  const detailKey = `${messageKey(agent, message)}:tool:${call.id || `${index}:${call.name}`}`;
+
   if (call.kind === "resident-agent") {
     const target = call.targetAgent || call.name;
     return `
-      <details class="tool-call resident-agent">
+      <details class="tool-call resident-agent" data-detail-key="${escapeAttr(detailKey)}">
         <summary>
           <span class="call-heading">
             <span class="call-name">Consultation ${escapeHtml(displayAgentName(target))}</span>
@@ -401,7 +621,7 @@ function renderToolCall(call, result) {
     const description = call.args?.description || prettyJson(call.args);
     const resultText = result?.contentText || "Résultat pas encore disponible.";
     return `
-      <details class="tool-call disposable-agent">
+      <details class="tool-call disposable-agent" data-detail-key="${escapeAttr(detailKey)}">
         <summary>
           <span class="call-heading">
             <span class="call-name">Appel ${escapeHtml(target)}</span>
@@ -424,7 +644,7 @@ function renderToolCall(call, result) {
 
   const resultText = result?.contentText || "Résultat pas encore disponible.";
   return `
-    <details class="tool-call generic-tool">
+    <details class="tool-call generic-tool" data-detail-key="${escapeAttr(detailKey)}">
       <summary>
         <span class="call-heading">
           <span class="call-name">${escapeHtml(call.name)}</span>
@@ -484,12 +704,39 @@ function prettyJson(value) {
   }
 }
 
+function directChildren(element) {
+  return Array.from(element?.children || []);
+}
+
+function insertChildAt(parent, child, index) {
+  const current = parent.children[index] || null;
+  if (current !== child) parent.insertBefore(child, current);
+}
+
+function htmlToElement(markup) {
+  const template = document.createElement("template");
+  template.innerHTML = markup.trim();
+  return template.content.firstElementChild;
+}
+
+function hashString(value) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
 function capturePinnedScrollers() {
   const pinned = new Map();
   document.querySelectorAll(".scroll-region").forEach((element) => {
     const key = element.dataset.scrollKey;
     if (!key) return;
-    pinned.set(key, isNearBottom(element));
+    pinned.set(key, {
+      nearBottom: isNearBottom(element),
+      scrollTop: element.scrollTop,
+    });
   });
   return pinned;
 }
@@ -498,8 +745,13 @@ function restorePinnedScrollers(pinned, firstLoad = false) {
   const apply = () => {
     document.querySelectorAll(".scroll-region").forEach((element) => {
       const key = element.dataset.scrollKey;
-      const shouldPin = firstLoad || pinned.get(key) !== false;
-      if (shouldPin) scrollRegionToBottom(element);
+      const previous = pinned.get(key);
+      const shouldPin = firstLoad || !previous || previous.nearBottom;
+      if (shouldPin) {
+        scrollRegionToBottom(element);
+      } else {
+        restoreScrollRegion(element, previous);
+      }
     });
   };
   requestAnimationFrame(() => {
@@ -507,6 +759,11 @@ function restorePinnedScrollers(pinned, firstLoad = false) {
     setTimeout(apply, 50);
     setTimeout(apply, 250);
   });
+}
+
+function restoreScrollRegion(element, previous) {
+  const maxScrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
+  element.scrollTop = Math.min(previous.scrollTop, maxScrollTop);
 }
 
 function scrollRegionToBottom(element) {
