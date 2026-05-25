@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Historique agents</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="title-block">
+        <h1>Historique agents</h1>
+        <p id="dbPath">Chargement...</p>
+      </div>
+      <div class="toolbar" aria-label="Contrôles">
+        <label class="field">
+          <span>Thread</span>
+          <select id="threadSelect"></select>
+        </label>
+        <div class="segmented" role="group" aria-label="Vue">
+          <button type="button" data-view="single">Un agent</button>
+          <button type="button" data-view="columns">3 colonnes</button>
+        </div>
+        <label class="field agent-field">
+          <span>Agent</span>
+          <select id="agentSelect"></select>
+        </label>
+        <label class="switch">
+          <input id="syncToggle" type="checkbox" />
+          <span>Synchroniser le scroll</span>
+        </label>
+        <label class="switch">
+          <input id="liveToggle" type="checkbox" checked />
+          <span>Live</span>
+        </label>
+        <label class="field search-field">
+          <span>Filtre</span>
+          <input id="searchInput" type="search" placeholder="message, outil, agent" />
+        </label>
+        <button id="refreshButton" class="refresh-button" type="button">Actualiser</button>
+      </div>
+      <div id="status" class="status" role="status"></div>
+    </header>
+
+    <main id="app" class="app-shell" aria-live="polite"></main>
+
+    <script src="/static/app.js" type="module"></script>
+  </body>
+</html>

@@ -126,9 +126,17 @@ def _resolve_model_value(
     if reasoning_effort is None or not isinstance(model, str):
         return model
 
-    model_kwargs: dict[str, Any] = {"reasoning_effort": reasoning_effort}
     if _is_openai_model(model):
-        model_kwargs["use_responses_api"] = True
+        reasoning: dict[str, str] = {"effort": reasoning_effort}
+        if reasoning_effort != "none":
+            reasoning["summary"] = "auto"
+        model_kwargs: dict[str, Any] = {
+            "reasoning": reasoning,
+            "use_responses_api": True,
+            "output_version": "responses/v1",
+        }
+    else:
+        model_kwargs = {"reasoning_effort": reasoning_effort}
 
     return init_chat_model(model=model, **model_kwargs)
 
