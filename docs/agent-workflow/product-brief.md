@@ -28,7 +28,9 @@ The observed V0 code already exists largely as a Python package and CLI under `c
 - Do not claim the readiness gate is approved until a human explicitly approves it.
 - Do not treat the existing V0 code as production-ready without tests, CI, and gate validation.
 - Do not allow broad implementation-mode write access before scoped task ownership is defined.
+- Do not implement a web UI in V0; web UI is the next product step after local-first V0.
 - Do not implement multi-feature-stream coordination in the MVP.
+- Do not distribute V0 externally; V0 is for local/repository use until tests, CI, runtime support, and API boundaries are validated.
 - Do not introduce a persistent StoreBackend beyond the documented SQLite/Postgres/memory checkpointing options for V0.
 - Do not expand scope beyond documentation and planning while the project remains in shaping mode.
 
@@ -36,10 +38,11 @@ The observed V0 code already exists largely as a Python package and CLI under `c
 
 V0 MVP is a single-feature-stream development-agent workflow with:
 
-- Engineering-manager Deep Agent and CLI entrypoint.
+- Engineering-manager Deep Agent and CLI entrypoint, with CLI as the only V0 user-facing entrypoint.
+- Minimal first-party Python API consisting of `AgentTeamConfig` and `create_development_team_agent` for CLI and future first-party entrypoints.
 - Resident product-analyst and software-architect tools restricted to manager use.
 - Checkpointing options using SQLite, Postgres, or memory backends.
-- Scout subagent for codebase reconnaissance.
+- Scout subagent for safe repo-local codebase reconnaissance; unrestricted shell execution is not part of the V0 product contract.
 - Disposable implementation-mode specialist agents: developer, code-reviewer, QA, devops, security-reviewer, and technical-writer.
 - Tavily-backed `web_search` and `fetch_url` tools.
 - Artifact templates and living workflow docs under `docs/agent-workflow/`.
@@ -54,7 +57,7 @@ V0 MVP is a single-feature-stream development-agent workflow with:
 
 ## Open Questions / Deferred Decisions
 
-- Whether Python `>=3.14` is acceptable for target adopters, given adoption risk.
+- Which Python runtime range will be ratified by the DEC-0006 compatibility review before release readiness.
 - Which automated tests and CI checks are required before V0 can be considered delivery-ready or production-ready.
-- How implementation-mode filesystem write scopes will be constrained and enforced.
-- Whether the readiness gate remains documentation-only for V0 or receives coded enforcement before approval.
+- How the approved implementation-mode task-scoped write allowlists will be implemented and verified.
+- How the approved coded readiness guard will be implemented and bootstrapped before broader implementation work.

@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from coding_agents.paths import validate_artifacts_dir
+from coding_agents.readiness import DEFAULT_READINESS_GATE_YAML
+
 
 ARTIFACT_TEMPLATES: dict[str, str] = {
     "product-brief.md": """# Product Brief
@@ -156,7 +159,26 @@ Date:
 
 Notes:
 """,
+    "readiness-gate.yaml": DEFAULT_READINESS_GATE_YAML,
 }
+
+
+def validate_agent_workflow_files(
+    root_dir: str | Path = ".",
+    artifacts_dir: str | Path = "docs/agent-workflow",
+) -> None:
+    """Fail closed when an existing workflow artifact file is a symlink."""
+
+    root = Path(root_dir).resolve()
+    safe_artifacts_dir = validate_artifacts_dir(artifacts_dir, root)
+    target_dir = root / safe_artifacts_dir
+    if not target_dir.exists():
+        return
+
+    for filename in ARTIFACT_TEMPLATES:
+        path = target_dir / filename
+        if path.is_symlink():
+            raise ValueError(f"Workflow artifact file must not be a symlink: {path}")
 
 
 def ensure_agent_workflow_files(
@@ -169,12 +191,17 @@ def ensure_agent_workflow_files(
     """
 
     root = Path(root_dir).resolve()
-    target_dir = root / artifacts_dir
+    safe_artifacts_dir = validate_artifacts_dir(artifacts_dir, root)
+    target_dir = root / safe_artifacts_dir
     target_dir.mkdir(parents=True, exist_ok=True)
+    validate_artifacts_dir(safe_artifacts_dir, root)
+    validate_agent_workflow_files(root, safe_artifacts_dir)
 
     created: list[Path] = []
     for filename, content in ARTIFACT_TEMPLATES.items():
         path = target_dir / filename
+        if path.is_symlink():
+            raise ValueError(f"Workflow artifact file must not be a symlink: {path}")
         if path.exists():
             continue
         path.write_text(content, encoding="utf-8")

@@ -3,15 +3,11 @@
 from __future__ import annotations
 
 import fnmatch
-import os
-import shlex
-import subprocess
 from pathlib import Path
 from typing import Any, Sequence
 
 from langchain.agents import create_agent
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool, StructuredTool
 
 
@@ -25,17 +21,15 @@ Thoroughness (infer from task, default medium):
 - Thorough: Trace all dependencies, check tests/types
 
 Strategy:
-1. grep/find to locate relevant code
+1. glob/grep to locate relevant code
 2. Read key sections (not entire files)
 3. Identify types, interfaces, key functions
 4. Note dependencies between files
 
 Tool guidance:
-- Prefer glob, grep, ls, and read_file over execute.
-- execute is read-only reconnaissance only. Do not use shell operators,
-  pipelines, redirection, or destructive commands.
-- If execute returns an error, switch to glob/grep/read_file instead of
-  retrying the same command.
+- Use glob, grep, ls, and read_file for local repository reconnaissance.
+- Use web_search and fetch_url when external context is needed.
+- Do not attempt to run shell commands; scout has no command execution tool.
 
 Output format:
 
@@ -68,7 +62,6 @@ Which file to look at first and why.
 """
 
 _MAX_READ_CHARS = 20_000
-_MAX_EXECUTE_OUTPUT = 20_000
 _EXCLUDED_PARTS = {
     ".coding-agents",
     ".git",
@@ -80,30 +73,7 @@ _EXCLUDED_PARTS = {
     "node_modules",
 }
 _SENSITIVE_SUFFIXES = {".key", ".pem", ".p12", ".pfx"}
-_ALLOWED_EXECUTABLES = {
-    "awk",
-    "cat",
-    "find",
-    "git",
-    "head",
-    "ls",
-    "pwd",
-    "rg",
-    "sed",
-    "tail",
-    "wc",
-}
-_ALLOWED_GIT_SUBCOMMANDS = {
-    "branch",
-    "diff",
-    "grep",
-    "log",
-    "ls-files",
-    "rev-parse",
-    "show",
-    "status",
-}
-_SHELL_OPERATORS = {"|", ">", ">>", "<", "<<", ";", "&&", "||"}
+_SENSITIVE_FILENAMES = {"id_rsa", "id_ed25519"}
 
 
 def create_scout_subagent(
@@ -144,7 +114,7 @@ def scout_tools(root_dir: Path) -> list[BaseTool]:
 
             items: list[dict[str, Any]] = []
             for child in sorted(target.iterdir(), key=lambda item: item.name):
-                if _is_excluded(child, root) or _is_sensitive(child):
+                if _is_excluded(child, root) or _is_sensitive(child.relative_to(root)):
                     continue
                 items.append(
                     {
@@ -161,7 +131,7 @@ def scout_tools(root_dir: Path) -> list[BaseTool]:
 
         try:
             target = _resolve_path(root, path)
-            if _is_sensitive(target):
+            if _is_sensitive(target.relative_to(root)):
                 return _tool_error(f"Refusing to read sensitive file: {_relative_path(root, target)}")
             if not target.is_file():
                 return _tool_error(f"Path is not a file: {path}")
@@ -187,7 +157,7 @@ def scout_tools(root_dir: Path) -> list[BaseTool]:
             clean_pattern = _clean_relative_pattern(pattern)
             matches: list[str] = []
             for candidate in root.glob(clean_pattern):
-                if _is_excluded(candidate, root) or _is_sensitive(candidate):
+                if _is_excluded(candidate, root) or _is_sensitive(candidate.relative_to(root)):
                     continue
                 matches.append(_relative_path(root, candidate))
                 if len(matches) >= max(1, min(max_results, 500)):
@@ -202,77 +172,78 @@ def scout_tools(root_dir: Path) -> list[BaseTool]:
         file_glob: str | None = None,
         max_matches: int = 50,
     ) -> list[dict[str, Any]]:
-        """Search project files for a text or regex pattern."""
+        """Search project files for a literal text pattern."""
 
         try:
             target = _resolve_path(root, path)
             if not target.exists():
                 return [_tool_error(f"Path not found: {path}")]
-
-            rg_command = [
-                "rg",
-                "--line-number",
-                "--no-heading",
-                "--color",
-                "never",
-                "--glob",
-                "!.env*",
-                "--glob",
-                "!*.pem",
-                "--glob",
-                "!*.key",
-                pattern,
-                str(target.relative_to(root)),
-            ]
-            if file_glob:
-                rg_command[7:7] = ["--glob", file_glob]
-
-            result = _run_command(root, rg_command, timeout=20)
-            if result["exit_code"] in {0, 1} and result["stdout"]:
-                return _parse_rg_output(root, result["stdout"], max_matches=max_matches)
+            if _is_sensitive(target.relative_to(root)):
+                return [_tool_error(f"Refusing to search sensitive path: {_relative_path(root, target)}")]
 
             return _python_grep(root, target, pattern, file_glob, max_matches)
         except Exception as exc:  # pragma: no cover - defensive tool boundary
             return [_tool_error(str(exc))]
-
-    def execute(command: str, timeout: int = 30) -> dict[str, Any]:
-        """Run a read-only reconnaissance shell command in the project root."""
-
-        try:
-            args = shlex.split(command)
-            if not args:
-                return _tool_error("command must not be empty")
-            _validate_read_only_command(args)
-            return _run_command(root, args, timeout=max(1, min(timeout, 30)))
-        except Exception as exc:  # pragma: no cover - defensive tool boundary
-            return _tool_error(str(exc), command=command)
 
     return [
         StructuredTool.from_function(ls, name="ls"),
         StructuredTool.from_function(read_file, name="read_file"),
         StructuredTool.from_function(glob, name="glob"),
         StructuredTool.from_function(grep, name="grep"),
-        StructuredTool.from_function(execute, name="execute"),
     ]
 
 
 def _resolve_path(root: Path, path: str) -> Path:
     if not path:
         path = "."
-    raw = Path(path)
-    if raw.is_absolute():
-        resolved = raw.resolve()
-        try:
-            resolved.relative_to(root)
-        except ValueError:
-            resolved = (root / path.lstrip("/")).resolve()
-    else:
-        resolved = (root / path.lstrip("/")).resolve()
+
+    relative = _relative_input_path(root, path)
+    if _is_sensitive(relative):
+        raise PermissionError(f"Refusing to access sensitive path: {relative.as_posix() or '.'}")
+
+    target = root / relative
+    _reject_symlink_components(root, relative)
+
+    resolved = target.resolve(strict=False)
     try:
-        resolved.relative_to(root)
+        resolved_relative = resolved.relative_to(root)
     except ValueError as exc:
         raise PermissionError(f"Path is outside project root: {path}") from exc
+    if _is_sensitive(resolved_relative):
+        raise PermissionError(f"Refusing to access sensitive path: {resolved_relative.as_posix() or '.'}")
     return resolved
+
+
+def _relative_input_path(root: Path, path: str) -> Path:
+    raw = Path(path)
+    if raw.is_absolute():
+        try:
+            relative = raw.relative_to(root)
+        except ValueError:
+            relative = Path(path.lstrip("/"))
+    else:
+        relative = Path(path.lstrip("/"))
+
+    if not relative.parts:
+        return Path(".")
+    if any(part in {"..", "~"} for part in relative.parts):
+        raise PermissionError(f"Path traversal is not allowed: {path}")
+    return relative
+
+
+def _reject_symlink_components(root: Path, relative: Path) -> None:
+    current = root
+    for part in relative.parts:
+        if part in {"", "."}:
+            continue
+        current = current / part
+        try:
+            if current.is_symlink():
+                raise PermissionError(f"Refusing to access symlink path: {current.relative_to(root).as_posix()}")
+            if not current.exists():
+                break
+        except OSError as exc:
+            raise PermissionError(f"Refusing to access unsafe path: {current}") from exc
 
 
 def _relative_path(root: Path, path: Path) -> str:
@@ -293,95 +264,44 @@ def _is_excluded(path: Path, root: Path) -> bool:
         return True
     if any(part in _EXCLUDED_PARTS for part in relative.parts):
         return True
+    if _has_symlink_component(path, root):
+        return True
     try:
-        resolved = path.resolve()
+        resolved = path.resolve(strict=False)
         resolved.relative_to(root)
     except (OSError, ValueError):
         return True
     return False
 
 
-def _is_sensitive(path: Path) -> bool:
-    return path.name.startswith(".env") or path.suffix in _SENSITIVE_SUFFIXES
-
-
-def _run_command(root: Path, args: list[str], *, timeout: int) -> dict[str, Any]:
-    env = {
-        "HOME": os.environ.get("HOME", ""),
-        "PATH": os.environ.get("PATH", ""),
-    }
+def _has_symlink_component(path: Path, root: Path) -> bool:
     try:
-        completed = subprocess.run(
-            args,
-            cwd=root,
-            env=env,
-            text=True,
-            capture_output=True,
-            timeout=timeout,
-            check=False,
-        )
-    except FileNotFoundError as exc:
-        raise RuntimeError(f"Command not found: {args[0]}") from exc
-    return {
-        "command": shlex.join(args),
-        "exit_code": completed.returncode,
-        "stdout": _truncate(completed.stdout, _MAX_EXECUTE_OUTPUT),
-        "stderr": _truncate(completed.stderr, _MAX_EXECUTE_OUTPUT),
-    }
-
-
-def _validate_read_only_command(args: list[str]) -> None:
-    if any(token in _SHELL_OPERATORS for token in args):
-        raise PermissionError("Shell operators and redirection are not allowed in scout execute.")
-
-    executable = Path(args[0]).name
-    if executable not in _ALLOWED_EXECUTABLES:
-        raise PermissionError(f"Scout execute does not allow command: {executable}")
-
-    if executable == "git":
-        subcommand = _first_non_option(args[1:])
-        if subcommand not in _ALLOWED_GIT_SUBCOMMANDS:
-            raise PermissionError(f"Scout execute does not allow git subcommand: {subcommand}")
-
-    if executable == "sed" and any(arg == "-i" or arg.startswith("-i") for arg in args[1:]):
-        raise PermissionError("Scout execute does not allow in-place sed edits.")
-
-    for arg in args[1:]:
-        if arg.startswith("/") or ".." in Path(arg).parts:
-            raise PermissionError("Scout execute arguments must stay inside the project root.")
-
-
-def _first_non_option(args: list[str]) -> str | None:
-    for arg in args:
-        if not arg.startswith("-"):
-            return arg
-    return None
-
-
-def _parse_rg_output(root: Path, output: str, *, max_matches: int) -> list[dict[str, Any]]:
-    matches: list[dict[str, Any]] = []
-    for line in output.splitlines():
-        if len(matches) >= max_matches:
-            break
-        path, line_number, text = _split_rg_line(line)
-        if path is None or line_number is None:
-            continue
-        target = _resolve_path(root, path)
-        if _is_excluded(target, root) or _is_sensitive(target):
-            continue
-        matches.append({"path": path, "line": line_number, "text": text})
-    return matches
-
-
-def _split_rg_line(line: str) -> tuple[str | None, int | None, str]:
-    parts = line.split(":", 2)
-    if len(parts) != 3:
-        return None, None, line
-    path, line_number, text = parts
-    try:
-        return path, int(line_number), text
+        relative = path.relative_to(root)
     except ValueError:
-        return None, None, line
+        return True
+
+    current = root
+    for part in relative.parts:
+        if part in {"", "."}:
+            continue
+        current = current / part
+        try:
+            if current.is_symlink():
+                return True
+            if not current.exists():
+                break
+        except OSError:
+            return True
+    return False
+
+
+def _is_sensitive(path: Path) -> bool:
+    for part in path.parts:
+        name = part.casefold()
+        suffix = Path(part).suffix.casefold()
+        if name.startswith(".env") or name in _SENSITIVE_FILENAMES or suffix in _SENSITIVE_SUFFIXES:
+            return True
+    return False
 
 
 def _python_grep(
@@ -391,20 +311,30 @@ def _python_grep(
     file_glob: str | None,
     max_matches: int,
 ) -> list[dict[str, Any]]:
+    limit = max(0, min(max_matches, 500))
+    if limit == 0:
+        return []
+
     matches: list[dict[str, Any]] = []
     candidates = [target] if target.is_file() else target.rglob("*")
     for candidate in candidates:
-        if len(matches) >= max_matches:
+        if len(matches) >= limit:
             break
-        if not candidate.is_file() or _is_excluded(candidate, root) or _is_sensitive(candidate):
+        if _is_excluded(candidate, root) or not candidate.is_file():
             continue
         relative = _relative_path(root, candidate)
+        if _is_sensitive(Path(relative)):
+            continue
         if file_glob and not fnmatch.fnmatch(relative, file_glob):
             continue
-        for line_number, line in enumerate(candidate.read_text(encoding="utf-8", errors="replace").splitlines(), start=1):
+        try:
+            lines = candidate.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        for line_number, line in enumerate(lines, start=1):
             if pattern in line:
                 matches.append({"path": relative, "line": line_number, "text": line})
-                if len(matches) >= max_matches:
+                if len(matches) >= limit:
                     break
     return matches
 

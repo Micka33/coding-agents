@@ -7,17 +7,19 @@ from pathlib import Path
 from typing import Any
 
 from deepagents import create_deep_agent
-from deepagents.backends import FilesystemBackend
 from langchain.chat_models import init_chat_model
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from coding_agents.artifacts import ensure_agent_workflow_files
+from coding_agents.artifacts import ensure_agent_workflow_files, validate_agent_workflow_files
 from coding_agents.checkpoints import CheckpointerHandle, create_checkpointer_handle
 from coding_agents.config import AgentTeamConfig
 from coding_agents.env import load_dotenv_file
+from coding_agents.harness import disable_default_general_purpose_subagent
 from coding_agents.permissions import filesystem_permissions
 from coding_agents.prompts import engineering_manager_prompt, implementation_subagents
+from coding_agents.readiness import assert_readiness_approved
 from coding_agents.resident_agents import create_resident_agent_team
+from coding_agents.safe_filesystem import SafeFilesystemBackend
 from coding_agents.scout import create_scout_subagent
 from coding_agents.tools import default_tools
 
@@ -54,12 +56,21 @@ def create_development_team_agent(config: AgentTeamConfig | None = None) -> Deve
 
     config = config or AgentTeamConfig()
     root_dir = config.resolved_root_dir()
+    artifacts_dir = config.resolved_artifacts_dir()
     load_dotenv_file(root_dir / ".env")
 
     if config.initialize_artifacts:
-        ensure_agent_workflow_files(root_dir, config.artifacts_dir)
+        ensure_agent_workflow_files(root_dir, artifacts_dir)
+    else:
+        validate_agent_workflow_files(root_dir, artifacts_dir)
 
+    implementation_enabled = config.mode == "implementation"
+    if implementation_enabled:
+        assert_readiness_approved(root_dir, artifacts_dir)
+
+    disable_default_general_purpose_subagent(config.resolved_model())
     model = _resolve_model(config)
+    disable_default_general_purpose_subagent(model)
     scout_model = _resolve_scout_model(config)
     memory = _existing_memory_files(root_dir, config.memory)
     shared_tools = default_tools()
@@ -67,7 +78,7 @@ def create_development_team_agent(config: AgentTeamConfig | None = None) -> Deve
     resident_team = create_resident_agent_team(
         model=model,
         root_dir=root_dir,
-        artifacts_dir=config.artifacts_dir,
+        artifacts_dir=artifacts_dir,
         parent_thread_id=config.thread_id,
         tools=shared_tools,
         memory=memory,
@@ -75,21 +86,29 @@ def create_development_team_agent(config: AgentTeamConfig | None = None) -> Deve
         debug=config.debug,
     )
     manager_tools = [*shared_tools, *resident_team.manager_tools()]
+    subagents = [
+        create_scout_subagent(
+            model=scout_model,
+            root_dir=root_dir,
+            tools=shared_tools,
+        )
+    ]
+    if implementation_enabled:
+        subagents.extend(implementation_subagents(shared_tools))
+
     manager_graph = create_deep_agent(
         name="engineering-manager",
         model=model,
         tools=manager_tools,
-        system_prompt=engineering_manager_prompt(config.mode, config.artifacts_dir),
-        subagents=[
-            create_scout_subagent(
-                model=scout_model,
-                root_dir=root_dir,
-                tools=shared_tools,
-            ),
-            *implementation_subagents(shared_tools),
-        ],
-        backend=FilesystemBackend(root_dir=root_dir, virtual_mode=True),
-        permissions=filesystem_permissions(config.mode, config.artifacts_dir),
+        system_prompt=engineering_manager_prompt(config.mode, artifacts_dir),
+        subagents=subagents,
+        backend=SafeFilesystemBackend(root_dir=root_dir, virtual_mode=True),
+        permissions=filesystem_permissions(
+            config.mode,
+            artifacts_dir,
+            config.implementation_write_paths,
+            root_dir,
+        ),
         skills=list(config.skills) or None,
         memory=list(memory) or None,
         checkpointer=checkpointer_handle.checkpointer,

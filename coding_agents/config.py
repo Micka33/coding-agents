@@ -9,6 +9,8 @@ from typing import Literal
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
+from coding_agents.paths import validate_artifacts_dir
+
 
 AgentMode = Literal["shaping", "implementation"]
 CheckpointerBackend = Literal["memory", "sqlite", "postgres"]
@@ -44,6 +46,7 @@ class AgentTeamConfig:
     postgres_checkpoint_url: str | None = None
     skills: tuple[str, ...] = field(default_factory=tuple)
     memory: tuple[str, ...] = field(default_factory=tuple)
+    implementation_write_paths: tuple[str, ...] = field(default_factory=tuple)
     debug: bool = False
     initialize_artifacts: bool = True
 
@@ -108,3 +111,8 @@ class AgentTeamConfig:
         """Return the root directory as an absolute path."""
 
         return Path(self.root_dir).resolve()
+
+    def resolved_artifacts_dir(self) -> str:
+        """Return the validated repository-relative artifact directory."""
+
+        return validate_artifacts_dir(self.artifacts_dir)

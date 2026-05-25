@@ -29,6 +29,9 @@ from coding_agents.config import (
 )
 from coding_agents.env import load_dotenv_file
 from coding_agents.messages import conversation_transcript, last_message_text
+from coding_agents.paths import validate_artifacts_dir
+from coding_agents.readiness import ReadinessGateError
+from coding_agents.redaction import redact_secrets
 from coding_agents.team import create_development_team_agent
 
 
@@ -36,50 +39,54 @@ def main(argv: Iterable[str] | None = None) -> int:
     """Run the interactive CLI."""
 
     args = _parse_args(argv)
-    load_dotenv_file(args.root / ".env")
-    model = args.model or os.environ.get("CODING_AGENTS_MODEL", DEFAULT_MODEL)
-    reasoning_effort = args.reasoning_effort or os.environ.get(REASONING_EFFORT_ENV)
-    scout_model = args.scout_model or os.environ.get(SCOUT_MODEL_ENV) or model
-    scout_reasoning_effort = (
-        args.scout_reasoning_effort
-        or os.environ.get(SCOUT_REASONING_EFFORT_ENV)
-        or DEFAULT_SCOUT_REASONING_EFFORT
-    )
-    checkpointer_backend = args.checkpointer or os.environ.get(CHECKPOINTER_BACKEND_ENV) or DEFAULT_CHECKPOINTER_BACKEND
-    sqlite_checkpoint_path = args.sqlite_checkpoint_path or os.environ.get(SQLITE_CHECKPOINT_PATH_ENV) or DEFAULT_SQLITE_CHECKPOINT_PATH
-    postgres_checkpoint_url = args.postgres_checkpoint_url or os.environ.get(POSTGRES_CHECKPOINT_URL_ENV) or os.environ.get("DATABASE_URL")
-
-    if args.init_artifacts:
-        created = ensure_agent_workflow_files(args.root, args.artifacts_dir)
-        if created:
-            print("Initialized workflow artifacts:")
-            for path in created:
-                print(f"- {path}")
-        else:
-            print("Workflow artifacts already exist.")
-        if args.init_only:
-            return 0
-
-    config = AgentTeamConfig(
-        model=model,
-        root_dir=args.root,
-        mode=args.mode,
-        thread_id=args.thread_id,
-        artifacts_dir=args.artifacts_dir,
-        reasoning_effort=reasoning_effort,
-        scout_model=scout_model,
-        scout_reasoning_effort=scout_reasoning_effort,
-        checkpointer_backend=checkpointer_backend,
-        sqlite_checkpoint_path=sqlite_checkpoint_path,
-        postgres_checkpoint_url=postgres_checkpoint_url,
-        debug=args.debug,
-        initialize_artifacts=args.init_artifacts,
-    )
-
+    model_for_error = args.model or os.environ.get("CODING_AGENTS_MODEL", DEFAULT_MODEL)
     try:
+        artifacts_dir = validate_artifacts_dir(args.artifacts_dir)
+        load_dotenv_file(args.root / ".env")
+        model = args.model or os.environ.get("CODING_AGENTS_MODEL", DEFAULT_MODEL)
+        model_for_error = model
+        reasoning_effort = args.reasoning_effort or os.environ.get(REASONING_EFFORT_ENV)
+        scout_model = args.scout_model or os.environ.get(SCOUT_MODEL_ENV) or model
+        scout_reasoning_effort = (
+            args.scout_reasoning_effort
+            or os.environ.get(SCOUT_REASONING_EFFORT_ENV)
+            or DEFAULT_SCOUT_REASONING_EFFORT
+        )
+        checkpointer_backend = args.checkpointer or os.environ.get(CHECKPOINTER_BACKEND_ENV) or DEFAULT_CHECKPOINTER_BACKEND
+        sqlite_checkpoint_path = args.sqlite_checkpoint_path or os.environ.get(SQLITE_CHECKPOINT_PATH_ENV) or DEFAULT_SQLITE_CHECKPOINT_PATH
+        postgres_checkpoint_url = args.postgres_checkpoint_url or os.environ.get(POSTGRES_CHECKPOINT_URL_ENV) or os.environ.get("DATABASE_URL")
+
+        if args.init_artifacts:
+            created = ensure_agent_workflow_files(args.root, artifacts_dir)
+            if created:
+                print("Initialized workflow artifacts:")
+                for path in created:
+                    print(f"- {path}")
+            else:
+                print("Workflow artifacts already exist.")
+            if args.init_only:
+                return 0
+
+        config = AgentTeamConfig(
+            model=model,
+            root_dir=args.root,
+            mode=args.mode,
+            thread_id=args.thread_id,
+            artifacts_dir=artifacts_dir,
+            reasoning_effort=reasoning_effort,
+            scout_model=scout_model,
+            scout_reasoning_effort=scout_reasoning_effort,
+            checkpointer_backend=checkpointer_backend,
+            sqlite_checkpoint_path=sqlite_checkpoint_path,
+            postgres_checkpoint_url=postgres_checkpoint_url,
+            implementation_write_paths=tuple(args.write_paths),
+            debug=args.debug,
+            initialize_artifacts=args.init_artifacts,
+        )
+
         agent = create_development_team_agent(config)
-    except Exception as exc:  # pragma: no cover - provider errors vary
-        _print_startup_error(exc, model)
+    except Exception as exc:  # pragma: no cover - provider/startup errors vary
+        _print_startup_error(exc, model_for_error)
         return 1
 
     print("Development Agent Team")
@@ -107,7 +114,7 @@ def main(argv: Iterable[str] | None = None) -> int:
             if user_input in {"/exit", "/quit"}:
                 return 0
             if user_input == "/help":
-                _print_help(args.artifacts_dir)
+                _print_help(artifacts_dir)
                 continue
 
             try:
@@ -117,8 +124,8 @@ def main(argv: Iterable[str] | None = None) -> int:
                 )
             except Exception as exc:  # pragma: no cover - model/runtime errors vary
                 if args.debug:
-                    traceback.print_exc()
-                print(f"\nError: {exc}", file=sys.stderr)
+                    print(redact_secrets(traceback.format_exc()), file=sys.stderr, end="")
+                print(f"\nError: {redact_secrets(exc)}", file=sys.stderr)
                 continue
 
             print(f"\nmanager> {last_message_text(result)}")
@@ -153,7 +160,17 @@ def _parse_args(argv: Iterable[str] | None) -> argparse.Namespace:
         choices=["shaping", "implementation"],
         default="shaping",
         type=_agent_mode,
-        help="Workflow mode for this run.",
+        help="Workflow mode for this run. Implementation mode requires an approved readiness gate.",
+    )
+    parser.add_argument(
+        "--write-path",
+        dest="write_paths",
+        action="append",
+        default=[],
+        help=(
+            "Repository-relative implementation write allowlist path. Repeat for multiple paths. "
+            "Directories must end with '/' to include descendants."
+        ),
     )
     parser.add_argument(
         "--thread-id",
@@ -186,6 +203,7 @@ def _parse_args(argv: Iterable[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--artifacts-dir",
         default=DEFAULT_ARTIFACTS_DIR,
+        type=_artifacts_dir,
         help="Repository-relative folder for workflow artifacts.",
     )
     parser.add_argument(
@@ -216,6 +234,13 @@ def _checkpointer_backend(value: str) -> CheckpointerBackend:
     return value  # type: ignore[return-value]
 
 
+def _artifacts_dir(value: str) -> str:
+    try:
+        return validate_artifacts_dir(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
 def _print_help(artifacts_dir: str) -> None:
     print(
         f"""
@@ -225,7 +250,8 @@ Commands:
 
 Workflow:
   - shaping mode is the default
-  - implementation mode should only be used after the readiness gate is approved
+  - implementation mode requires readiness-gate.yaml approved for full_implementation
+  - implementation writes require explicit --write-path allowlists
   - workflow artifacts live in {artifacts_dir}
 """.strip()
     )
@@ -237,7 +263,7 @@ def _print_restored_conversation(agent: object, thread_id: str) -> None:
             {"configurable": {"thread_id": thread_id}}
         )
     except Exception as exc:  # pragma: no cover - checkpoint backends vary
-        print(f"\nCould not restore conversation history: {exc}", file=sys.stderr)
+        print(f"\nCould not restore conversation history: {redact_secrets(exc)}", file=sys.stderr)
         return
 
     values = getattr(snapshot, "values", {}) or {}
@@ -252,7 +278,15 @@ def _print_restored_conversation(agent: object, thread_id: str) -> None:
 
 
 def _print_startup_error(exc: Exception, model: str) -> None:
-    print(f"Could not start the development-agent team: {exc}", file=sys.stderr)
+    print(f"Could not start the development-agent team: {redact_secrets(exc)}", file=sys.stderr)
+    if isinstance(exc, ReadinessGateError):
+        print(
+            "Hint: implementation mode requires docs/agent-workflow/readiness-gate.yaml "
+            "with approved: true, approval_scope: full_implementation, and non-empty "
+            "approved_by/approved_date. Write access also requires --write-path allowlists.",
+            file=sys.stderr,
+        )
+        return
     if model.startswith("openai:"):
         print(
             "Hint: set OPENAI_API_KEY or choose another model with --model or CODING_AGENTS_MODEL.",

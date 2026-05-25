@@ -1,0 +1,7 @@
+# Machine-readable readiness gate for implementation mode.
+# This file fails closed until a human explicitly approves full implementation.
+approved: false
+approval_scope: none
+approved_by: ""
+approved_date: ""
+notes: ""

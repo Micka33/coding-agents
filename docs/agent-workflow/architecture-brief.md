@@ -42,10 +42,10 @@ gate approval.
 | Scout subagent | Present | Implemented | Used for codebase reconnaissance before status, readiness, progress, or gap analysis answers. |
 | Tavily tools | `web_search` and `fetch_url` available | Implemented | Used when current external documentation or source verification is needed. |
 | Workflow artifacts | Files exist under `/docs/agent-workflow/` and have been reconciled with observed V0 state | Partially implemented | Core artifacts now contain draft content, but remain unapproved and require human validation. |
-| Permissions by mode | Mode concept exists | Partially implemented | Shaping mode is docs-only; implementation-mode write permissions appear broad and need tighter task-scoped controls. |
-| Implementation subagent prompts/wiring | Developer/reviewer/QA/devops/security/writer wiring exists | Partially implemented | Wiring exists, but readiness and quality gates are not yet fully enforced. |
-| Readiness gate enforcement | Documentation exists only | Missing in code | No observed machine-enforced readiness gate. |
-| Tests and CI | Not observed | Missing | Lack of automated validation is a release and regression risk. |
+| Permissions by mode | Mode concept exists with hardened enforcement | Implemented / validation pending | Shaping writes are explicit workflow-artifact files only; implementation writes require task-scoped literal paths and safe filesystem handling. |
+| Implementation subagent prompts/wiring | Developer/reviewer/QA/devops/security/writer wiring exists | Implemented / gated | Runtime construction gates implementation subagents behind machine-readable readiness approval. |
+| Readiness gate enforcement | Machine-readable guard exists | Implemented / validation pending | `readiness-gate.yaml` defaults unapproved and implementation mode fails closed unless full approval metadata is present. |
+| Tests and CI | Focused tests added; CI not observed | Partial | Focused tests cover readiness/permissions/scout/backend/redaction; test execution and CI remain release-readiness gaps. |
 | Python runtime floor | Python `>=3.14` risk observed | Partially implemented / risky | May reduce adoption or conflict with available environments; requires explicit ratification or adjustment. |
 
 ## Current Architecture
@@ -70,7 +70,8 @@ gate approval.
   - In-memory for tests or temporary sessions.
 - The scout is a disposable reconnaissance subagent. It should gather codebase
   facts and return compressed context; it must not own product or architecture
-  decisions.
+  decisions. In the hardened V0 implementation, scout has no shell/`execute` tool
+  and `grep` is Python literal search.
 - Implementation-mode agents are available for developer, code review, QA,
   DevOps, security, and documentation work, but should only be activated after
   readiness approval.
@@ -85,11 +86,25 @@ The CLI should remain a thin entrypoint that configures and runs the reusable
 package. It should not become the primary owner of product, architecture, or
 workflow policy.
 
+For V0, the CLI is the only user-facing entrypoint officially supported. A web UI
+is the expected next product step after V0, not part of the V0 delivery shape.
+
 ### Package Boundary
 
 The `coding_agents/` package owns agent construction, tool wiring, checkpointer
-configuration, prompts, and mode-aware permissions. Public package contracts
-should stay stable enough for the CLI and tests to exercise the same behavior.
+configuration, prompts, and mode-aware permissions.
+
+The V0 public Python API is intentionally minimal and first-party only:
+
+- `AgentTeamConfig`
+- `create_development_team_agent`
+
+This surface exists so the CLI and future first-party entrypoints, especially the
+planned web UI, have a stable construction seam. It is not an external SDK
+commitment for V0.
+
+All other package modules and symbols are internal by default unless a later
+decision explicitly promotes them to public API.
 
 ### Engineering Manager Contract
 
@@ -124,29 +139,31 @@ criteria. Their write scopes should be task-scoped rather than broad.
 
 ### Artifact and Permission Contract
 
-During shaping mode, writes are limited to `/docs/agent-workflow/`. During
-implementation mode, write permissions should be explicitly granted per task and
-only after human approval of the readiness gate.
+During shaping mode, writes are limited to explicit workflow artifact files under
+`/docs/agent-workflow/`; the machine-readable readiness gate is not writable by
+agent tools. During implementation mode, write permissions are explicitly granted
+per task and only after machine-readable readiness approval. Implementation write
+scopes use literal exact files or existing directories, not globs.
 
 ## Gaps
 
 | Gap | Status | Impact | Proposed response |
 | --- | --- | --- | --- |
 | Product artifacts are draft and unapproved | Partial | Problem, users, MVP, non-goals, and acceptance criteria are now documented in draft form but have not been validated by the human decision maker. | Review and approve, revise, or explicitly defer open product questions. |
-| Readiness gate is not machine-enforced | Missing | Developers could be activated or broad writes allowed before approval. | Add a machine-readable gate and runtime guard before implementation mode. |
-| Tests and CI are absent | Missing | Agent wiring, permissions, checkpointers, and CLI behavior can regress silently. | Add unit/smoke tests and CI before release readiness. |
-| Implementation-mode writes are broad | Partial | Increases risk of unintended changes by implementation subagents. | Introduce task-scoped allowlists and stricter mode guards. |
-| Python `>=3.14` adoption risk | Partial / risky | Users may not have the required runtime; dependency support may lag. | Ratify the runtime floor or lower it after compatibility review. |
-| Artifact state lags code state | Partial | Planning and readiness answers can contradict the implementation. | Keep this architecture brief, decision log, task breakdown, and readiness gate synchronized with observed code. |
+| Readiness gate enforcement needs validation | Implemented / validation pending | DEC-0004 guard is implemented and defaults unapproved; automated tests still need to run. | Run focused tests and keep broad implementation blocked until explicit approval. |
+| Tests and CI are incomplete | Partial | Focused tests were added, but they have not been executed here and CI is still missing. | Run unit tests and add CI before release readiness. |
+| Implementation write-scope enforcement needs validation | Implemented / validation pending | DEC-0005 literal write scopes and safe filesystem protections are implemented; tests still need to run. | Run focused tests and keep broad feature work blocked. |
+| Python `>=3.14` adoption risk | Partial / risky | Runtime files currently use Python `>=3.14`; DEC-0006 requires compatibility review before release readiness. | Ratify the runtime floor or lower it after compatibility review. |
+| Top-level docs may lag workflow decisions | Follow-up | README and `docs/development-agent-team-architecture.md` may need updates after workflow decisions are finalized. | Update after readiness/gate decisions are finalized or explicit docs scope is reopened. |
 
 ## Risks
 
 | Risk | Severity | Mitigation |
 | --- | --- | --- |
 | Documentation and code drift | High | Require scout reconnaissance for status/gap questions and update artifacts when decisions change. |
-| Missing readiness gate enforcement | High | Implement a coded gate before allowing implementation-mode delegation. |
-| Broad implementation write permissions | High | Use task-scoped write allowlists and role-specific permission profiles. |
-| No automated tests or CI | High | Add tests for package construction, CLI startup, checkpointers, resident tools, scout wiring, mode permissions, and artifact templates. |
+| Readiness gate enforcement pending validation | High | Run focused tests and keep broad implementation blocked until full approval is recorded. |
+| Implementation write permissions pending validation | High | Use implemented task-scoped literal allowlists and safe filesystem protections; run tests before broader use. |
+| No CI | High | Add CI for package construction, CLI startup, checkpointers, resident tools, scout wiring, mode permissions, and artifact templates. |
 | Python `>=3.14` runtime floor limits adoption | Medium | Perform compatibility review and ratify or adjust the supported Python range. |
 | SQLite treated as source of truth | Medium | Keep decisions and requirements in versioned artifacts; treat checkpoint files as working memory only. |
 | Scout reports are compressed | Medium | Follow up with direct reads for high-risk or disputed claims. |
@@ -159,7 +176,7 @@ only after human approval of the readiness gate.
 - DEC-0002: Scout subagent for codebase reconnaissance — approved and observed
   as implemented.
 - DEC-0003: Ratify reusable Python package plus CLI as the V0 delivery shape —
-  proposed to ratify an observed implementation.
-- DEC-0004: Machine-enforce readiness before implementation mode — proposed.
-- DEC-0005: Tighten implementation-mode write scopes — proposed.
-- DEC-0006: Ratify or adjust the Python runtime floor — proposed.
+  approved with a minimal first-party API boundary and CLI-only user entrypoint for V0.
+- DEC-0004: Machine-enforce readiness before implementation mode — approved; implemented / validation pending.
+- DEC-0005: Tighten implementation-mode write scopes — approved; implemented / validation pending with literal-only write scopes and safe filesystem protections.
+- DEC-0006: Ratify or adjust the Python runtime floor — approved; Python `>=3.14` remains an unresolved release risk until compatibility review ratifies or changes it.

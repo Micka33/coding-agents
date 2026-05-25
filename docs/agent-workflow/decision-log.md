@@ -110,22 +110,38 @@ Consequences:
 - Status answers must compare documented state with actual code state.
 - The manager can delegate context-gathering without bloating its own prompt.
 - Scout remains disposable and does not own product or architecture decisions.
-- Scout `execute` access must remain constrained to reconnaissance commands.
+- Scout has no shell or `execute` tool in the hardened V0 implementation; reconnaissance uses safe file tools and Python literal grep.
 
 ### DEC-0003: Ratify reusable Python package plus CLI as the V0 delivery shape
 
-Decision status: proposed  
+Decision status: approved  
 Implementation status: implemented
 
 Context:
 
 The codebase already exists largely as a reusable Python package under
 `coding_agents/` plus a minimal interactive CLI. The previous workflow artifacts
-did not explicitly record this as the delivery shape.
+did not explicitly record this as the delivery shape or define the V0 public API
+boundary.
 
 Decision:
 
-Ratify the reusable Python package plus CLI as the V0 delivery shape.
+Ratify the reusable Python package under `coding_agents/` plus a minimal CLI as
+the V0 delivery shape.
+
+The CLI command is the only user-facing entrypoint officially supported in V0.
+The Python package exposes only a minimal first-party integration surface for the
+CLI and future first-party entrypoints:
+
+- `AgentTeamConfig`
+- `create_development_team_agent`
+
+Everything else in `coding_agents/` is internal by default unless a later
+decision explicitly promotes it to public API.
+
+V0 is for local/repository use and is not intended for external distribution. A
+web UI is the expected next product step after V0 and should wrap the package
+through the minimal public surface rather than importing internal modules.
 
 Options considered:
 
@@ -135,44 +151,75 @@ Options considered:
 
 Selected option:
 
-- Reusable Python package with a minimal CLI.
+- Reusable Python package with a minimal CLI as the only V0 user-facing
+  entrypoint.
+- Minimal first-party Python API: `AgentTeamConfig` and
+  `create_development_team_agent`.
 
 Rejected options:
 
 - One-off script, because it would make testing, reuse, and future integrations
   harder.
 - Hosted service or web UI for V0, because it adds deployment, auth, and product
-  surface area not needed for the local-first architecture.
+  surface area not needed before the local-first V0 is validated.
+- External distribution for V0, because package/runtime/API stability has not yet
+  been validated through tests, CI, and release hardening.
 
 Rationale:
 
-The package-plus-CLI shape matches the observed implementation, keeps local
-setup lightweight, and provides a stable boundary for tests and future tools.
+The package-plus-CLI shape matches the observed implementation, keeps local setup
+lightweight, gives the CLI a stable first-party construction seam, and leaves a
+clean path for the next-step web UI without turning the whole package into a
+public SDK.
 
 Consequences:
 
-- Package APIs and CLI behavior become part of the V0 contract.
-- Packaging metadata, runtime version support, and CLI smoke tests become
+- CLI behavior is the V0 user-facing contract.
+- `AgentTeamConfig` and `create_development_team_agent` are the only V0 Python
+  API contracts.
+- Prompts, subagent wiring, resident tools, checkpointers, permissions,
+  artifact templates, Tavily wrappers, and other modules remain internal.
+- Packaging metadata, runtime version support, and CLI/package smoke tests become
   release-relevant.
-- Future UI or service entrypoints should wrap the package rather than duplicate
-  agent wiring.
+- Future UI or service entrypoints should wrap the package through the minimal
+  public surface rather than duplicate agent wiring or import internals.
 
 ### DEC-0004: Machine-enforce readiness before implementation mode
 
-Decision status: proposed  
-Implementation status: missing
+Decision status: approved  
+Implementation status: implemented / validation pending
 
 Context:
 
-The readiness gate is documented but not observed as coded enforcement. The
-system is currently in shaping mode, and implementation tasks should not be
-assigned until the human approves the gate.
+The readiness gate was documented before it was coded. The limited governance
+implementation now includes a machine-readable readiness artifact and runtime
+guard, but broad implementation mode remains unapproved until the gate records
+explicit full implementation approval. A documentation-only convention is not
+sufficient for an autonomous agent workflow.
 
 Decision:
 
 Add machine-readable readiness state and runtime enforcement so implementation
-mode cannot delegate developer work or grant implementation write permissions
-until the readiness gate is approved.
+mode cannot delegate developer work, activate implementation subagents, or grant
+implementation write permissions until the readiness gate is approved.
+
+Use a simple machine-readable readiness artifact, recommended as
+`docs/agent-workflow/readiness-gate.yaml`, as the execution source for the guard.
+Keep `docs/agent-workflow/readiness-gate.md` as the human-readable view.
+
+The guard must fail closed when readiness is absent, invalid, or not approved.
+The guard should block at minimum:
+
+- implementation mode activation;
+- delegation to developer, code-reviewer, QA, DevOps, security-reviewer, and
+  technical-writer subagents for implementation work;
+- write permissions outside `/docs/agent-workflow/`;
+- destructive or sensitive operations that would bypass the gate.
+
+This decision approves the architecture direction only. It does not by itself
+start implementation mode. When implementation is explicitly authorized, the
+readiness guard should be the first governance code task before broader code
+work.
 
 Options considered:
 
@@ -193,39 +240,56 @@ Rejected options:
 Rationale:
 
 The readiness rule is a core governance control. It should be enforced by code,
-not only by instructions.
+not only by instructions. A machine-readable file gives agents and tests a durable
+source of truth while the Markdown artifact remains readable for humans.
 
 Consequences:
 
 - The engineering manager must fail closed when readiness is not approved.
 - Developer, reviewer, QA, DevOps, security, and writer subagents should only be
   activated for implementation after approval.
-- The readiness artifact must be kept synchronized with any machine-readable
-  gate representation.
+- The readiness artifact must be kept synchronized with the machine-readable gate
+  representation.
+- Tests must cover approved, unapproved, missing, and invalid readiness states.
+- The guard implementation becomes the first governance implementation task once
+  implementation work is explicitly approved.
 
 ### DEC-0005: Tighten implementation-mode write scopes
 
-Decision status: proposed  
-Implementation status: partial
+Decision status: approved  
+Implementation status: implemented / validation pending
 
 Context:
 
-Mode-aware permissions are present, but implementation-mode write permissions are
-currently broad. Broad writes increase the risk that implementation subagents
-modify unrelated files or cross module boundaries.
+Mode-aware permissions are present. The limited governance implementation now
+uses task-scoped implementation write allowlists, literal-only write paths, safe
+filesystem path handling, and readiness-gate write protections. Broad writes were
+removed from the implementation-mode permission model, pending test execution and
+final validation.
 
 Decision:
 
 Require task-scoped write allowlists for implementation work. Each developer task
 brief must identify files or modules in scope, files or modules out of scope,
-constraints, and acceptance criteria before write permissions are granted.
+constraints, acceptance criteria, and the write permissions granted before work
+is delegated.
+
+Allowlists may use exact files or literal existing directories. Glob patterns are
+not accepted for implementation write scopes in the limited DEC-0005 enforcement
+because they are harder to reason about safely. Directories require explicit
+justification in the task brief. Tests and documentation related to a task are in
+scope only when the task brief names them explicitly.
+
 Implementation subagents may request access to additional files or modules, but
 must do so through the engineering manager with a concise justification, the
 specific files or paths requested, the reason the current scope is insufficient,
-and the risk of not granting access. The engineering manager may consult the
-software architect and product analyst before approving the expansion,
-suggesting an alternate solution, splitting the task, or escalating to the
-human.
+the risk of not granting access, and any safer alternative. The engineering
+manager may consult the software architect and product analyst before approving
+the expansion, rejecting it, suggesting an alternate solution, splitting the task,
+or escalating to the human.
+
+Cross-cutting work should be split into smaller scoped tasks by default. A broad
+scope is allowed only with explicit approval and documented rationale.
 
 Options considered:
 
@@ -235,9 +299,12 @@ Options considered:
 
 Selected option:
 
-- Task-scoped write allowlists, with role-specific defaults where useful.
+- Task-scoped write allowlists, with exact files preferred and literal existing
+  directories allowed only with justification; glob patterns are disallowed.
 - Manager-mediated scope expansion requests, with product/architecture
   consultation when the request may change scope, boundaries, or tradeoffs.
+- Cross-cutting tasks split by default unless a broad scope is explicitly
+  approved.
 
 Rejected options:
 
@@ -248,7 +315,9 @@ Rejected options:
 Rationale:
 
 Task-scoped write permissions align implementation authority with the approved
-brief and reduce accidental cross-cutting changes.
+brief and reduce accidental cross-cutting changes. This complements DEC-0004:
+the readiness gate controls whether implementation may start, while task-scoped
+allowlists control what an implementation agent may change after authorization.
 
 Consequences:
 
@@ -257,24 +326,58 @@ Consequences:
 - Subagents can request additional access, but cannot grant it to themselves.
 - Scope expansion decisions must be documented when they change product,
   architecture, planning, or delivery context.
+- Tests and docs are not automatically writable unless named by the task brief.
 - Some implementation tasks may need to be split when their write scopes overlap
   too broadly.
+- Permission enforcement supports exact file and literal existing-directory
+  allowlists plus denied out-of-scope paths; glob allowlists are intentionally
+  rejected in the limited implementation.
+
+Scope clarification for the limited DEC-0004/DEC-0005 corrective pass:
+
+The following security and correctness fixes are in scope for the limited
+DEC-0004/DEC-0005 implementation authorization because they close bypasses of the
+readiness gate, artifact integrity, or task-scoped write permissions:
+
+- Remove `scout.execute` from scout tool registration rather than trying to validate arbitrary shell commands in this pass.
+- Normalize and compare protected paths using case-insensitive deny checks for
+  reserved targets such as `readiness-gate.yaml`, `.env`, and private key files.
+- Reject symlink components for artifact directories, workflow artifact files,
+  runtime filesystem-tool aliases, and write-scope paths, then verify containment
+  after resolving the final path where applicable.
+- Validate `artifacts_dir` by resolved containment, not only by string prefix, and
+  fail closed on symlink relocation.
+- Add a small internal redaction helper for startup/runtime exception messages so
+  DSNs, API keys, and similar secrets are not printed raw.
+
+These fixes do not approve broader implementation mode, new dependencies, runtime
+metadata changes, or expanded scout command capabilities. Reintroducing scout
+shell execution through new parameterized wrappers or broad command validation is
+a separate DEC-0002/scout design decision unless explicitly limited to preserving
+DEC-0004/DEC-0005 enforcement.
 
 ### DEC-0006: Ratify or adjust the Python runtime floor
 
-Decision status: proposed  
+Decision status: approved  
 Implementation status: partial / risky
 
 Context:
 
 A Python `>=3.14` runtime requirement was observed as a potential adoption risk.
 Python version support affects contributor setup, CI availability, dependency
-compatibility, and package usability.
+compatibility, package usability, and the future web UI. V0 is local/repository
+use only and is not intended for external distribution, but runtime support still
+matters for contributors and release-readiness claims.
 
 Decision:
 
 Do not treat Python `>=3.14` as settled for release readiness until a runtime
 compatibility review ratifies it or proposes a lower supported range.
+
+Python `>=3.14` remains an unresolved release risk, not an approved final runtime
+floor. Before claiming V0 is release-ready, run a compatibility review that checks
+whether the code actually requires Python 3.14, whether core dependencies support
+the selected version or range, and whether CI can validate it.
 
 Options considered:
 
@@ -284,8 +387,8 @@ Options considered:
 
 Selected option:
 
-- Proposed: perform a compatibility review before release readiness, then either
-  ratify Python `>=3.14` or update the supported range.
+- Perform a compatibility review before release readiness, then either ratify
+  Python `>=3.14` or update the supported range.
 
 Rejected options:
 
@@ -294,10 +397,15 @@ Rejected options:
 Rationale:
 
 Runtime support is a structural adoption choice. It should be explicit and
-validated rather than an accidental packaging default.
+validated rather than an accidental packaging default. Because V0 is not intended
+for external distribution, this review does not block shaping, but it does block
+release-ready claims.
 
 Consequences:
 
 - CI should test the ratified Python version or version range.
-- Package metadata and documentation must match the ratified runtime support.
+- Package metadata, `.python-version`, documentation, and CI must match the
+  ratified runtime support.
 - A lower version range may require dependency or syntax compatibility checks.
+- The future web UI should use the same package runtime decision unless a later
+  architecture decision splits runtimes deliberately.

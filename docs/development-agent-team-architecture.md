@@ -821,12 +821,13 @@ The scout subagent is configured with scoped reconnaissance tools:
 - `read_file`
 - `glob`
 - `grep`
-- `execute`
 - `web_search`
 - `fetch_url`
 
-The scout `execute` tool should be limited to read-only reconnaissance commands.
-It is not a general-purpose shell for implementation work.
+The scout has no shell or `execute` tool in the hardened V0 implementation. Scout
+`grep` uses Python literal search rather than external command execution. Shell
+execution must not be reintroduced for scout without a separate approved design
+and security review.
 
 Agents should use web tools when current external information, documentation, or
 source verification is needed. Any summary that depends on web results should

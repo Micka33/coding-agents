@@ -7,13 +7,14 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from deepagents import create_deep_agent
-from deepagents.backends import FilesystemBackend
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.tools import BaseTool, StructuredTool
 
+from coding_agents.harness import disable_default_general_purpose_subagent
 from coding_agents.messages import last_message_text
 from coding_agents.permissions import filesystem_permissions
 from coding_agents.prompts import PRODUCT_ANALYST_PROMPT, SOFTWARE_ARCHITECT_PROMPT
+from coding_agents.safe_filesystem import SafeFilesystemBackend
 
 
 @dataclass
@@ -85,8 +86,9 @@ def create_resident_agent_team(
 ) -> ResidentAgentTeam:
     """Create resident product and architecture agents."""
 
-    backend = FilesystemBackend(root_dir=root_dir, virtual_mode=True)
-    permissions = filesystem_permissions("shaping", artifacts_dir)
+    disable_default_general_purpose_subagent(model)
+    backend = SafeFilesystemBackend(root_dir=root_dir, virtual_mode=True)
+    permissions = filesystem_permissions("shaping", artifacts_dir, root_dir=root_dir)
 
     product_agent = create_deep_agent(
         name="product-analyst",
