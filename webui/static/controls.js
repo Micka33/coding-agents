@@ -10,6 +10,7 @@ export function collectElements() {
     agentSelect: document.querySelector("#agentSelect"),
     syncToggle: document.querySelector("#syncToggle"),
     liveToggle: document.querySelector("#liveToggle"),
+    markdownToggle: document.querySelector("#markdownToggle"),
     searchInput: document.querySelector("#searchInput"),
     refreshButton: document.querySelector("#refreshButton"),
     status: document.querySelector("#status"),
@@ -43,6 +44,7 @@ export function renderControls(els, state, agents, columnOptions) {
   if (els.syncToggle.disabled) state.syncScroll = false;
   els.syncToggle.checked = state.syncScroll;
   els.liveToggle.checked = state.live;
+  els.markdownToggle.checked = state.formatMarkdown;
   renderColumnPicker(els, state, columnOptions);
 }
 

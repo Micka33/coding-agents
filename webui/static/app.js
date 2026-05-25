@@ -11,7 +11,7 @@ import {
 import { renderRunDrawer } from "./drawer.js";
 import { renderLayout } from "./layouts.js";
 import { handleDetailsToggle } from "./messageList.js";
-import { resetColumnSelection, resetRunState, state } from "./state.js";
+import { resetColumnSelection, resetRunState, setFormatMarkdown, state } from "./state.js";
 import { capturePinnedScrollers, formatTime, restorePinnedScrollers } from "./utils.js";
 
 const els = collectElements();
@@ -51,6 +51,11 @@ function init() {
   els.liveToggle.addEventListener("change", () => {
     state.live = els.liveToggle.checked;
     schedulePolling();
+  });
+
+  els.markdownToggle.addEventListener("change", () => {
+    setFormatMarkdown(els.markdownToggle.checked);
+    render();
   });
 
   els.searchInput.addEventListener("input", () => {
@@ -145,6 +150,7 @@ function render(options = {}) {
     activeRunId: state.activeRunId,
     openDetails: state.openDetails,
     search: state.search,
+    formatMarkdown: state.formatMarkdown,
     tempRunIds: state.tempRunIds,
     taskRunById: buildTaskRunMap(state.data, state.taskRunCache),
   };

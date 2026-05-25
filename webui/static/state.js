@@ -1,3 +1,5 @@
+const preferences = loadPreferences();
+
 export const state = {
   data: null,
   selectedThreadId: null,
@@ -5,6 +7,7 @@ export const state = {
   view: "columns",
   syncScroll: false,
   live: true,
+  formatMarkdown: preferences.formatMarkdown,
   search: "",
   loading: false,
   pollTimer: null,
@@ -27,4 +30,36 @@ export function resetRunState() {
 
 export function resetColumnSelection() {
   state.selectedColumnIds = null;
+}
+
+export function setFormatMarkdown(enabled) {
+  state.formatMarkdown = Boolean(enabled);
+  savePreference("formatMarkdown", state.formatMarkdown);
+}
+
+function loadPreferences() {
+  return {
+    formatMarkdown: loadBooleanPreference("formatMarkdown", true),
+  };
+}
+
+function loadBooleanPreference(key, fallback) {
+  try {
+    const value = localStorage.getItem(preferenceKey(key));
+    return value === null ? fallback : value === "true";
+  } catch {
+    return fallback;
+  }
+}
+
+function savePreference(key, value) {
+  try {
+    localStorage.setItem(preferenceKey(key), String(value));
+  } catch {
+    // Preferences are optional; rendering should keep working if storage is blocked.
+  }
+}
+
+function preferenceKey(key) {
+  return `agent-history:${key}`;
 }

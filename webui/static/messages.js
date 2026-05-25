@@ -1,3 +1,4 @@
+import { renderMarkdown } from "./markdown.js";
 import { escapeAttr, escapeHtml, hashString, htmlToElement, prettyJson } from "./utils.js";
 
 export function createMessageElement(message, agent, maps, context, openDetails = new Map()) {
@@ -39,6 +40,7 @@ export function messageSignature(message, maps, context) {
       message,
       relatedResults,
       activeRunId: context.activeRunId,
+      formatMarkdown: context.formatMarkdown,
       tempRunIds: context.tempRunIds || [],
     }),
   );
@@ -83,12 +85,12 @@ function renderMessage(message, agent, maps, context) {
     .filter(Boolean)
     .join(" ");
 
-  const blocks = message.blocks.map((block, index) => renderBlock(block, message, agent, index)).join("");
+  const blocks = message.blocks.map((block, index) => renderBlock(block, message, agent, index, context)).join("");
   const calls = message.toolCalls
     .map((call, index) => renderToolCall(call, maps?.byToolCallId.get(call.id), message, agent, index, context))
     .join("");
   const fallback = !blocks && !calls && message.contentText
-    ? `<div class="text-block">${escapeHtml(message.contentText)}</div>`
+    ? renderTextBlock(message.contentText, context)
     : "";
 
   return `
@@ -104,7 +106,7 @@ function renderMessage(message, agent, maps, context) {
   `;
 }
 
-function renderBlock(block, message, agent, index) {
+function renderBlock(block, message, agent, index, context) {
   if (block.type === "reasoning") {
     const text = block.summary || block.text;
     if (!text) return "";
@@ -113,16 +115,27 @@ function renderBlock(block, message, agent, index) {
       <details class="thinking" data-detail-key="${escapeAttr(detailKey)}">
         <summary><span>Réflexion</span><span class="badge">collapsed</span></summary>
         <div class="thinking-body">
-          <div class="text-block">${escapeHtml(text)}</div>
+          ${renderTextBlock(text, context)}
         </div>
       </details>
     `;
   }
 
   if (!block.text) return "";
-  const phase = block.phase ? `<span class="badge">${escapeHtml(block.phase)}</span>` : "";
+  return renderTextBlock(block.text, context, { phase: block.phase });
+}
+
+function renderTextBlock(text, context, options = {}) {
+  const phase = options.phase ? `<span class="badge text-phase">${escapeHtml(options.phase)}</span>` : "";
+  if (!context.formatMarkdown) {
+    return `<div class="text-block">${phase}${phase ? "\n" : ""}${escapeHtml(text)}</div>`;
+  }
+
   return `
-    <div class="text-block">${phase}${phase ? "\n" : ""}${escapeHtml(block.text)}</div>
+    <div class="text-block markdown-block">
+      ${phase}
+      <div class="markdown-body">${renderMarkdown(text)}</div>
+    </div>
   `;
 }
 
