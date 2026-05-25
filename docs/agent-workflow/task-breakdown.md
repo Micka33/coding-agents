@@ -32,12 +32,12 @@ This task breakdown therefore separates:
 | SQLite/Postgres/memory checkpointers | Implemented | Local, shared/production, and disposable/test options exist. |
 | Stable resident thread IDs | Implemented | Product and architecture residents have stable derived thread IDs. |
 | Scout subagent | Implemented | Reconnaissance role exists. |
-| Implementation subagent prompts/wiring | Implemented / gated | Implementation subagents are registered only after implementation-mode readiness approval. |
+| Implementation subagent prompts/wiring | Implemented / statically inspected and tested; gated | Scout reports implementation subagents are registered only after implementation-mode readiness approval. |
 | Tavily tools | Implemented | Web search/fetch tools exist. |
 | Workflow artifacts | Partial | Files exist and now contain draft content; human validation and gate approval are still pending. |
-| Permissions by mode | Implemented / gated | Shaping mode remains docs-only for writes; implementation writes require explicit task-scoped allowlists. |
-| Readiness gate enforcement | Implemented / unapproved default | `readiness-gate.yaml` is machine-readable and implementation mode fails closed until full approval is recorded. |
-| Tests and CI | Partial / CI missing | Focused governance tests were added; broad automated validation and CI remain missing. |
+| Permissions by mode | Implemented / statically inspected and tested | Shaping mode remains docs-only for writes; implementation writes require explicit task-scoped allowlists. |
+| Readiness gate enforcement | Implemented / statically inspected and tested; unapproved default | `readiness-gate.yaml` is machine-readable with `approved: false`; scout reports implementation mode fails closed until full approval is recorded. |
+| Tests and CI | Tests passing locally; CI missing | Local validation passed with `uv run --project / python -m unittest discover -s tests`; result: exit code 0, `Ran 64 tests in 0.297s`, `OK`; CI is still missing. |
 | Python runtime support | Risk / partial | Python `>=3.14` needs ratification or adjustment. |
 
 ## Shaping Tasks
@@ -61,8 +61,8 @@ human.
 
 | ID | Task | Owner Role | Dependencies | Acceptance Criteria | Status |
 | --- | --- | --- | --- | --- | --- |
-| DEV-001 | Implement machine-enforced readiness gate | developer + engineering-manager | DEC-0004 approved; limited governance implementation authorized by human on 2026-05-24 | Implementation mode fails closed when readiness is not approved; gate state is machine-readable or otherwise checkable by the manager; denial messages identify missing gate items; tests cover approved, unapproved, missing, and invalid states | implemented / validation pending |
-| DEV-002 | Tighten implementation-mode write permissions | developer + security-reviewer | DEC-0005 approved; DEV-001 or equivalent guard; limited governance implementation authorized by human on 2026-05-24 | Developer tasks require explicit write scopes; out-of-scope writes are rejected or require manager-mediated escalation; access expansion requests include requested paths, rationale, risk, and alternatives; manager may consult product and architecture before approving, denying, splitting, or redirecting the task; mode permissions distinguish shaping docs-only access from implementation task scopes; tests cover allowed, denied, and escalation paths | implemented / validation pending |
+| DEV-001 | Implement machine-enforced readiness gate | developer + engineering-manager | DEC-0004 approved; limited governance implementation authorized by human on 2026-05-24 | Implementation mode fails closed when readiness is not approved; gate state is machine-readable or otherwise checkable by the manager; denial messages identify missing gate items; tests cover approved, unapproved, missing, and invalid states | implemented / statically inspected and tested |
+| DEV-002 | Tighten implementation-mode write permissions | developer + security-reviewer | DEC-0005 approved; DEV-001 or equivalent guard; limited governance implementation authorized by human on 2026-05-24 | Developer tasks require explicit write scopes; out-of-scope writes are rejected or require manager-mediated escalation; access expansion requests include requested paths, rationale, risk, and alternatives; manager may consult product and architecture before approving, denying, splitting, or redirecting the task; mode permissions distinguish shaping docs-only access from implementation task scopes; tests cover allowed, denied, and escalation paths | implemented / statically inspected and tested |
 | QA-001 | Add automated tests for agent-team wiring | qa-engineer + developer | Stable package APIs; DEC-0001 and DEC-0002 retained | Tests cover manager construction, resident product/architecture tools, stable thread IDs, SQLite/memory checkpointers, scout wiring, Tavily tool registration, artifact templates, and mode permissions | proposed / blocked |
 | DEVOPS-001 | Add CI for tests and packaging checks | devops-engineer | QA-001 test command defined | CI runs on pull requests or equivalent checks; package installs in a clean environment; CLI smoke test runs; failures block release readiness | proposed / blocked |
 | ARCH-002 | Run Python runtime compatibility review | software-architect + devops-engineer | DEC-0006 approved; implementation/release-readiness work authorized | Compatibility review documents dependency and environment support; package metadata, `.python-version`, docs, and CI match the ratified Python version or range; CI tests the ratified version or range | proposed / blocked |
@@ -72,8 +72,8 @@ human.
 
 ## DEC-0004/DEC-0005 Corrective Security Pass
 
-The corrective security pass has been implemented and is pending test execution /
-final validation. It:
+The corrective security pass has been implemented, statically inspected, and
+validated by the local unittest suite on 2026-05-25. It:
 
 - removed `scout.execute` instead of attempting broad shell command validation;
 - closed case-variant bypasses for readiness and secret deny paths;
@@ -82,6 +82,8 @@ final validation. It:
 - validates `artifacts_dir` after resolution, not by string checks alone;
 - redacts secrets from startup/runtime exception output.
 
+Validation evidence: `uv run --project / python -m unittest discover -s tests` exited 0 with `Ran 64 tests in 0.297s`, `OK`.
+
 This pass did not introduce new dependencies, change runtime metadata, broaden
 implementation mode, or add new scout command capabilities.
 
@@ -89,9 +91,9 @@ implementation mode, or add new scout command capabilities.
 
 1. Review and validate the draft product, requirements, and prioritization artifacts.
 2. Use the completed scout-backed gap analysis in `code-docs-gap-check.md` as the current code/docs baseline.
-3. Run the focused test suite and complete final validation for DEC-0004/DEC-0005 enforcement.
+3. Use the completed local test validation for DEC-0004/DEC-0005 enforcement as readiness evidence.
 4. Seek explicit human authorization before any broader implementation mode or feature work.
 5. Rerun the scout-backed gap check if code changes before readiness approval.
-6. Add tests and CI before release readiness.
+6. Add CI before release readiness.
 7. Run the DEC-0006 Python runtime compatibility review before release readiness.
 8. Update user-facing documentation after behavior and runtime support are stable.

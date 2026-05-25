@@ -20,7 +20,8 @@ DEFAULT_MODEL = "openai:gpt-5.4"
 DEFAULT_THREAD_ID = "development-agent-team"
 DEFAULT_ARTIFACTS_DIR = "docs/agent-workflow"
 DEFAULT_CHECKPOINTER_BACKEND: CheckpointerBackend = "sqlite"
-DEFAULT_EXECUTION_BACKEND: ExecutionBackend = "none"
+DEFAULT_SHAPING_EXECUTION_BACKEND: ExecutionBackend = "local"
+DEFAULT_IMPLEMENTATION_EXECUTION_BACKEND: ExecutionBackend = "none"
 DEFAULT_SQLITE_CHECKPOINT_PATH = ".coding-agents/checkpoints.sqlite"
 DEFAULT_SCOUT_REASONING_EFFORT = "medium"
 REASONING_EFFORT_ENV = "CODING_AGENTS_REASONING_EFFORT"
@@ -99,7 +100,7 @@ class AgentTeamConfig:
         backend = (
             self.execution_backend
             or os.environ.get(EXECUTION_BACKEND_ENV)
-            or DEFAULT_EXECUTION_BACKEND
+            or default_execution_backend(self.mode)
         )
         if backend not in {"none", "local"}:
             raise ValueError("execution backend must be one of: none, local")
@@ -136,3 +137,11 @@ class AgentTeamConfig:
         """Return the validated repository-relative artifact directory."""
 
         return validate_artifacts_dir(self.artifacts_dir)
+
+
+def default_execution_backend(mode: AgentMode) -> ExecutionBackend:
+    """Return the default command execution backend for a workflow mode."""
+
+    if mode == "shaping":
+        return DEFAULT_SHAPING_EXECUTION_BACKEND
+    return DEFAULT_IMPLEMENTATION_EXECUTION_BACKEND

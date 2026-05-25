@@ -43,6 +43,8 @@ Status: draft
 - The readiness gate must remain unapproved until explicit human approval is recorded.
 - The system must document whether each readiness condition is satisfied, partial, blocked, or deferred.
 - Implementation-mode tasks must have bounded ownership, scope, constraints, and acceptance criteria before assignment.
+- Test execution evidence is required before marking DEC-0004/DEC-0005 enforcement as tested or using that enforcement as evidence for broad implementation readiness; local evidence was recorded on 2026-05-25 with `uv run --project / python -m unittest discover -s tests` (`Ran 64 tests`, `OK`).
+- Missing CI blocks release readiness and delivery-ready claims. It does not by itself block entry into broad implementation mode if local test evidence exists, task-scoped implementation work is approved, and the human explicitly accepts CI as a follow-up implementation/release-readiness task.
 
 ## Non-Functional Requirements
 
@@ -73,7 +75,7 @@ Documentation alignment is acceptable when:
 - `prioritization.md` identifies MVP priorities, deferred work, risks, and sequencing.
 - `task-breakdown.md` lists proposed tasks with dependencies, owner role, acceptance criteria, and draft/blocked status.
 - `readiness-gate.md` explicitly states that implementation mode is not approved.
-- Known gaps are visible: missing test execution/CI, draft/unapproved artifacts, broad implementation mode still unapproved, DEC-0006 Python `>=3.14` adoption risk, and release-readiness validation still pending.
+- Known gaps are visible: missing CI, draft/unapproved artifacts, broad implementation mode still unapproved, DEC-0006 Python `>=3.14` adoption risk, and release-readiness validation still pending.
 - DEC-0003 records that V0 is local/repository use only, has CLI as the only user-facing entrypoint, and limits the Python public API to `AgentTeamConfig` plus `create_development_team_agent`.
 - Implementation mode must fail closed unless DEC-0004 machine-readable readiness enforcement records full approval with approver/date metadata.
 - Implementation writes must be task-scoped per DEC-0005 using exact files or literal existing directories only; glob/root/traversal/symlink scopes are rejected.

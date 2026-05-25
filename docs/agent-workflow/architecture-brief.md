@@ -42,11 +42,25 @@ gate approval.
 | Scout subagent | Present | Implemented | Used for codebase reconnaissance before status, readiness, progress, or gap analysis answers. |
 | Tavily tools | `web_search` and `fetch_url` available | Implemented | Used when current external documentation or source verification is needed. |
 | Workflow artifacts | Files exist under `/docs/agent-workflow/` and have been reconciled with observed V0 state | Partially implemented | Core artifacts now contain draft content, but remain unapproved and require human validation. |
-| Permissions by mode | Mode concept exists with hardened enforcement | Implemented / validation pending | Shaping writes are explicit workflow-artifact files only; implementation writes require task-scoped literal paths and safe filesystem handling. |
-| Implementation subagent prompts/wiring | Developer/reviewer/QA/devops/security/writer wiring exists | Implemented / gated | Runtime construction gates implementation subagents behind machine-readable readiness approval. |
-| Readiness gate enforcement | Machine-readable guard exists | Implemented / validation pending | `readiness-gate.yaml` defaults unapproved and implementation mode fails closed unless full approval metadata is present. |
-| Tests and CI | Focused tests added; CI not observed | Partial | Focused tests cover readiness/permissions/scout/backend/redaction; test execution and CI remain release-readiness gaps. |
+| Permissions by mode | Mode concept exists with hardened enforcement | Implemented / statically inspected and tested | Scout-backed static inspection reports shaping writes are explicit workflow-artifact files only; implementation writes require task-scoped literal paths and safe filesystem handling. |
+| Implementation subagent prompts/wiring | Developer/reviewer/QA/devops/security/writer wiring exists | Implemented / statically inspected and tested; gated | Scout-backed static inspection reports runtime construction gates implementation subagents behind machine-readable readiness approval. |
+| Readiness gate enforcement | Machine-readable guard exists | Implemented / statically inspected and tested | `readiness-gate.yaml` defaults unapproved and implementation mode fails closed unless full approval metadata is present; local unittest validation passed on 2026-05-25. |
+| Tests and CI | `unittest` suite present; CI not observed | Tests passing locally; CI missing | Local validation passed with `uv run --project / python -m unittest discover -s tests`; result: exit code 0, `Ran 64 tests in 0.297s`, `OK`. |
 | Python runtime floor | Python `>=3.14` risk observed | Partially implemented / risky | May reduce adoption or conflict with available environments; requires explicit ratification or adjustment. |
+
+## Validation Evidence
+
+Current evidence combines scout-backed static inspection and local test execution:
+
+- Scout-backed inspection confirms the readiness guard, implementation subagent
+  gating, task-scoped write allowlists, safe path checks, protected readiness/secret
+  paths, and no-shell scout behavior are present in code.
+- Automated validation passed on 2026-05-25 with `uv run --project / python -m unittest discover -s tests`.
+- Result: exit code 0, `Ran 64 tests in 0.297s`, `OK`.
+- This supports `implemented / statically inspected and tested` for DEC-0004,
+  DEC-0005, and DEC-0007 governance controls.
+- `readiness-gate.yaml` must remain `approved: false` until explicit human
+  approval for broad implementation mode is recorded.
 
 ## Current Architecture
 
@@ -154,9 +168,9 @@ scopes use literal exact files or existing directories, not globs.
 | Gap | Status | Impact | Proposed response |
 | --- | --- | --- | --- |
 | Product artifacts are draft and unapproved | Partial | Problem, users, MVP, non-goals, and acceptance criteria are now documented in draft form but have not been validated by the human decision maker. | Review and approve, revise, or explicitly defer open product questions. |
-| Readiness gate enforcement needs validation | Implemented / validation pending | DEC-0004 guard is implemented and defaults unapproved; automated tests still need to run. | Run focused tests and keep broad implementation blocked until explicit approval. |
-| Tests and CI are incomplete | Partial | Focused tests were added, but they have not been executed here and CI is still missing. | Run unit tests and add CI before release readiness. |
-| Implementation write-scope enforcement needs validation | Implemented / validation pending | DEC-0005 literal write scopes and safe filesystem protections are implemented; tests still need to run. | Run focused tests and keep broad feature work blocked. |
+| Readiness gate enforcement validated locally | Implemented / statically inspected and tested | Scout-backed inspection reports the DEC-0004 guard is implemented, defaults unapproved, and fails closed; local unittest suite passed on 2026-05-25. | Keep broad implementation blocked until explicit approval is recorded. |
+| Tests and CI status | Tests passing locally; CI missing | Local validation passed with `uv run --project / python -m unittest discover -s tests`; result: exit code 0, `Ran 64 tests in 0.297s`, `OK`; CI is still missing. | Add CI before release readiness. |
+| Implementation write-scope enforcement validated locally | Implemented / statically inspected and tested | Scout-backed inspection reports DEC-0005 literal write scopes and safe filesystem protections are implemented; local unittest suite passed on 2026-05-25. | Keep broad feature work blocked until readiness approval. |
 | Python `>=3.14` adoption risk | Partial / risky | Runtime files currently use Python `>=3.14`; DEC-0006 requires compatibility review before release readiness. | Ratify the runtime floor or lower it after compatibility review. |
 | Top-level docs may lag workflow decisions | Follow-up | README and `docs/development-agent-team-architecture.md` may need updates after workflow decisions are finalized. | Update after readiness/gate decisions are finalized or explicit docs scope is reopened. |
 
@@ -165,8 +179,8 @@ scopes use literal exact files or existing directories, not globs.
 | Risk | Severity | Mitigation |
 | --- | --- | --- |
 | Documentation and code drift | High | Require scout reconnaissance for status/gap questions and update artifacts when decisions change. |
-| Readiness gate enforcement pending validation | High | Run focused tests and keep broad implementation blocked until full approval is recorded. |
-| Implementation write permissions pending validation | High | Use implemented task-scoped literal allowlists and safe filesystem protections; run tests before broader use. |
+| Broad implementation gate still unapproved | High | Keep broad implementation blocked until full approval is recorded in `readiness-gate.yaml`. |
+| CI missing after local validation | High | Add CI before release readiness so validation is repeatable. |
 | No CI | High | Add CI for package construction, CLI startup, checkpointers, resident tools, scout wiring, mode permissions, and artifact templates. |
 | Python `>=3.14` runtime floor limits adoption | Medium | Perform compatibility review and ratify or adjust the supported Python range. |
 | SQLite treated as source of truth | Medium | Keep decisions and requirements in versioned artifacts; treat checkpoint files as working memory only. |
@@ -181,6 +195,7 @@ scopes use literal exact files or existing directories, not globs.
   as implemented.
 - DEC-0003: Ratify reusable Python package plus CLI as the V0 delivery shape —
   approved with a minimal first-party API boundary and CLI-only user entrypoint for V0.
-- DEC-0004: Machine-enforce readiness before implementation mode — approved; implemented / validation pending.
-- DEC-0005: Tighten implementation-mode write scopes — approved; implemented / validation pending with literal-only write scopes and safe filesystem protections.
+- DEC-0004: Machine-enforce readiness before implementation mode — approved; implemented / statically inspected and tested.
+- DEC-0005: Tighten implementation-mode write scopes — approved; implemented / statically inspected and tested with literal-only write scopes and safe filesystem protections.
 - DEC-0006: Ratify or adjust the Python runtime floor — approved; Python `>=3.14` remains an unresolved release risk until compatibility review ratifies or changes it.
+- DEC-0007: Explicit command execution profiles — approved; implemented / statically inspected and tested.

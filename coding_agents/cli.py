@@ -14,7 +14,6 @@ from coding_agents.config import (
     CHECKPOINTER_BACKEND_ENV,
     DEFAULT_ARTIFACTS_DIR,
     DEFAULT_CHECKPOINTER_BACKEND,
-    DEFAULT_EXECUTION_BACKEND,
     DEFAULT_MODEL,
     DEFAULT_SCOUT_REASONING_EFFORT,
     DEFAULT_SQLITE_CHECKPOINT_PATH,
@@ -29,6 +28,7 @@ from coding_agents.config import (
     AgentTeamConfig,
     CheckpointerBackend,
     ExecutionBackend,
+    default_execution_backend,
 )
 from coding_agents.env import load_dotenv_file
 from coding_agents.messages import conversation_transcript, last_message_text
@@ -63,7 +63,7 @@ def main(argv: Iterable[str] | None = None) -> int:
         execution_backend = (
             args.execution
             or os.environ.get(EXECUTION_BACKEND_ENV)
-            or DEFAULT_EXECUTION_BACKEND
+            or default_execution_backend(args.mode)
         )
         sqlite_checkpoint_path = (
             args.sqlite_checkpoint_path
@@ -212,8 +212,9 @@ def _parse_args(argv: Iterable[str] | None) -> argparse.Namespace:
         default=None,
         type=_execution_backend,
         help=(
-            "Command execution backend. Use 'local' only for trusted implementation "
-            "runs because commands execute on this machine."
+            "Command execution backend. Shaping defaults to 'local'; implementation "
+            "defaults to 'none'. Use 'none' to disable command execution because "
+            "local commands execute on this machine."
         ),
     )
     parser.add_argument(
@@ -290,7 +291,7 @@ Workflow:
   - shaping mode is the default
   - implementation mode requires readiness-gate.yaml approved for full_implementation
   - implementation writes require explicit --write-path allowlists
-  - local command execution requires --execution local
+  - shaping mode uses local command execution by default; use --execution none to disable it
   - workflow artifacts live in {artifacts_dir}
 """.strip()
     )

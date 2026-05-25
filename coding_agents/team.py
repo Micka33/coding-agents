@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from deepagents import create_deep_agent
+from deepagents.backends import BackendProtocol, CompositeBackend
 from langchain.chat_models import init_chat_model
 from langchain_core.language_models.chat_models import BaseChatModel
 
@@ -119,12 +120,14 @@ def create_development_team_agent(config: AgentTeamConfig | None = None) -> Deve
     return DevelopmentTeamAgent(manager_graph, checkpointer_handle)
 
 
-def _resolve_backend(config: AgentTeamConfig, root_dir: Path) -> SafeFilesystemBackend:
+def _resolve_backend(config: AgentTeamConfig, root_dir: Path) -> BackendProtocol:
     """Return the filesystem/execution backend for the manager graph."""
 
     execution_backend = config.resolved_execution_backend()
     if execution_backend == "local":
-        return SafeLocalShellBackend(root_dir=root_dir, virtual_mode=True)
+        filesystem_backend = SafeFilesystemBackend(root_dir=root_dir, virtual_mode=True)
+        shell_backend = SafeLocalShellBackend(root_dir=root_dir, virtual_mode=True)
+        return CompositeBackend(default=shell_backend, routes={"/": filesystem_backend})
     return SafeFilesystemBackend(root_dir=root_dir, virtual_mode=True)
 
 

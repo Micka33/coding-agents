@@ -8,6 +8,8 @@ Status: draft
 - `proposed`: decision is recommended but still needs explicit approval or
   ratification.
 - `implemented`: observed in code.
+- `statically inspected`: observed through scout or file inspection; runtime test execution has not been recorded.
+- `tested`: passing command output or equivalent execution evidence has been recorded.
 - `partial`: partially observed in code or documentation.
 - `missing`: not observed in code.
 
@@ -188,7 +190,7 @@ Consequences:
 
 Decision status: approved
 
-Implementation status: implemented / validation pending
+Implementation status: implemented / statically inspected and tested
 
 Context:
 
@@ -255,19 +257,27 @@ Consequences:
 - The guard implementation becomes the first governance implementation task once
   implementation work is explicitly approved.
 
+Validation evidence as of 2026-05-25:
+
+- Scout-backed static inspection reports a fail-closed readiness guard,
+  implementation subagent gating, and `readiness-gate.yaml` with `approved:
+  false`.
+- Automated validation passed with `uv run --project / python -m unittest discover -s tests`.
+- Result: exit code 0, `Ran 64 tests in 0.297s`, `OK`.
+
 ### DEC-0005: Tighten implementation-mode write scopes
 
 Decision status: approved
 
-Implementation status: implemented / validation pending
+Implementation status: implemented / statically inspected and tested
 
 Context:
 
 Mode-aware permissions are present. The limited governance implementation now
 uses task-scoped implementation write allowlists, literal-only write paths, safe
 filesystem path handling, and readiness-gate write protections. Broad writes were
-removed from the implementation-mode permission model, pending test execution and
-final validation.
+removed from the implementation-mode permission model, and local unittest
+validation passed on 2026-05-25.
 
 Decision:
 
@@ -334,6 +344,14 @@ Consequences:
 - Permission enforcement supports exact file and literal existing-directory
   allowlists plus denied out-of-scope paths; glob allowlists are intentionally
   rejected in the limited implementation.
+
+Validation evidence as of 2026-05-25:
+
+- Scout-backed static inspection reports task-scoped write allowlists,
+  literal-only write scopes, safe path checks, and protected readiness/secret
+  path handling.
+- Automated validation passed with `uv run --project / python -m unittest discover -s tests`.
+- Result: exit code 0, `Ran 64 tests in 0.297s`, `OK`.
 
 Scope clarification for the limited DEC-0004/DEC-0005 corrective pass:
 
@@ -416,7 +434,7 @@ Consequences:
 
 Decision status: approved
 
-Implementation status: implemented / validation pending
+Implementation status: implemented / statically inspected and tested
 
 Context:
 
@@ -455,3 +473,11 @@ Consequences:
   comes from explicit mode/profile selection and role prompts.
 - A future sandbox profile can use the same agent-facing `execute` contract
   without changing specialist workflows.
+
+Validation evidence as of 2026-05-25:
+
+- Scout-backed static inspection reports shaping mode rejects local command
+  execution, implementation mode can opt into local execution, and scout still has
+  no `execute` tool.
+- Automated validation passed with `uv run --project / python -m unittest discover -s tests`.
+- Result: exit code 0, `Ran 64 tests in 0.297s`, `OK`.

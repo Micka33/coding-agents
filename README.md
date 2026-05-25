@@ -103,14 +103,20 @@ Use implementation mode only after the readiness gate has been approved:
 uv run python main.py --mode implementation
 ```
 
-Enable local command execution for trusted shaping validation runs:
+Shaping mode enables local command execution for trusted validation runs by
+default:
 
 ```bash
-uv run python main.py --mode shaping --execution local
+uv run python main.py --mode shaping
 ```
 
-Enable local command execution for trusted implementation runs after readiness
-approval:
+Disable local command execution when you want a read/write-only shaping session:
+
+```bash
+uv run python main.py --mode shaping --execution none
+```
+
+Enable local command execution for implementation runs after readiness approval:
 
 ```bash
 uv run python main.py --mode implementation --execution local
@@ -120,8 +126,9 @@ Local execution exposes Deep Agents' `execute` tool to the implementation
 manager graph and implementation specialists. In shaping mode, it exposes
 `execute` to the engineering manager for validation, diagnostics, and evidence
 gathering only. Commands run on this machine with the current user's environment
-and permissions. Scout and resident product/architecture agents remain without
-general shell execution.
+and permissions while filesystem writes remain governed by mode permissions.
+Scout and resident product/architecture agents remain without general shell
+execution.
 
 ## Python API
 
@@ -133,7 +140,6 @@ with create_development_team_agent(
         model="openai:gpt-5.5",
         mode="shaping",
         checkpointer_backend="sqlite",
-        execution_backend="none",
     )
 ) as agent:
     result = agent.invoke(

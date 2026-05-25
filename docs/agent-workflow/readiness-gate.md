@@ -24,10 +24,10 @@ Limited authorization: **APPROVED for DEC-0004/DEC-0005 governance implementatio
 Primary blockers:
 
 - Product, requirements, prioritization, and task breakdown artifacts are draft and need human validation.
-- Architecture decisions DEC-0003 through DEC-0006 are now approved; DEC-0004/DEC-0005 enforcement is implemented pending validation, and DEC-0006 compatibility review remains unimplemented.
+- Architecture decisions DEC-0003 through DEC-0007 are now approved; DEC-0004/DEC-0005/DEC-0007 enforcement is implemented, statically inspected, and tested locally; DEC-0006 compatibility review remains unimplemented.
 - Human approval for broad implementation mode has not been recorded.
 - Human authorization for limited DEC-0004/DEC-0005 governance implementation was recorded on 2026-05-24.
-- Machine-readable readiness artifact and runtime guard are now implemented; the gate remains unapproved by default.
+- Machine-readable readiness artifact and runtime guard are now implemented, statically inspected, and tested locally; the gate remains unapproved by default.
 - Implementation-mode write permissions now require task-scoped allowlists; broad repository writes remain blocked by default.
 
 ## Current Assessment
@@ -39,12 +39,12 @@ Primary blockers:
 | MVP is defined | Partial / draft | `product-brief.md` and `prioritization.md` now describe the V0 MVP cut. | Human review and approve or revise MVP boundaries. |
 | Non-goals are documented | Partial / draft | `product-brief.md` now documents non-goals including no production-ready claim, no unapproved gate, and no multi-feature-stream MVP. | Human review and approve or revise. |
 | Core acceptance criteria are documented | Partial / draft | `requirements.md` now captures documentation-alignment acceptance criteria; implementation-task acceptance criteria remain proposed in `task-breakdown.md`. | Validate acceptance criteria against desired V0 scope. |
-| Major architecture choices are made | Partial | DEC-0001 through DEC-0006 are approved; DEC-0004/DEC-0005 enforcement is implemented pending validation, and DEC-0006 requires compatibility review before release readiness. | Validate enforcement and plan runtime-review follow-up work. |
-| Major technical risks are identified | Partial | Remaining risks include unapproved broad implementation gate, limited test/CI coverage, gate artifact integrity, and unresolved Python `>=3.14` runtime support. | Confirm severity and mitigation ownership. |
-| Open questions are answered or explicitly deferred | Partial | Coded readiness enforcement and write-scope tightening are implemented pending validation; Python runtime floor is explicitly deferred to DEC-0006 compatibility review before release readiness. | Track follow-up implementation/review tasks. |
+| Major architecture choices are made | Partial | DEC-0001 through DEC-0007 are approved; DEC-0004/DEC-0005/DEC-0007 enforcement is implemented, statically inspected, and tested locally; DEC-0006 requires compatibility review before release readiness. | Decide whether DEC-0006 is an implementation-entry blocker or release-readiness follow-up. |
+| Major technical risks are identified | Partial | Remaining risks include unapproved broad implementation gate, missing CI, gate artifact integrity, and unresolved Python `>=3.14` runtime support. | Confirm whether CI and DEC-0006 block implementation entry or only release readiness. |
+| Open questions are answered or explicitly deferred | Partial | Coded readiness enforcement, write-scope tightening, and execution-profile controls are implemented, statically inspected, and tested locally; Python runtime floor is explicitly deferred to DEC-0006 compatibility review before release readiness. | Decide whether to approve broad implementation for bounded tasks. |
 | Task breakdown is clear enough for developer agents | Partial | `task-breakdown.md` now lists shaping tasks and proposed implementation tasks. | Validate task order after product requirements are complete. |
 | Each implementation task has acceptance criteria | Partial | Proposed technical tasks have acceptance criteria; product-driven implementation tasks cannot be final until requirements are validated. | Validate requirements, then refine task briefs. |
-| Human approved the move to implementation mode | Limited / blocked | Human approved limited DEC-0004/DEC-0005 governance implementation only; broad implementation mode is not approved. | Complete/verify governance implementation, then request any broader approval separately. |
+| Human approved the move to implementation mode | Limited / blocked | Human approved limited DEC-0004/DEC-0005 governance implementation only; broad implementation mode is not approved. Governance implementation is now locally tested. | Request explicit broad implementation approval separately if the remaining risks are accepted. |
 
 ## Additional Release and Safety Checks
 
@@ -53,9 +53,9 @@ claiming V0 is delivery-ready unless explicitly accepted as risks.
 
 | Check | Status | Risk |
 | --- | --- | --- |
-| Machine-enforced readiness gate | Implemented / unapproved default | `readiness-gate.yaml` exists and implementation mode fails closed unless it records full implementation approval with approver/date metadata. |
-| Task-scoped implementation write permissions | Implemented | Implementation mode uses explicit write allowlists and denies writes when no scope is configured. |
-| Automated tests | Partial | Focused tests cover readiness parsing/guarding, permission allowlists, team gating, and CLI write-path parsing; broader coverage and CI remain missing. |
+| Machine-enforced readiness gate | Implemented / statically inspected and tested | `readiness-gate.yaml` exists with `approved: false`; scout reports implementation mode fails closed unless it records full implementation approval with approver/date metadata; local unittest suite passed on 2026-05-25. |
+| Task-scoped implementation write permissions | Implemented / statically inspected and tested | Scout reports implementation mode uses explicit write allowlists and denies writes when no scope is configured; local unittest suite passed on 2026-05-25. |
+| Automated tests | Passing locally | `uv run --project / python -m unittest discover -s tests` exited 0 with `Ran 64 tests in 0.297s`, `OK`; CI remains missing. |
 | CI | Missing | No repeatable validation before merge/release. |
 | Python runtime support decision | Approved review / unresolved runtime | DEC-0006 requires compatibility review before release readiness; Python `>=3.14` is not final. |
 | Scout-backed code/docs gap check | Completed | PLAN-001 completed in `code-docs-gap-check.md`; final readiness should rerun if code changes before approval. |
@@ -64,11 +64,25 @@ claiming V0 is delivery-ready unless explicitly accepted as risks.
 
 1. Human review of `product-brief.md`, `requirements.md`, `prioritization.md`,
    and `task-breakdown.md`; approve, revise, or explicitly defer open items.
-2. Validate the completed DEC-0004/DEC-0005 enforcement work, and track DEC-0006 compatibility review before release readiness.
+2. Use the completed DEC-0004/DEC-0005/DEC-0007 local validation evidence as the governance baseline.
 3. Use the completed PLAN-001 scout-backed gap check as the current baseline; rerun it if code changes before approval.
-4. Confirm whether missing tests/CI are blockers for implementation entry or
-   only for release readiness.
+4. Confirm whether missing CI and the DEC-0006 runtime review are blockers for implementation entry or only for release readiness.
 5. Record explicit human approval if the gate is accepted.
+
+## Next Readiness Decision Prepared
+
+Recommended next decision: **human go/no-go for broad implementation mode**. The
+governance controls now have static inspection evidence and a passing local
+unittest run. Broad implementation mode is still not approved because explicit
+human approval has not been recorded.
+
+Decision to request from the human: approve broad implementation mode for bounded,
+task-scoped work now, while treating missing CI and DEC-0006 runtime review as
+release-readiness blockers; or require CI and/or DEC-0006 completion before broad
+implementation entry.
+
+Keep `readiness-gate.yaml` at `approved: false` until explicit human approval for
+broad implementation mode is recorded.
 
 ## Approval
 

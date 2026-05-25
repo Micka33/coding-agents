@@ -8,13 +8,14 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
 
-from deepagents.middleware.filesystem import _check_fs_permission
+from deepagents.middleware.filesystem import FilesystemMiddleware, _check_fs_permission, supports_execution
 
 from coding_agents.cli import _parse_args, _print_restored_conversation, _print_startup_error, main
 from coding_agents.config import AgentTeamConfig
+from coding_agents.permissions import filesystem_permissions
 from coding_agents.readiness import ReadinessGateError
 from coding_agents.resident_agents import create_resident_agent_team
-from coding_agents.team import _resolve_model_value, create_development_team_agent
+from coding_agents.team import _resolve_backend, _resolve_model_value, create_development_team_agent
 
 
 APPROVED_GATE = """approved: true
@@ -49,6 +50,7 @@ def patched_team_construction():
             "coding_agents.team.SafeLocalShellBackend",
             return_value="local-backend",
         ) as local_shell_backend,
+        patch("coding_agents.team.CompositeBackend", return_value="composite-backend") as composite_backend,
         patch("coding_agents.team.create_deep_agent", return_value="graph") as create_deep_agent,
     ):
         yield {
@@ -62,6 +64,7 @@ def patched_team_construction():
             "implementation_subagents": implementation_subagents,
             "filesystem_backend": filesystem_backend,
             "local_shell_backend": local_shell_backend,
+            "composite_backend": composite_backend,
             "create_deep_agent": create_deep_agent,
             "checkpointer_handle": checkpointer_handle,
         }
@@ -84,8 +87,16 @@ class TeamGovernanceTests(unittest.TestCase):
 
             self.assertEqual(agent.graph, "graph")
             patched["implementation_subagents"].assert_not_called()
+            patched["local_shell_backend"].assert_called_once_with(
+                root_dir=Path(tmp).resolve(),
+                virtual_mode=True,
+            )
+            patched["composite_backend"].assert_called_once_with(
+                default="local-backend",
+                routes={"/": "backend"},
+            )
             kwargs = patched["create_deep_agent"].call_args.kwargs
-            self.assertEqual(kwargs["backend"], "backend")
+            self.assertEqual(kwargs["backend"], "composite-backend")
             self.assertEqual(kwargs["subagents"], [{"name": "scout"}])
             patched["disable_general_purpose"].assert_has_calls([call("test:model"), call("model")])
             self.assertEqual(
@@ -186,7 +197,7 @@ class TeamGovernanceTests(unittest.TestCase):
             )
             self.assertEqual(kwargs["backend"], "backend")
 
-    def test_implementation_local_execution_uses_local_shell_backend(self) -> None:
+    def test_implementation_local_execution_uses_composite_backend(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             gate_dir = root / "docs/agent-workflow"
@@ -206,15 +217,22 @@ class TeamGovernanceTests(unittest.TestCase):
             with patched_team_construction() as patched:
                 create_development_team_agent(config)
 
-            patched["filesystem_backend"].assert_not_called()
+            patched["filesystem_backend"].assert_called_once_with(
+                root_dir=root.resolve(),
+                virtual_mode=True,
+            )
             patched["local_shell_backend"].assert_called_once_with(
                 root_dir=root.resolve(),
                 virtual_mode=True,
             )
+            patched["composite_backend"].assert_called_once_with(
+                default="local-backend",
+                routes={"/": "backend"},
+            )
             kwargs = patched["create_deep_agent"].call_args.kwargs
-            self.assertEqual(kwargs["backend"], "local-backend")
+            self.assertEqual(kwargs["backend"], "composite-backend")
 
-    def test_shaping_local_execution_uses_local_shell_backend_without_implementation_subagents(self) -> None:
+    def test_shaping_local_execution_uses_composite_backend_without_implementation_subagents(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             config = AgentTeamConfig(
@@ -231,13 +249,20 @@ class TeamGovernanceTests(unittest.TestCase):
                 create_development_team_agent(config)
 
             patched["implementation_subagents"].assert_not_called()
-            patched["filesystem_backend"].assert_not_called()
+            patched["filesystem_backend"].assert_called_once_with(
+                root_dir=root.resolve(),
+                virtual_mode=True,
+            )
             patched["local_shell_backend"].assert_called_once_with(
                 root_dir=root.resolve(),
                 virtual_mode=True,
             )
+            patched["composite_backend"].assert_called_once_with(
+                default="local-backend",
+                routes={"/": "backend"},
+            )
             kwargs = patched["create_deep_agent"].call_args.kwargs
-            self.assertEqual(kwargs["backend"], "local-backend")
+            self.assertEqual(kwargs["backend"], "composite-backend")
             self.assertEqual(kwargs["subagents"], [{"name": "scout"}])
             self.assertEqual(
                 _check_fs_permission(kwargs["permissions"], "write", "/coding_agents/config.py"),
@@ -250,6 +275,43 @@ class TeamGovernanceTests(unittest.TestCase):
             self.assertEqual(
                 _check_fs_permission(kwargs["permissions"], "write", "/docs/agent-workflow/readiness-gate.yaml"),
                 "deny",
+            )
+
+    def test_shaping_execution_can_be_disabled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = AgentTeamConfig(
+                root_dir=Path(tmp),
+                mode="shaping",
+                model="test:model",
+                scout_model="test:scout",
+                checkpointer_backend="memory",
+                execution_backend="none",
+                initialize_artifacts=True,
+            )
+
+            with patched_team_construction() as patched:
+                create_development_team_agent(config)
+
+            patched["local_shell_backend"].assert_not_called()
+            patched["composite_backend"].assert_not_called()
+            kwargs = patched["create_deep_agent"].call_args.kwargs
+            self.assertEqual(kwargs["backend"], "backend")
+
+    def test_local_execution_backend_keeps_filesystem_permissions_supported(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = AgentTeamConfig(
+                root_dir=root,
+                mode="shaping",
+                execution_backend="local",
+            )
+
+            backend = _resolve_backend(config, root.resolve())
+
+            self.assertTrue(supports_execution(backend))
+            FilesystemMiddleware(
+                backend=backend,
+                _permissions=filesystem_permissions("shaping", root_dir=root),
             )
 
     def test_resident_agents_disable_default_general_purpose_subagent(self) -> None:
