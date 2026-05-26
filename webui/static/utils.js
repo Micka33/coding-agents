@@ -47,7 +47,7 @@ export function restorePinnedScrollers(pinned, firstLoad = false) {
         previous.element === element &&
         scrollContentSignature(element) === previous.contentSignature
       ) return;
-      if (previous && didScrollAfterCapture(element, previous)) return;
+      if (previous && previous.element === element && didScrollAfterCapture(element, previous)) return;
 
       const shouldPin = firstLoad || !previous || previous.nearBottom;
       if (shouldPin) {

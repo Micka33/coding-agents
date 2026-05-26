@@ -1,6 +1,6 @@
 import { buildResultMaps, columnOptions, runAsAgent } from "./data.js";
 import { clearMessagePaneHost, renderMessagePane, replacePanePart } from "./panes.js";
-import { escapeAttr, escapeHtml, formatCompactNumber, formatCost } from "./utils.js";
+import { escapeAttr, escapeHtml, formatCompactNumber, formatCost, hashString, htmlToElement } from "./utils.js";
 
 export function renderRunDrawer(els, state, context, agents = []) {
   if (state.costBreakdown) {
@@ -95,39 +95,113 @@ function renderDrawerToolbar(stats, state, columnAction, isColumnOpen) {
 
 function renderCostDrawer(root, state, agents) {
   document.body.classList.add("drawer-open");
-  root.innerHTML = renderCostDrawerShell(state, agents);
-  root.dataset.messagePaneKey = `cost:${state.costBreakdown.scope}:${state.costBreakdown.id || ""}`;
+  const target = resolveCostTarget(state, agents);
+  const shellKey = costDrawerKey(state);
+
+  if (root.dataset.messagePaneKey !== shellKey || root.dataset.messagePaneMode !== "cost") {
+    root.innerHTML = renderCostDrawerShell(target, state, shellKey);
+    root.dataset.messagePaneKey = shellKey;
+    root.dataset.messagePaneMode = "cost";
+    return;
+  }
+
+  updateCostDrawer(root, target, state, shellKey);
+  root.dataset.messagePaneKey = shellKey;
   root.dataset.messagePaneMode = "cost";
 }
 
-function renderCostDrawerShell(state, agents) {
-  const target = resolveCostTarget(state, agents);
+function renderCostDrawerShell(target, state, shellKey) {
   const cost = target.cost || {};
   return `
     <div class="drawer-backdrop" data-action="close-cost-breakdown"></div>
     <aside class="run-drawer cost-drawer" role="dialog" aria-label="${escapeAttr(target.title)}">
-      <header class="drawer-header">
-        <div class="lane-title">
-          <h2>${escapeHtml(target.title)}</h2>
-          <p>${escapeHtml(target.subtitle)}</p>
-        </div>
-        <button class="icon-button" type="button" data-action="close-cost-breakdown" title="Fermer" aria-label="Fermer">&times;</button>
-      </header>
-      <div class="drawer-toolbar">
-        <span class="cost-total">${escapeHtml(formatCost(cost))}</span>
-        <span class="run-metrics">${escapeHtml(cost.tier || state.data?.pricing?.tier || "standard")} · ${escapeHtml(cost.currency || "USD")}</span>
-        ${cost.partial ? `<span class="badge cost-warning">partiel</span>` : ""}
-      </div>
-      <div class="drawer-body cost-drawer-body">
-        ${renderCostSummary(cost, state)}
-        ${renderCostChart(cost, state)}
-        ${renderCostParts(cost)}
-        ${renderCostSources(target.sources)}
-        ${renderModelBreakdown(cost)}
-        ${renderUnpricedModels(cost)}
-      </div>
+      ${renderCostDrawerHeader(target)}
+      ${renderCostDrawerToolbar(cost, state)}
+      ${renderCostDrawerBodyShell(target, cost, state, shellKey)}
     </aside>
   `;
+}
+
+function updateCostDrawer(root, target, state, shellKey) {
+  const drawer = root.querySelector(".cost-drawer");
+  if (!drawer) {
+    root.innerHTML = renderCostDrawerShell(target, state, shellKey);
+    return;
+  }
+
+  const cost = target.cost || {};
+  drawer.setAttribute("aria-label", target.title);
+  replacePanePart(drawer, ".drawer-header", renderCostDrawerHeader(target));
+  replacePanePart(drawer, ".drawer-toolbar", renderCostDrawerToolbar(cost, state));
+  updateCostDrawerBody(drawer, target, cost, state, shellKey);
+}
+
+function renderCostDrawerHeader(target) {
+  return `
+    <header class="drawer-header">
+      <div class="lane-title">
+        <h2>${escapeHtml(target.title)}</h2>
+        <p>${escapeHtml(target.subtitle)}</p>
+      </div>
+      <button class="icon-button" type="button" data-action="close-cost-breakdown" title="Fermer" aria-label="Fermer">&times;</button>
+    </header>
+  `;
+}
+
+function renderCostDrawerToolbar(cost, state) {
+  return `
+    <div class="drawer-toolbar">
+      <span class="cost-total">${escapeHtml(formatCost(cost))}</span>
+      <span class="run-metrics">${escapeHtml(cost.tier || state.data?.pricing?.tier || "standard")} · ${escapeHtml(cost.currency || "USD")}</span>
+      ${cost.partial ? `<span class="badge cost-warning">partiel</span>` : ""}
+    </div>
+  `;
+}
+
+function renderCostDrawerBodyShell(target, cost, state, shellKey) {
+  const body = renderCostDrawerBody(target, cost, state);
+  return `
+    <div
+      class="drawer-body cost-drawer-body scroll-region"
+      data-scroll-key="${escapeAttr(shellKey)}"
+      data-render-hash="${escapeAttr(hashString(body))}"
+    >
+      ${body}
+    </div>
+  `;
+}
+
+function updateCostDrawerBody(drawer, target, cost, state, shellKey) {
+  const body = drawer.querySelector(".cost-drawer-body");
+  if (!body) {
+    drawer.appendChild(htmlToElement(renderCostDrawerBodyShell(target, cost, state, shellKey)));
+    return;
+  }
+
+  body.classList.add("scroll-region");
+  body.dataset.scrollKey = shellKey;
+  const nextBody = renderCostDrawerBody(target, cost, state);
+  const nextHash = hashString(nextBody);
+  if (body.dataset.renderHash !== nextHash) {
+    body.innerHTML = nextBody;
+    body.dataset.renderHash = nextHash;
+  }
+}
+
+function renderCostDrawerBody(target, cost, state) {
+  return `
+    ${renderCostSummary(cost, state)}
+    ${renderCostChart(cost, state)}
+    ${renderCostParts(cost)}
+    ${renderCostSources(target.sources)}
+    ${renderModelBreakdown(cost)}
+    ${renderUnpricedModels(cost)}
+  `;
+}
+
+function costDrawerKey(state) {
+  const breakdown = state.costBreakdown || { scope: "thread", id: "" };
+  return `cost:${breakdown.scope || "thread"}:${breakdown.id || ""}`;
 }
 
 function resolveCostTarget(state, agents) {
