@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -170,6 +171,7 @@ def estimate_messages_cost(
             continue
 
         _merge_estimate(totals, estimate)
+        _add_time_series_estimate(totals, message, estimate)
         model_key = estimate["priced_model"]
         if model_key not in by_model:
             by_model[model_key] = _empty_model_summary(estimate)
@@ -197,6 +199,8 @@ def combine_cost_summaries(
         "calls_with_usage": 0,
         "messages_without_usage": 0,
         "unpriced_calls": 0,
+        "unbucketed_calls": 0,
+        "time_series": _empty_time_series(),
     }
     by_model: dict[str, dict[str, Any]] = {}
     unpriced_models: dict[str, dict[str, Any]] = {}
@@ -209,9 +213,11 @@ def combine_cost_summaries(
         totals["calls_with_usage"] += int(summary.get("calls_with_usage") or 0)
         totals["messages_without_usage"] += int(summary.get("messages_without_usage") or 0)
         totals["unpriced_calls"] += int(summary.get("unpriced_calls") or 0)
+        totals["unbucketed_calls"] += int(summary.get("unbucketed_calls") or 0)
         totals["estimated_cost_usd"] += Decimal(str(summary.get("estimated_cost_usd_decimal") or 0))
         _merge_token_counts(totals["tokens"], summary.get("tokens") or {})
         _merge_cost_parts(totals["subtotals_usd"], summary.get("subtotals_usd") or {})
+        _merge_time_series(totals["time_series"], summary.get("time_series") or {})
 
         for model_summary in summary.get("by_model") or []:
             model_key = model_summary.get("priced_model") or model_summary.get("model") or "unknown"
@@ -292,6 +298,8 @@ def _empty_cost_summary(catalog: dict[str, Any], tier: str) -> dict[str, Any]:
         "calls_with_usage": 0,
         "messages_without_usage": 0,
         "unpriced_calls": 0,
+        "unbucketed_calls": 0,
+        "time_series": _empty_time_series(),
     }
 
 
@@ -345,6 +353,14 @@ def _empty_cost_parts() -> dict[str, Decimal]:
     }
 
 
+def _empty_time_series() -> dict[str, dict[str, dict[str, Any]]]:
+    return {
+        "hour": {},
+        "day": {},
+        "week": {},
+    }
+
+
 def _merge_estimate(target: dict[str, Any], estimate: dict[str, Any]) -> None:
     target["estimated_cost_usd"] += Decimal(str(estimate["estimated_cost_usd_decimal"]))
     _merge_token_counts(target["tokens"], estimate["tokens"])
@@ -380,6 +396,94 @@ def _add_raw_usage_tokens(target: dict[str, Any], usage: dict[str, Any]) -> None
     target["tokens"]["reasoning_output"] += _reasoning_output_tokens(usage)
 
 
+def _add_time_series_estimate(
+    target: dict[str, Any],
+    message: dict[str, Any],
+    estimate: dict[str, Any],
+) -> None:
+    dt = _message_datetime(message)
+    if dt is None:
+        target["unbucketed_calls"] += 1
+        return
+
+    amount = Decimal(str(estimate["estimated_cost_usd_decimal"]))
+    tokens = estimate.get("tokens") or {}
+    for granularity, bucket, label in _time_buckets(dt):
+        row = target["time_series"][granularity].setdefault(
+            bucket,
+            {
+                "bucket": bucket,
+                "label": label,
+                "estimated_cost_usd": Decimal("0"),
+                "calls": 0,
+                "tokens": _empty_token_counts(),
+            },
+        )
+        row["estimated_cost_usd"] += amount
+        row["calls"] += 1
+        _merge_token_counts(row["tokens"], tokens)
+
+
+def _merge_time_series(
+    target: dict[str, dict[str, dict[str, Any]]],
+    source: dict[str, Any],
+) -> None:
+    for granularity in _empty_time_series():
+        for item in source.get(granularity) or []:
+            bucket = str(item.get("bucket") or "")
+            if not bucket:
+                continue
+            row = target[granularity].setdefault(
+                bucket,
+                {
+                    "bucket": bucket,
+                    "label": item.get("label") or bucket,
+                    "estimated_cost_usd": Decimal("0"),
+                    "calls": 0,
+                    "tokens": _empty_token_counts(),
+                },
+            )
+            row["estimated_cost_usd"] += Decimal(str(item.get("estimated_cost_usd_decimal") or 0))
+            row["calls"] += int(item.get("calls") or 0)
+            _merge_token_counts(row["tokens"], item.get("tokens") or {})
+
+
+def _message_datetime(message: dict[str, Any]) -> datetime | None:
+    timestamp = message.get("timestamp") or {}
+    epoch_ms = timestamp.get("epochMs") if isinstance(timestamp, dict) else None
+    if epoch_ms is not None:
+        try:
+            return datetime.fromtimestamp(float(epoch_ms) / 1000, tz=UTC)
+        except (TypeError, ValueError, OSError):
+            pass
+
+    iso = timestamp.get("iso") if isinstance(timestamp, dict) else None
+    if not iso:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
+
+
+def _time_buckets(dt: datetime) -> list[tuple[str, str, str]]:
+    hour = dt.replace(minute=0, second=0, microsecond=0)
+    day = dt.replace(hour=0, minute=0, second=0, microsecond=0)
+    iso_year, iso_week, _ = dt.isocalendar()
+    return [
+        ("hour", _iso_z(hour), hour.strftime("%m/%d %H:00")),
+        ("day", day.date().isoformat(), day.strftime("%m/%d")),
+        ("week", f"{iso_year}-W{iso_week:02d}", f"{iso_year} W{iso_week:02d}"),
+    ]
+
+
+def _iso_z(dt: datetime) -> str:
+    return dt.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
 def _add_unpriced(
     unpriced_models: dict[str, dict[str, Any]],
     model: str,
@@ -411,11 +515,13 @@ def _finalize_cost_summary(
         "messages_without_usage": int(summary["messages_without_usage"]),
         "priced_calls": calls_with_usage - unpriced_calls,
         "unpriced_calls": unpriced_calls,
+        "unbucketed_calls": int(summary.get("unbucketed_calls") or 0),
         "tokens": summary["tokens"],
         "subtotals_usd": {
             key: _decimal_text(value)
             for key, value in summary["subtotals_usd"].items()
         },
+        "time_series": _finalize_time_series(summary.get("time_series") or {}),
         "by_model": [
             _finalize_model_summary(model_summary)
             for model_summary in sorted(
@@ -428,6 +534,29 @@ def _finalize_cost_summary(
             unpriced_models.values(),
             key=lambda item: (-int(item.get("calls") or 0), str(item.get("model") or "")),
         ),
+    }
+
+
+def _finalize_time_series(time_series: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    finalized: dict[str, list[dict[str, Any]]] = {}
+    for granularity in _empty_time_series():
+        rows = time_series.get(granularity) or {}
+        finalized[granularity] = [
+            _finalize_time_bucket(row)
+            for _, row in sorted(rows.items(), key=lambda item: item[0])
+        ]
+    return finalized
+
+
+def _finalize_time_bucket(row: dict[str, Any]) -> dict[str, Any]:
+    total = row["estimated_cost_usd"]
+    return {
+        "bucket": row["bucket"],
+        "label": row.get("label") or row["bucket"],
+        "estimated_cost_usd": float(total),
+        "estimated_cost_usd_decimal": _decimal_text(total),
+        "calls": int(row["calls"]),
+        "tokens": row["tokens"],
     }
 
 

@@ -11,6 +11,7 @@ export const state = {
   formatMarkdown: preferences.formatMarkdown,
   theme: preferences.theme,
   pricingTier: preferences.pricingTier,
+  costChartGranularity: "day",
   search: "",
   loading: false,
   pollTimer: null,

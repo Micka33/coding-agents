@@ -244,6 +244,8 @@ async function handleActionClick(event) {
     openCostBreakdown(target.dataset.costScope, target.dataset.costId);
   } else if (action === "close-cost-breakdown") {
     closeCostBreakdown();
+  } else if (action === "set-cost-granularity") {
+    setCostGranularity(target.dataset.granularity);
   } else if (action === "open-run-column" && runId) {
     await openRunColumn(runId);
   } else if (action === "close-run-column" && runId) {
@@ -277,6 +279,12 @@ function openCostBreakdown(scope, id) {
 
 function closeCostBreakdown() {
   state.costBreakdown = null;
+  render();
+}
+
+function setCostGranularity(granularity) {
+  if (!["hour", "day", "week"].includes(granularity)) return;
+  state.costChartGranularity = granularity;
   render();
 }
 

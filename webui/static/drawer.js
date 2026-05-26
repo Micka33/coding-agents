@@ -120,6 +120,7 @@ function renderCostDrawerShell(state, agents) {
       </div>
       <div class="drawer-body cost-drawer-body">
         ${renderCostSummary(cost, state)}
+        ${renderCostChart(cost, state)}
         ${renderCostParts(cost)}
         ${renderCostSources(target.sources)}
         ${renderModelBreakdown(cost)}
@@ -217,6 +218,83 @@ function renderCostSummary(cost, state) {
       </p>
     </section>
   `;
+}
+
+function renderCostChart(cost, state) {
+  const granularity = normalizeGranularity(state.costChartGranularity);
+  const buckets = cost.time_series?.[granularity] || [];
+  const maxCost = Math.max(...buckets.map((bucket) => Number(bucket.estimated_cost_usd || 0)), 0);
+  const totalCalls = buckets.reduce((sum, bucket) => sum + (bucket.calls || 0), 0);
+  const peak = buckets.reduce((best, bucket) => {
+    return Number(bucket.estimated_cost_usd || 0) > Number(best?.estimated_cost_usd || 0) ? bucket : best;
+  }, null);
+  const innerWidth = Math.max(100, buckets.length * 28);
+
+  return `
+    <section class="cost-section cost-chart-section">
+      <div class="cost-section-header">
+        <h3>Coût dans le temps</h3>
+        <div class="cost-chart-tabs" role="group" aria-label="Granularité coût">
+          ${renderGranularityButton("hour", "Heure", granularity)}
+          ${renderGranularityButton("day", "Jour", granularity)}
+          ${renderGranularityButton("week", "Semaine", granularity)}
+        </div>
+      </div>
+      <div class="cost-chart-meta">
+        <span>${escapeHtml(`${buckets.length} bucket${buckets.length > 1 ? "s" : ""}`)}</span>
+        <span>${escapeHtml(`${totalCalls} appels`)}</span>
+        ${peak ? `<span>Pic ${escapeHtml(formatUsd(peak.estimated_cost_usd_decimal))} · ${escapeHtml(peak.label || peak.bucket)}</span>` : ""}
+        ${cost.unbucketed_calls ? `<span>${escapeHtml(String(cost.unbucketed_calls))} sans timestamp</span>` : ""}
+      </div>
+      ${buckets.length ? `
+        <div class="cost-chart-scroll" tabindex="0" aria-label="Bar chart coût par ${escapeAttr(granularityLabel(granularity).toLowerCase())}">
+          <div class="cost-chart-bars" style="width: max(100%, ${innerWidth}px);">
+            ${buckets.map((bucket) => renderCostBar(bucket, maxCost)).join("")}
+          </div>
+        </div>
+      ` : `<div class="empty-state compact-empty">Aucun timestamp exploitable pour ce coût.</div>`}
+    </section>
+  `;
+}
+
+function renderGranularityButton(value, label, active) {
+  return `
+    <button
+      class="${value === active ? "active" : ""}"
+      type="button"
+      data-action="set-cost-granularity"
+      data-granularity="${escapeAttr(value)}"
+      aria-pressed="${value === active ? "true" : "false"}"
+    >
+      ${escapeHtml(label)}
+    </button>
+  `;
+}
+
+function renderCostBar(bucket, maxCost) {
+  const cost = Number(bucket.estimated_cost_usd || 0);
+  const height = maxCost > 0 ? Math.max(4, Math.round((cost / maxCost) * 100)) : 0;
+  const title = `${bucket.label || bucket.bucket}: ${formatUsd(bucket.estimated_cost_usd_decimal)} · ${bucket.calls || 0} appels`;
+  return `
+    <div class="cost-bar-item" title="${escapeAttr(title)}">
+      <div class="cost-bar-track">
+        <div class="cost-bar-fill" style="height: ${height}%;"></div>
+      </div>
+      <span>${escapeHtml(shortBucketLabel(bucket.label || bucket.bucket))}</span>
+    </div>
+  `;
+}
+
+function normalizeGranularity(value) {
+  return ["hour", "day", "week"].includes(value) ? value : "day";
+}
+
+function granularityLabel(value) {
+  return { hour: "Heure", day: "Jour", week: "Semaine" }[normalizeGranularity(value)];
+}
+
+function shortBucketLabel(value) {
+  return String(value || "").replace(/^\d{4}\s+/, "");
 }
 
 function renderCostParts(cost) {

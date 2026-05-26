@@ -75,6 +75,7 @@ class WebUiPricingTests(unittest.TestCase):
                         "input_token_details": {"cache_read": 500},
                     },
                     "responseMetadata": {"model_name": "gpt-5.5-2026-04-23"},
+                    "timestamp": {"iso": "2026-05-25T21:15:00Z", "epochMs": 1779743700000},
                 },
                 {"usage": None, "responseMetadata": {}},
             ],
@@ -85,6 +86,10 @@ class WebUiPricingTests(unittest.TestCase):
         self.assertFalse(summary["partial"])
         self.assertEqual(summary["estimated_cost_usd_decimal"], "0.00575")
         self.assertEqual(summary["by_model"][0]["priced_model"], "gpt-5.5")
+        self.assertEqual(summary["time_series"]["hour"][0]["bucket"], "2026-05-25T21:00:00Z")
+        self.assertEqual(summary["time_series"]["day"][0]["bucket"], "2026-05-25")
+        self.assertEqual(summary["time_series"]["week"][0]["bucket"], "2026-W22")
+        self.assertEqual(summary["time_series"]["hour"][0]["estimated_cost_usd_decimal"], "0.00575")
 
     def test_unknown_model_keeps_partial_token_counts(self) -> None:
         summary = estimate_messages_cost(
@@ -107,6 +112,7 @@ class WebUiPricingTests(unittest.TestCase):
                 {
                     "usage": {"input_tokens": 1000, "output_tokens": 100},
                     "responseMetadata": {"model_name": "gpt-5.5-2026-04-23"},
+                    "timestamp": {"iso": "2026-05-25T21:15:00Z", "epochMs": 1779743700000},
                 }
             ],
         )
@@ -115,6 +121,7 @@ class WebUiPricingTests(unittest.TestCase):
                 {
                     "usage": {"input_tokens": 1000, "output_tokens": 100},
                     "responseMetadata": {"model_name": "gpt-5.5-2026-04-23"},
+                    "timestamp": {"iso": "2026-05-25T22:15:00Z", "epochMs": 1779747300000},
                 }
             ],
         )
@@ -124,6 +131,9 @@ class WebUiPricingTests(unittest.TestCase):
         self.assertEqual(combined["calls_with_usage"], 2)
         self.assertEqual(combined["by_model"][0]["calls"], 2)
         self.assertEqual(combined["estimated_cost_usd_decimal"], "0.016")
+        self.assertEqual(len(combined["time_series"]["hour"]), 2)
+        self.assertEqual(len(combined["time_series"]["day"]), 1)
+        self.assertEqual(combined["time_series"]["day"][0]["calls"], 2)
 
 
 if __name__ == "__main__":

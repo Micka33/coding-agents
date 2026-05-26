@@ -184,6 +184,7 @@ function emptyCost() {
     messages_without_usage: 0,
     priced_calls: 0,
     unpriced_calls: 0,
+    unbucketed_calls: 0,
     tokens: {
       input: 0,
       input_uncached: 0,
@@ -195,6 +196,11 @@ function emptyCost() {
       input: "0",
       cached_input: "0",
       output: "0",
+    },
+    time_series: {
+      hour: [],
+      day: [],
+      week: [],
     },
     by_model: [],
     unpriced_models: [],
@@ -214,8 +220,10 @@ function addCosts(left, right) {
   cost.messages_without_usage += incoming.messages_without_usage || 0;
   cost.priced_calls += incoming.priced_calls || 0;
   cost.unpriced_calls += incoming.unpriced_calls || 0;
+  cost.unbucketed_calls += incoming.unbucketed_calls || 0;
   mergeTokenCounts(cost.tokens, incoming.tokens || {});
   mergeCostParts(cost.subtotals_usd, incoming.subtotals_usd || {});
+  cost.time_series = mergeTimeSeries(cost.time_series, incoming.time_series || {});
   cost.by_model = mergeModelCosts(cost.by_model, incoming.by_model || []);
   cost.unpriced_models = mergeUnpricedModels(cost.unpriced_models, incoming.unpriced_models || []);
   return cost;
@@ -227,8 +235,17 @@ function cloneCost(cost) {
     ...cost,
     tokens: { ...emptyCost().tokens, ...(cost.tokens || {}) },
     subtotals_usd: { ...emptyCost().subtotals_usd, ...(cost.subtotals_usd || {}) },
+    time_series: cloneTimeSeries(cost.time_series || {}),
     by_model: [...(cost.by_model || [])],
     unpriced_models: [...(cost.unpriced_models || [])],
+  };
+}
+
+function cloneTimeSeries(timeSeries) {
+  return {
+    hour: [...(timeSeries.hour || [])],
+    day: [...(timeSeries.day || [])],
+    week: [...(timeSeries.week || [])],
   };
 }
 
@@ -275,6 +292,39 @@ function mergeUnpricedModels(left, right) {
     byModel.set(key, current);
   });
   return [...byModel.values()].sort((a, b) => (b.calls || 0) - (a.calls || 0));
+}
+
+function mergeTimeSeries(left, right) {
+  const merged = cloneTimeSeries(left || {});
+  ["hour", "day", "week"].forEach((granularity) => {
+    const byBucket = new Map((merged[granularity] || []).map((bucket) => [bucket.bucket, cloneBucket(bucket)]));
+    (right[granularity] || []).forEach((bucket) => {
+      const key = bucket.bucket || "";
+      if (!key) return;
+      const current = byBucket.get(key) || {
+        bucket: key,
+        label: bucket.label || key,
+        estimated_cost_usd: 0,
+        estimated_cost_usd_decimal: "0",
+        calls: 0,
+        tokens: { ...emptyCost().tokens },
+      };
+      current.estimated_cost_usd = Number(current.estimated_cost_usd || 0) + Number(bucket.estimated_cost_usd || 0);
+      current.estimated_cost_usd_decimal = String(current.estimated_cost_usd);
+      current.calls = (current.calls || 0) + (bucket.calls || 0);
+      mergeTokenCounts(current.tokens, bucket.tokens || {});
+      byBucket.set(key, current);
+    });
+    merged[granularity] = [...byBucket.values()].sort((a, b) => String(a.bucket).localeCompare(String(b.bucket)));
+  });
+  return merged;
+}
+
+function cloneBucket(bucket) {
+  return {
+    ...bucket,
+    tokens: { ...emptyCost().tokens, ...(bucket.tokens || {}) },
+  };
 }
 
 export function buildTaskRunMap(data, taskRunCache) {
