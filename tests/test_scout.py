@@ -21,6 +21,13 @@ class ScoutSecretGuardTests(unittest.TestCase):
             Path("secrets/PRIVATE.KEY"),
             Path(".ssh/id_rsa"),
             Path(".ssh/ID_ED25519"),
+            Path(".npmrc"),
+            Path(".PYPIRC"),
+            Path(".netrc"),
+            Path("cloud/credentials.json"),
+            Path("cloud/CREDENTIALS.JSON"),
+            Path("cloud/secrets.json"),
+            Path("cloud/application_default_credentials.json"),
         ):
             with self.subTest(path=path):
                 self.assertTrue(_is_sensitive(path))

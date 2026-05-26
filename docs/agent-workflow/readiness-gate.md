@@ -3,8 +3,9 @@
 Status: approved for broad implementation entry
 
 Implementation mode has explicit human approval as of 2026-05-25 for bounded,
-task-scoped work. CI and DEC-0006 Python runtime review remain release-readiness
-blockers, not implementation-entry blockers.
+task-scoped work. CI and DEC-0006 have since been implemented and locally
+validated; hosted CI evidence, final review, and explicit release approval remain
+separate from implementation-entry approval.
 
 The machine-readable `readiness-gate.yaml` records this approval with
 `approval_scope: full_implementation`.
@@ -28,8 +29,8 @@ Conditions and remaining blockers:
 - Broad implementation work is approved only when each task has bounded ownership, acceptance criteria, and review expectations.
 - Architecture decisions DEC-0003 through DEC-0007 are approved; DEC-0004/DEC-0005/DEC-0007 enforcement is implemented, statically inspected, and tested locally.
 - Human approval for broad implementation mode was recorded on 2026-05-25.
-- CI is missing and remains a release-readiness blocker.
-- DEC-0006 Python runtime compatibility review remains a release-readiness blocker.
+- CI workflow is present and locally validated; a passing hosted CI run remains required external release evidence.
+- DEC-0006 Python runtime compatibility review is resolved with support ratified as `>=3.11,<4.0`.
 - Runtime implementation mode may start under the approved gate.
 
 ## Current Assessment
@@ -41,12 +42,12 @@ Conditions and remaining blockers:
 | MVP is defined | Approved for implementation entry | `product-brief.md` and `prioritization.md` describe the V0 MVP cut. | Do not expand beyond task-scoped implementation without a new decision. |
 | Non-goals are documented | Approved for implementation entry | Non-goals include no production-ready claim, no multi-feature-stream MVP, and no external distribution before release-readiness blockers are cleared. | Preserve non-goals during implementation. |
 | Core acceptance criteria are documented | Approved for implementation entry | `requirements.md` captures V0 governance acceptance criteria; `task-breakdown.md` lists candidate implementation/quality tasks. | Create a bounded task brief before each assignment. |
-| Major architecture choices are made | Approved for implementation entry | DEC-0001 through DEC-0007 are approved; DEC-0004/DEC-0005/DEC-0007 enforcement is implemented, statically inspected, and tested locally; DEC-0006 remains release-readiness work. | Track DEC-0006 before release readiness. |
-| Major technical risks are identified | Accepted for implementation entry | Remaining risks include missing CI, gate artifact integrity, repo-wide implementation write power after approval, and unresolved Python `>=3.14` runtime support. | Treat CI and DEC-0006 as release-readiness blockers and keep implementation tasks bounded. |
-| Open questions are answered or explicitly deferred | Accepted for implementation entry | CI and DEC-0006 are explicitly deferred to release-readiness; bounded implementation may proceed under the recorded machine-readable gate. | Keep deferred blockers visible. |
+| Major architecture choices are made | Approved for implementation entry | DEC-0001 through DEC-0008 are approved; DEC-0004/DEC-0005/DEC-0007 enforcement is implemented, statically inspected, and tested locally; DEC-0006 is ratified as Python `>=3.11,<4.0`. | Keep runtime metadata and CI aligned with DEC-0006. |
+| Major technical risks are identified | Accepted for implementation entry | Remaining risks include gate artifact integrity, repo-wide implementation write power after approval, trusted-local shell execution, Tavily URL/content exposure, and the need for hosted CI evidence before release claims. | Keep implementation tasks bounded and require hosted CI/review before release-ready claims. |
+| Open questions are answered or explicitly deferred | Accepted for implementation entry | CI and DEC-0006 implementation work is complete locally; hosted CI evidence and release approval remain outside implementation-entry approval. | Keep release-readiness claims separate from implementation-entry approval. |
 | Task breakdown is clear enough for developer agents | Approved for implementation entry | `task-breakdown.md` lists implementation and quality tasks with dependencies and acceptance criteria. | Produce scoped task briefs before assignment. |
 | Each implementation task has acceptance criteria | Approved for implementation entry | Candidate tasks have acceptance criteria; each execution still requires a concrete bounded brief. | Produce scoped task briefs before assignment. |
-| Human approved the move to implementation mode | Approved / recorded | Human approved broad implementation mode for bounded, task-scoped tasks on 2026-05-25 and `readiness-gate.yaml` records the approval. | Proceed with bounded implementation tasks while preserving release-readiness blockers. |
+| Human approved the move to implementation mode | Approved / recorded | Human approved broad implementation mode for bounded, task-scoped tasks on 2026-05-25 and `readiness-gate.yaml` records the approval. | Proceed with bounded implementation tasks while keeping release-readiness claims separate from implementation-entry approval. |
 
 ## Additional Release and Safety Checks
 
@@ -57,16 +58,16 @@ claiming V0 is delivery-ready unless explicitly accepted as risks.
 | --- | --- | --- |
 | Machine-enforced readiness gate | Implemented / statically inspected and tested; approved | `readiness-gate.yaml` records `approved: true`, `approval_scope: full_implementation`, approver, date, and release-readiness caveats. |
 | Implementation write protections | Implemented / statically inspected and tested | Implementation mode allows repo-wide writes by default after gate approval while denying protected readiness/secret paths; optional literal `--write-path` restrictions are tested. |
-| Automated tests | Passing locally | `uv run --project / python -m unittest discover -s tests` exited 0 with `Ran 64 tests in 0.297s`, `OK`; CI remains missing. |
-| CI | Missing / release blocker | No repeatable validation before merge/release; not an implementation-entry blocker by human decision on 2026-05-25. |
-| Python runtime support decision | Release blocker / unresolved runtime | DEC-0006 requires compatibility review before release readiness; not an implementation-entry blocker by human decision on 2026-05-25. |
+| Automated tests | Passing locally | `uv run --python 3.11/3.12/3.13/3.14 python -m unittest discover -s tests` passed locally with `Ran 82 tests`, `OK` on each supported version. |
+| CI | Workflow present / hosted run pending | `.github/workflows/ci.yml` runs tests, wheel build, clean wheel install, and CLI smoke on Python 3.11 through 3.14. A passing hosted CI run remains required external release evidence. |
+| Python runtime support decision | Resolved / aligned locally | DEC-0006 ratifies `>=3.11,<4.0`; `pyproject.toml`, `.python-version`, `uv.lock`, docs, and CI are aligned. |
 | Official code/docs baseline | Completed | PLAN-001 reconciled observed code facts into `architecture-brief.md`, `decision-log.md`, `readiness-gate.md`, and `task-breakdown.md`; refresh those artifacts when code changes. |
 
 ## Required During Runtime Implementation Use
 
 1. Use the completed DEC-0004/DEC-0005/DEC-0007 local validation evidence as the governance baseline.
 2. Use the official code/docs baseline in `architecture-brief.md`, `decision-log.md`, `readiness-gate.md`, and `task-breakdown.md`; refresh it when code changes.
-3. Treat missing CI and the DEC-0006 runtime review as release-readiness blockers, not implementation-entry blockers.
+3. Treat hosted CI evidence and explicit release approval as separate from implementation-entry approval.
 4. Require a bounded task brief before each implementation assignment.
 
 ## Readiness Decision Recorded
@@ -74,11 +75,15 @@ claiming V0 is delivery-ready unless explicitly accepted as risks.
 Human decision: **approved broad implementation mode for bounded, task-scoped
 work** on 2026-05-25.
 
-Accepted release-readiness blockers: missing CI and DEC-0006 runtime review.
-These do not block implementation entry, but they do block delivery-ready,
-release-ready, production-ready, or external distribution claims.
+Previously accepted release-readiness blockers, missing CI and DEC-0006 runtime
+review, have been implemented and locally validated. Release readiness is still
+not approved by this gate; hosted CI evidence, final review, and explicit release
+approval remain required before delivery-ready, release-ready, production-ready,
+or external distribution claims.
 
-Machine-readable gate values:
+Machine-readable gate values are shown below for traceability. The `notes` field
+preserves the original approval context and is not edited by implementation
+agents; the current Markdown sections above record the post-implementation status.
 
 ```yaml
 approved: true
@@ -95,4 +100,6 @@ Approved by: Human decision maker
 Date: 2026-05-25
 
 Notes: Broad implementation mode is approved for bounded, task-scoped tasks. CI
-and DEC-0006 runtime review remain release-readiness blockers only.
+and DEC-0006 have since been implemented and locally validated; hosted CI
+evidence, final review, and explicit release approval remain outside the
+implementation-entry approval.

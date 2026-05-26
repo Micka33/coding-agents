@@ -13,18 +13,39 @@ _URL_CREDENTIALS_RE = re.compile(
     r"(?P<username>[^\s/?#@:\\]+):"
     r"(?P<password>[^\s/?#@\\]+)@"
 )
+_PRIVATE_KEY_BLOCK_RE = re.compile(
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----",
+    re.DOTALL,
+)
+_AUTHORIZATION_HEADER_RE = re.compile(
+    r"(?P<key>\bAuthorization)"
+    r"(?P<sep>\s*:\s*)"
+    r"(?P<scheme>Bearer|Basic)"
+    r"\s+"
+    r"(?P<value>[^'\"\s,;&}\]]+)",
+    re.IGNORECASE,
+)
+_SENSITIVE_KEY_PATTERN = (
+    r"[A-Za-z0-9_-]*"
+    r"(?:password|token|api[_-]?key|apikey|secret|private[_-]?key|access[_-]?key|credentials?)"
+    r"[A-Za-z0-9_-]*"
+)
 _KEY_VALUE_QUOTED_RE = re.compile(
-    r"(?P<key>\b[A-Za-z0-9_]*(?:password|token|api[_-]?key|apikey|secret)[A-Za-z0-9_-]*)"
-    r"(?P<sep>\s*=\s*)"
+    r"(?P<key_quote>['\"]?)"
+    rf"(?P<key>\b{_SENSITIVE_KEY_PATTERN})"
+    r"(?P=key_quote)"
+    r"(?P<sep>\s*[:=]\s*)"
     r"(?P<quote>['\"])"
     r"(?P<value>[^\n]*?)"
     r"(?P=quote)",
     re.IGNORECASE,
 )
 _KEY_VALUE_UNQUOTED_RE = re.compile(
-    r"(?P<key>\b[A-Za-z0-9_]*(?:password|token|api[_-]?key|apikey|secret)[A-Za-z0-9_-]*)"
-    r"(?P<sep>\s*=\s*)"
-    r"(?P<value>[^'\"\s,;&]+)",
+    r"(?P<key_quote>['\"]?)"
+    rf"(?P<key>\b{_SENSITIVE_KEY_PATTERN})"
+    r"(?P=key_quote)"
+    r"(?P<sep>\s*[:=]\s*)"
+    r"(?P<value>[^'\"\s,;&}\]]+)",
     re.IGNORECASE,
 )
 _SENSITIVE_ENV_NAME_PARTS = (
@@ -34,6 +55,10 @@ _SENSITIVE_ENV_NAME_PARTS = (
     "APIKEY",
     "SECRET",
     "PRIVATE_KEY",
+    "ACCESS_KEY",
+    "CREDENTIAL",
+    "AUTHORIZATION",
+    "AUTH_TOKEN",
     "DATABASE_URL",
     "POSTGRES_URL",
 )
@@ -48,19 +73,30 @@ def redact_secrets(value: Any, *, env: Mapping[str, str] | None = None) -> str:
     """
 
     text = str(value)
+    text = _PRIVATE_KEY_BLOCK_RE.sub(_REDACTED, text)
     text = _URL_CREDENTIALS_RE.sub(r"\g<scheme>***:***@", text)
+    text = _AUTHORIZATION_HEADER_RE.sub(_replace_authorization_header, text)
     text = _redact_sensitive_env_values(text, os.environ if env is None else env)
     text = _KEY_VALUE_QUOTED_RE.sub(_replace_quoted_key_value, text)
     text = _KEY_VALUE_UNQUOTED_RE.sub(_replace_unquoted_key_value, text)
     return text
 
 
+def _replace_authorization_header(match: re.Match[str]) -> str:
+    return f"{match.group('key')}{match.group('sep')}{match.group('scheme')} {_REDACTED}"
+
+
 def _replace_quoted_key_value(match: re.Match[str]) -> str:
-    return f"{match.group('key')}{match.group('sep')}{match.group('quote')}{_REDACTED}{match.group('quote')}"
+    return f"{_matched_key(match)}{match.group('sep')}{match.group('quote')}{_REDACTED}{match.group('quote')}"
 
 
 def _replace_unquoted_key_value(match: re.Match[str]) -> str:
-    return f"{match.group('key')}{match.group('sep')}{_REDACTED}"
+    return f"{_matched_key(match)}{match.group('sep')}{_REDACTED}"
+
+
+def _matched_key(match: re.Match[str]) -> str:
+    key_quote = match.group("key_quote") or ""
+    return f"{key_quote}{match.group('key')}{key_quote}"
 
 
 def _redact_sensitive_env_values(text: str, env: Mapping[str, str]) -> str:

@@ -121,6 +121,63 @@ class SafeFilesystemBackendTests(unittest.TestCase):
         self.assertIsNotNone(read_result.error)
         self.assertIn("sensitive", read_result.error)
 
+    def test_filesystem_backend_rejects_common_secret_like_filenames(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "credentials.json").write_text("secret", encoding="utf-8")
+            (root / ".npmrc").write_text("//registry/:_authToken=secret", encoding="utf-8")
+            backend = SafeFilesystemBackend(root_dir=root, virtual_mode=True)
+
+            credentials_result = backend.read("/credentials.json")
+            npmrc_result = backend.read("/.npmrc")
+            entries = backend.ls("/").entries or []
+            grep_matches = backend.grep("secret", path="/").matches or []
+
+        self.assertIsNotNone(credentials_result.error)
+        self.assertIn("sensitive", credentials_result.error)
+        self.assertIsNotNone(npmrc_result.error)
+        self.assertIn("sensitive", npmrc_result.error)
+        self.assertNotIn("/credentials.json", [entry["path"] for entry in entries])
+        self.assertNotIn("/.npmrc", [entry["path"] for entry in entries])
+        self.assertEqual(grep_matches, [])
+
+    def test_local_shell_execute_output_redacts_common_secret_shapes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            backend = SafeLocalShellBackend(
+                root_dir=Path(tmp),
+                virtual_mode=True,
+                env={"TOKEN": "super-secret-token"},
+                inherit_env=False,
+            )
+
+            result = backend.execute(
+                "printf 'api_key=abc123 token=%s postgres://user:pass@host/db "
+                "api_key: sk-yaml \"x-api-key\": \"sk-json\" "
+                "PRIVATE_KEY=inline-key Authorization: Bearer bearer-secret "
+                "AWS_ACCESS_KEY_ID=AKIA_TEST' \"$TOKEN\""
+            )
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("api_key=<redacted>", result.output)
+        self.assertIn("token=<redacted>", result.output)
+        self.assertIn("postgres://***:***@host/db", result.output)
+        self.assertIn("api_key: <redacted>", result.output)
+        self.assertIn('"x-api-key": "<redacted>"', result.output)
+        self.assertIn("PRIVATE_KEY=<redacted>", result.output)
+        self.assertIn("Authorization: Bearer <redacted>", result.output)
+        self.assertIn("AWS_ACCESS_KEY_ID=<redacted>", result.output)
+        for secret in (
+            "abc123",
+            "super-secret-token",
+            "user:pass",
+            "sk-yaml",
+            "sk-json",
+            "inline-key",
+            "bearer-secret",
+            "AKIA_TEST",
+        ):
+            self.assertNotIn(secret, result.output)
+
 
 if __name__ == "__main__":
     unittest.main()

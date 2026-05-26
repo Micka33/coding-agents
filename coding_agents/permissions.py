@@ -23,6 +23,16 @@ def _case_insensitive_literal_pattern(value: str) -> str:
     return "".join(parts)
 
 
+_SECRET_LIKE_FILENAMES = (
+    ".netrc",
+    ".npmrc",
+    ".pypirc",
+    "application_default_credentials.json",
+    "credentials.json",
+    "secrets.json",
+)
+
+
 SENSITIVE_READ_DENY_PATHS = [
     f"/{_case_insensitive_literal_pattern('.env')}",
     f"/{_case_insensitive_literal_pattern('.env')}/**",
@@ -44,6 +54,14 @@ SENSITIVE_READ_DENY_PATHS = [
     f"/{_case_insensitive_literal_pattern('id_ed25519')}",
     f"/**/{_case_insensitive_literal_pattern('id_rsa')}",
     f"/**/{_case_insensitive_literal_pattern('id_ed25519')}",
+    *[
+        f"/{_case_insensitive_literal_pattern(filename)}"
+        for filename in _SECRET_LIKE_FILENAMES
+    ],
+    *[
+        f"/**/{_case_insensitive_literal_pattern(filename)}"
+        for filename in _SECRET_LIKE_FILENAMES
+    ],
 ]
 SENSITIVE_WRITE_DENY_PATHS = SENSITIVE_READ_DENY_PATHS
 SHAPING_WRITABLE_ARTIFACT_FILENAMES = (

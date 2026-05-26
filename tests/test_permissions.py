@@ -162,6 +162,13 @@ class FilesystemPermissionsTests(unittest.TestCase):
             "/service/ID_RSA",
             "/service/id_ed25519",
             "/service/ID_ED25519",
+            "/.npmrc",
+            "/.PYPIRC",
+            "/.netrc",
+            "/service/credentials.json",
+            "/service/CREDENTIALS.JSON",
+            "/service/secrets.json",
+            "/service/application_default_credentials.json",
         ):
             with self.subTest(path=path):
                 self.assertEqual(_check_fs_permission(permissions, "read", path), "deny")

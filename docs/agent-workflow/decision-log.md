@@ -1,6 +1,6 @@
 # Decision Log
 
-Status: approved for implementation entry
+Status: approved decisions with implementation follow-ups locally completed; release readiness not claimed
 
 ## Status Legend
 
@@ -259,13 +259,16 @@ Consequences:
 - The guard implementation becomes the first governance implementation task once
   implementation work is explicitly approved.
 
-Validation evidence as of 2026-05-25:
+Historical validation evidence from the pre-approval corrective pass on 2026-05-25:
 
-- Scout-backed static inspection reports a fail-closed readiness guard,
-  implementation subagent gating, and `readiness-gate.yaml` with `approved:
-  false`.
+- Scout-backed static inspection reported a fail-closed readiness guard,
+  implementation subagent gating, and the then-current `readiness-gate.yaml` with
+  `approved: false` before broad implementation approval was recorded.
 - Automated validation passed with `uv run --project / python -m unittest discover -s tests`.
 - Result: exit code 0, `Ran 64 tests in 0.297s`, `OK`.
+
+Current implementation-entry approval is recorded separately in DEC-0008 and in
+`docs/agent-workflow/readiness-gate.yaml`.
 
 ### DEC-0005: Tighten implementation-mode write protections
 
@@ -346,13 +349,19 @@ Consequences:
 - Permission enforcement supports repo-wide default writes, optional exact-file
   and literal existing-directory restrictions, and denied protected paths.
 
-Validation evidence as of 2026-05-25:
+Initial validation evidence from the corrective security pass on 2026-05-25:
 
 - Scout-backed static inspection reports repo-wide implementation writes after
   gate approval, optional literal write restrictions, safe path checks, and
   protected readiness/secret path handling.
 - Automated validation passed with `uv run --project / python -m unittest discover -s tests`.
 - Result: exit code 0, `Ran 64 tests in 0.297s`, `OK`.
+
+SEC-001 follow-up validation as of 2026-05-25:
+
+- Secret-like path protection now includes common credential filenames such as `.netrc`, `.npmrc`, `.pypirc`, `credentials.json`, `secrets.json`, and `application_default_credentials.json` in permissions, safe filesystem access, and scout reconnaissance.
+- Local shell output and defensive shell exception messages are best-effort redacted before being returned to agents.
+- Local validation passed across Python 3.11 through 3.14 with `Ran 82 tests`, `OK`.
 
 Scope clarification for the limited DEC-0004/DEC-0005 corrective pass:
 
@@ -377,10 +386,10 @@ shell execution through new parameterized wrappers or broad command validation i
 a separate DEC-0002/scout design decision unless explicitly limited to preserving
 DEC-0004/DEC-0005 enforcement.
 
-### DEC-0006: Ratify or adjust the Python runtime floor
+### DEC-0006: Ratify Python runtime support range
 
 Decision status: approved  
-Implementation status: partial / risky
+Implementation status: implemented / metadata aligned and locally tested
 
 Context:
 
@@ -390,46 +399,82 @@ compatibility, package usability, and the future web UI. V0 is local/repository
 use only and is not intended for external distribution, but runtime support still
 matters for contributors and release-readiness claims.
 
+The compatibility review found:
+
+- Scout-backed code inspection found no Python 3.14-specific syntax or API usage.
+- The code uses Python 3.10+ syntax such as `X | Y` unions and built-in generics,
+  but not `match`, `except*`, `tomllib`, `typing.Self`, or `typing.override`.
+- Verified dependency metadata makes `deepagents 0.6.3` the limiting dependency at
+  Python `<4.0,>=3.11`; other current dependencies support Python 3.10 or lower
+  floors except where they also cap at `<4.0`.
+- Initial local validation was on Python 3.14.5; final local validation now covers Python 3.11, 3.12, 3.13, and 3.14.
+
 Decision:
 
-Do not treat Python `>=3.14` as settled for release readiness until a runtime
-compatibility review ratifies it or proposes a lower supported range.
+Ratify V0 supported Python runtime as `>=3.11,<4.0`.
 
-Python `>=3.14` remains an unresolved release risk, not an approved final runtime
-floor. Before claiming V0 is release-ready, run a compatibility review that checks
-whether the code actually requires Python 3.14, whether core dependencies support
-the selected version or range, and whether CI can validate it.
+Align `pyproject.toml`, `.python-version`, `uv.lock`, CI, and documentation to
+this supported range. Use Python 3.11 as the default local floor-development
+version in `.python-version`; validate the full supported range through CI.
 
 Options considered:
 
 - Keep Python `>=3.14`.
-- Lower the minimum to an older supported Python version.
-- Support a tested version range across multiple Python versions.
+- Support Python `>=3.10,<4.0`.
+- Support Python `>=3.11,<4.0`.
+- Support a narrower floor such as Python `>=3.12,<4.0`.
 
 Selected option:
 
-- Perform a compatibility review before release readiness, then either ratify
-  Python `>=3.14` or update the supported range.
+- Python `>=3.11,<4.0`.
 
 Rejected options:
 
-- Treat the current runtime floor as final without review.
+- Keep Python `>=3.14`, because no observed code or dependency requirement
+  justifies the restriction and it unnecessarily narrows contributor and CI
+  environments.
+- Support Python `>=3.10,<4.0`, because `deepagents 0.6.3` requires Python
+  `>=3.11`.
+- Support Python `>=3.12,<4.0`, because it excludes Python 3.11 without a
+  technical requirement.
+- Use an unbounded `>=3.11` range, because current core dependencies already cap
+  support below Python 4 and the project has not designed or validated Python 4
+  compatibility.
 
 Rationale:
 
-Runtime support is a structural adoption choice. It should be explicit and
-validated rather than an accidental packaging default. Because V0 is not intended
-for external distribution, this review does not block shaping, but it does block
-release-ready claims.
+Python 3.11 is the actual dependency-constrained floor. Python 3.14 remains in
+the supported range, but it is not required by the code or dependencies. The
+`>=3.11,<4.0` range improves local contributor compatibility and gives CI a clear
+validation contract while matching the current Deep Agents dependency boundary.
+The `<4.0` upper bound is explicit because core dependencies already require it
+and Python 4 compatibility is outside the V0 design.
 
 Consequences:
 
-- CI should test the ratified Python version or version range.
-- Package metadata, `.python-version`, documentation, and CI must match the
-  ratified runtime support.
-- A lower version range may require dependency or syntax compatibility checks.
+- `pyproject.toml` should use `requires-python = ">=3.11,<4.0"`.
+- `.python-version` should use `3.11` so the default local development runtime
+  exercises the supported floor rather than the newest tested version.
+- `uv.lock` must be regenerated after metadata changes and committed with the CI
+  update.
+- CI must test Python 3.11, 3.12, 3.13, and 3.14 before release-ready claims.
+- Documentation must state V0 support as Python 3.11 through Python 3.14 while
+  preserving the existing non-goal of external distribution.
+- Future use of Python 3.12+, 3.13+, or 3.14+ syntax or APIs requires either
+  compatibility guards or a new decision to raise the floor.
 - The future web UI should use the same package runtime decision unless a later
   architecture decision splits runtimes deliberately.
+
+Validation evidence as of 2026-05-25:
+
+- `pyproject.toml` uses `requires-python = ">=3.11,<4.0"` and Python 3.11-3.14 classifiers.
+- `.python-version` uses `3.11`.
+- `uv.lock` resolves under `requires-python = ">=3.11, <4.0"` and `uv lock --check` passed.
+- `.github/workflows/ci.yml` validates Python 3.11, 3.12, 3.13, and 3.14.
+- Local validation passed on Python 3.11, 3.12, 3.13, and 3.14 with `uv run --python <version> python -m unittest discover -s tests`; each run exited 0 with `Ran 82 tests`, `OK`.
+- Clean Python 3.11 wheel install, package import, and `coding-agents --init-only` smoke passed locally.
+
+Hosted CI results should still be recorded as external release evidence before release-ready claims.
 
 ### DEC-0007: Default local command execution profiles
 
@@ -478,7 +523,7 @@ Consequences:
 - A future sandbox profile can use the same agent-facing `execute` contract
   without changing specialist workflows.
 
-Validation evidence as of 2026-05-25:
+Initial validation evidence from the execution-profile pass on 2026-05-25:
 
 - Scout-backed static inspection reports shaping and implementation modes default
   to local execution for the manager graph, implementation specialists receive
@@ -494,32 +539,32 @@ Implementation status: approved for implementation entry; machine-readable gate 
 
 Context:
 
-DEC-0004/DEC-0005/DEC-0007 governance controls are implemented, statically inspected, and locally tested. The local unittest suite passed on 2026-05-25 with `uv run --project / python -m unittest discover -s tests` (`Ran 64 tests`, `OK`). CI is still missing, and DEC-0006 Python runtime compatibility review remains unresolved.
+DEC-0004/DEC-0005/DEC-0007 governance controls are implemented, statically inspected, and locally tested. The autonomous implementation pass added CI, resolved DEC-0006 as Python `>=3.11,<4.0`, aligned metadata/lockfile/docs/CI, and locally validated the suite on Python 3.11 through 3.14 with `Ran 82 tests`, `OK`. Hosted CI evidence and final release approval remain separate from implementation-entry approval.
 
 Decision:
 
-Approve entry into broad implementation mode for bounded, task-scoped tasks. Missing CI and DEC-0006 runtime review are release-readiness blockers, not implementation-entry blockers.
+Approve entry into broad implementation mode for bounded, task-scoped tasks. Hosted CI evidence, final review, and explicit release approval are separate from implementation-entry approval.
 
 Selected option:
 
 - Proceed with bounded implementation tasks after the machine-readable readiness gate records `full_implementation` approval.
 - Require each task to have a complete brief, explicit ownership, files/modules in scope, constraints, and acceptance criteria.
-- Keep CI and DEC-0006 visible as blockers before delivery-ready, release-ready, production-ready, or external distribution claims.
+- Keep hosted CI evidence, final review, and explicit release approval visible as requirements before delivery-ready, release-ready, production-ready, or external distribution claims.
 
 Rejected options:
 
 - Block all implementation until CI is added.
-- Block all implementation until DEC-0006 runtime compatibility review is complete.
+- Block all implementation until DEC-0006 runtime metadata, lockfile, CI validation, and documentation alignment are complete.
 - Permit unbounded implementation work without task-scoped briefs.
 
 Rationale:
 
-The governance controls needed to safely bound implementation work have passing local validation. CI and runtime compatibility affect repeatable release validation and adoption, but the human decision maker accepted them as release-readiness blockers rather than implementation-entry blockers.
+The governance controls needed to safely bound implementation work had passing local validation before broad implementation entry. CI and runtime compatibility affect repeatable release validation and adoption; they were accepted as implementation follow-ups and have now been implemented and locally validated, while hosted CI evidence and explicit release approval remain separate release concerns.
 
 Consequences:
 
 - Broad implementation work is approved only for bounded, task-scoped tasks.
 - Runtime implementation mode is enabled by `readiness-gate.yaml`, which records `approved: true`, `approval_scope: full_implementation`, approver, and date.
-- CI remains a P0 release-readiness follow-up.
-- DEC-0006 remains a release-readiness follow-up.
+- CI workflow is present and should be used for hosted release evidence.
+- DEC-0006 is ratified as Python `>=3.11,<4.0`; metadata, lockfile, CI matrix, and documentation are aligned.
 - No artifact may claim release readiness, production readiness, or external distribution readiness until release blockers are cleared or explicitly accepted.

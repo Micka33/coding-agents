@@ -582,19 +582,21 @@ decision.
 
 Implementation cannot begin until the readiness gate passes.
 
-The readiness gate should be enforced both by convention and, later, by code.
+The readiness gate is enforced both by convention and by code in the V0
+implementation.
 
 Convention:
 
 - the engineering manager must not enter implementation mode until the gate is
   approved by the human
 
-Future code enforcement:
+Code enforcement:
 
-- maintain a lightweight machine-readable checklist, such as
+- maintain a lightweight machine-readable checklist at
   `docs/agent-workflow/readiness-gate.yaml`
-- tooling should verify that required fields are approved before developer
-  agents receive tasks
+- tooling verifies that required fields are approved before implementation mode
+  activates implementation specialists or broader write permissions
+- agent tools must not modify the machine-readable readiness gate
 
 The readiness gate passes only when:
 
@@ -835,11 +837,12 @@ human can disable this with `--execution none`. The initial supported backend is
 graph. In implementation mode it also exposes execution to implementation
 specialists. In shaping mode, the engineering manager must not use execution to
 implement changes or approve the readiness gate. Local commands run on the host
-machine with the current user's environment and permissions while filesystem
-writes remain governed by mode permissions. Scout and resident
-product/architecture agents do not receive general command execution.
-Agents must not use `execute` to bypass filesystem-tool protections, read or
-write secret-like files, or modify the machine-readable readiness gate.
+machine with the current user's environment and permissions; filesystem
+permissions do not sandbox shell commands. Shell output is best-effort redacted
+before it is returned to the agent. Scout and resident product/architecture
+agents do not receive general command execution. Agents must not use `execute` to
+bypass filesystem-tool protections, read or write secret-like files, or modify
+the machine-readable readiness gate.
 
 Agents should use web tools when current external information, documentation, or
 source verification is needed. Any summary that depends on web results should
@@ -930,4 +933,5 @@ docs/agent-workflow/features/<feature-id>/
 There are no open design questions in this draft.
 
 Future iterations may reopen decisions around persistent memory, concurrent
-feature streams, or automated readiness-gate enforcement.
+feature streams, hosted deployment, stronger execution sandboxing, or URL policy
+for external fetch tools.

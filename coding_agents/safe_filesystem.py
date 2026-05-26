@@ -21,9 +21,20 @@ from deepagents.backends.protocol import (
     SandboxBackendProtocol,
 )
 
+from coding_agents.redaction import redact_secrets
+
 _WCMATCH_FLAGS = wcglob.BRACE | wcglob.GLOBSTAR
 _SENSITIVE_SUFFIXES = {".key", ".pem", ".p12", ".pfx"}
-_SENSITIVE_FILENAMES = {"id_rsa", "id_ed25519"}
+_SENSITIVE_FILENAMES = {
+    ".netrc",
+    ".npmrc",
+    ".pypirc",
+    "application_default_credentials.json",
+    "credentials.json",
+    "id_rsa",
+    "id_ed25519",
+    "secrets.json",
+}
 
 
 class SafeFilesystemBackend(FilesystemBackend):
@@ -352,7 +363,7 @@ class SafeLocalShellBackend(SafeFilesystemBackend, SandboxBackendProtocol):
             )
         except Exception as exc:  # pragma: no cover - defensive command boundary
             return ExecuteResponse(
-                output=f"Error executing command ({type(exc).__name__}): {exc}",
+                output=f"Error executing command ({type(exc).__name__}): {redact_secrets(exc, env=self._env)}",
                 exit_code=1,
                 truncated=False,
             )
@@ -366,6 +377,7 @@ class SafeLocalShellBackend(SafeFilesystemBackend, SandboxBackendProtocol):
                 for line in completed.stderr.rstrip().splitlines()
             )
         output = "\n".join(output_parts) if output_parts else "<no output>"
+        output = redact_secrets(output, env=self._env)
 
         truncated = False
         if len(output) > self._max_output_bytes:

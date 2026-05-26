@@ -73,7 +73,16 @@ _EXCLUDED_PARTS = {
     "node_modules",
 }
 _SENSITIVE_SUFFIXES = {".key", ".pem", ".p12", ".pfx"}
-_SENSITIVE_FILENAMES = {"id_rsa", "id_ed25519"}
+_SENSITIVE_FILENAMES = {
+    ".netrc",
+    ".npmrc",
+    ".pypirc",
+    "application_default_credentials.json",
+    "credentials.json",
+    "id_rsa",
+    "id_ed25519",
+    "secrets.json",
+}
 
 
 def create_scout_subagent(

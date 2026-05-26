@@ -1,6 +1,6 @@
 # Architecture Brief
 
-Status: approved for implementation entry
+Status: implementation baseline updated; release readiness not claimed
 
 ## Context
 
@@ -29,8 +29,10 @@ that approval.
   records full approval and each task has a bounded brief. CLI write restrictions
   are optional controls for especially narrow runs, not a prerequisite for
   broad implementation mode.
-- CI and DEC-0006 are release-readiness blockers, not implementation-entry blockers,
-  by human decision on 2026-05-25.
+- CI and DEC-0006 alignment are implemented and locally validated. Hosted CI
+  evidence, final review, and explicit release approval remain separate from
+  implementation-entry approval. DEC-0006 ratifies Python `>=3.11,<4.0` as the V0
+  supported runtime range.
 
 ## Observed Implementation Snapshot
 
@@ -48,8 +50,8 @@ that approval.
 | Permissions by mode | Mode concept exists with hardened enforcement | Implemented / statically inspected and tested | Shaping writes are explicit workflow-artifact files only; implementation writes are repo-wide by default after gate approval except protected readiness/secret paths, with optional `--write-path` restrictions for narrower runs. |
 | Implementation subagent prompts/wiring | Developer/reviewer/QA/devops/security/writer wiring exists | Implemented / statically inspected and tested; gated | Scout-backed static inspection reports runtime construction gates implementation subagents behind machine-readable readiness approval. |
 | Readiness gate enforcement | Machine-readable guard exists | Implemented / statically inspected and tested | `readiness-gate.yaml` defaults unapproved and implementation mode fails closed unless full approval metadata is present; local unittest validation passed on 2026-05-25. |
-| Tests and CI | `unittest` suite present; CI not observed | Tests passing locally; CI missing | Local validation passed with `uv run --project / python -m unittest discover -s tests`; result: exit code 0, `Ran 64 tests in 0.297s`, `OK`. |
-| Python runtime floor | Python `>=3.14` risk observed | Partially implemented / risky | May reduce adoption or conflict with available environments; requires explicit ratification or adjustment. |
+| Tests and CI | `unittest` suite and GitHub Actions CI are present | Tests passing locally; CI workflow added | `.github/workflows/ci.yml` validates Python 3.11 through 3.14, unit tests, wheel build, clean wheel install, and CLI `--init-only` smoke. Local matrix validation passed with `Ran 82 tests`, `OK` on each supported version. |
+| Python runtime support | DEC-0006 ratifies Python `>=3.11,<4.0` | Ratified, metadata aligned, tested locally | Python 3.11 is the dependency-constrained floor; `pyproject.toml`, `.python-version`, `uv.lock`, CI, and docs are aligned. |
 
 ## Validation Evidence
 
@@ -58,10 +60,11 @@ Current evidence combines scout-backed static inspection and local test executio
 - Scout-backed inspection confirms the readiness guard, implementation subagent
   gating, optional write restrictions, safe path checks, protected
   readiness/secret paths, and no-shell scout behavior are present in code.
-- Automated validation passed on 2026-05-25 with `uv run --project / python -m unittest discover -s tests`.
-- Result: exit code 0, `Ran 64 tests in 0.297s`, `OK`.
+- Automated validation passed on 2026-05-25 with `uv run --python 3.11 python -m unittest discover -s tests`, `uv run --python 3.12 python -m unittest discover -s tests`, `uv run --python 3.13 python -m unittest discover -s tests`, and `uv run --python 3.14 python -m unittest discover -s tests`.
+- Result: exit code 0 on each supported version, `Ran 82 tests`, `OK`.
+- Clean Python 3.11 wheel install, package import, and `coding-agents --init-only` smoke passed locally.
 - This supports `implemented / statically inspected and tested` for DEC-0004,
-  DEC-0005, and DEC-0007 governance controls.
+  DEC-0005, DEC-0006, DEC-0007, CI/package smoke, QA coverage, and SEC-001 controls.
 - Human approval for broad implementation mode is recorded in Markdown artifacts
   and `readiness-gate.yaml`.
 
@@ -173,10 +176,10 @@ literal exact files or existing directories, not globs.
 | --- | --- | --- | --- |
 | Product artifacts approved for implementation entry | Approved | Problem, users, MVP, non-goals, and acceptance criteria are documented and accepted by the human decision maker for bounded implementation entry. | Keep scope bounded and update artifacts when decisions change. |
 | Readiness gate enforcement validated locally | Implemented / statically inspected and tested; approved | Scout-backed inspection reports the DEC-0004 guard is implemented and fails closed before approval; local unittest suite passed on 2026-05-25; human approval is recorded in `readiness-gate.yaml`. | Continue to keep the machine-readable gate protected from agent writes. |
-| Tests and CI status | Tests passing locally; CI missing / release blocker | Local validation passed with `uv run --project / python -m unittest discover -s tests`; result: exit code 0, `Ran 64 tests in 0.297s`, `OK`; CI is still missing. | Add CI before release readiness. |
+| Tests and CI status | CI workflow added; tests passing locally | Local validation passed on Python 3.11, 3.12, 3.13, and 3.14 with `Ran 82 tests`, `OK`; CI workflow is present for hosted validation. | Require hosted CI evidence before release-ready claims. |
 | Implementation write protections validated locally | Implemented / statically inspected and tested | Repo-wide implementation writes are allowed by default after gate approval while `readiness-gate.yaml` and secret-like paths remain protected; optional literal `--write-path` restrictions are tested. | Use bounded task briefs for every implementation task and optional write restrictions when useful. |
-| Python `>=3.14` adoption risk | Release blocker / risky | Runtime files currently use Python `>=3.14`; DEC-0006 requires compatibility review before release readiness but not before implementation entry. | Ratify the runtime floor or lower it before release readiness. |
-| Top-level docs may lag workflow decisions | Follow-up | README and `docs/development-agent-team-architecture.md` may need updates after workflow decisions are finalized. | Update after readiness/gate decisions are finalized or explicit docs scope is reopened. |
+| Python runtime adoption risk | Resolved locally / hosted validation pending | DEC-0006 ratifies `>=3.11,<4.0`; runtime metadata, lockfile, docs, and CI are aligned. | Keep CI matrix and metadata aligned; require hosted CI evidence before release-ready claims. |
+| Top-level docs may lag workflow decisions | Completed in current pass | README and `docs/development-agent-team-architecture.md` were updated for runtime, CI, CLI usage, mode rules, and limitations. | Keep docs synchronized as behavior changes. |
 
 ## Risks
 
@@ -184,8 +187,8 @@ literal exact files or existing directories, not globs.
 | --- | --- | --- |
 | Documentation and code drift | High | Require scout reconnaissance for status/gap questions and update artifacts when decisions change. |
 | Repo-wide implementation write access after approval | High | Keep tasks bounded through manager briefs, acceptance criteria, review, tests, and protected file denies. |
-| CI missing after local validation | High | Add CI before release readiness so validation is repeatable. |
-| Python `>=3.14` runtime floor limits adoption | Medium | Perform compatibility review and ratify or adjust the supported Python range. |
+| Hosted CI has not been observed in this local run | Medium | Use `.github/workflows/ci.yml` as external validation before release-ready claims. |
+| Runtime metadata drift | Medium | Keep `pyproject.toml`, `.python-version`, `uv.lock`, CI, and docs aligned to DEC-0006 `>=3.11,<4.0`. |
 | SQLite treated as source of truth | Medium | Keep decisions and requirements in versioned artifacts; treat checkpoint files as working memory only. |
 | Scout reports are compressed | Medium | Follow up with direct reads for high-risk or disputed claims. |
 | Postgres setup requires credentials and infrastructure | Low / Medium | Keep Postgres configurable and document required deployment settings separately. |
@@ -200,6 +203,6 @@ literal exact files or existing directories, not globs.
   approved with a minimal first-party API boundary and CLI-only user entrypoint for V0.
 - DEC-0004: Machine-enforce readiness before implementation mode — approved; implemented / statically inspected and tested.
 - DEC-0005: Tighten implementation-mode write protections — approved; implemented / statically inspected and tested with protected readiness/secret paths plus optional literal write restrictions.
-- DEC-0006: Ratify or adjust the Python runtime floor — approved; Python `>=3.14` remains an unresolved release risk until compatibility review ratifies or changes it.
+- DEC-0006: Ratify Python runtime support range — approved; ratified as `>=3.11,<4.0`, metadata/docs/CI aligned, and locally tested on Python 3.11 through 3.14.
 - DEC-0007: Default local command execution profiles — approved; implemented / statically inspected and tested.
 - DEC-0008: Approve broad implementation entry for bounded task-scoped work — approved by the human decision maker on 2026-05-25 and recorded in the machine-readable gate.

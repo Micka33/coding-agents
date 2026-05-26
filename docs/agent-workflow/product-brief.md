@@ -25,12 +25,12 @@ The observed V0 code already exists largely as a Python package and CLI under `c
 
 ## Non-Goals
 
-- Do not claim release readiness, delivery readiness, production readiness, or external distribution readiness until CI and DEC-0006 are complete or explicitly accepted as release risks.
-- Do not treat the existing V0 code as production-ready without CI and runtime compatibility validation.
+- Do not claim release readiness, delivery readiness, production readiness, or external distribution readiness until hosted CI evidence, final review, and explicit release approval are complete.
+- Do not treat the existing V0 code as production-ready based on local validation alone.
 - Do not allow broad implementation-mode write access before scoped task ownership is defined.
 - Do not implement a web UI in V0; web UI is the next product step after local-first V0.
 - Do not implement multi-feature-stream coordination in the MVP.
-- Do not distribute V0 externally; V0 is for local/repository use until tests, CI, runtime support, and API boundaries are validated.
+- Do not distribute V0 externally; V0 is for local/repository use until hosted CI, release approval, and API boundaries are validated for distribution.
 - Do not introduce a persistent StoreBackend beyond the documented SQLite/Postgres/memory checkpointing options for V0.
 - Do not expand implementation scope beyond bounded, task-scoped work without a new readiness or scope decision.
 
@@ -57,6 +57,6 @@ V0 MVP is a single-feature-stream development-agent workflow with:
 
 ## Open Questions / Deferred Decisions
 
-- Which Python runtime range will be ratified by the DEC-0006 compatibility review before release readiness.
-- Which automated tests and CI checks are required before V0 can be considered delivery-ready or production-ready.
+- Hosted CI results and explicit release approval are still required before delivery-ready, release-ready, production-ready, or external distribution claims.
 - How repo-wide implementation writes after gate approval should be reviewed, constrained by briefs, or optionally restricted for especially narrow runs.
+- Whether a future web UI should become part of a later product increment after local-first V0 validation.
