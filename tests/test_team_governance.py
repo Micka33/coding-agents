@@ -10,7 +10,13 @@ from unittest.mock import Mock, call, patch
 
 from deepagents.middleware.filesystem import FilesystemMiddleware, _check_fs_permission, supports_execution
 
-from coding_agents.cli import _parse_args, _print_restored_conversation, _print_startup_error, main
+from coding_agents.cli import (
+    _environment_file_candidates,
+    _parse_args,
+    _print_restored_conversation,
+    _print_startup_error,
+    main,
+)
 from coding_agents.config import AgentTeamConfig
 from coding_agents.permissions import filesystem_permissions
 from coding_agents.readiness import ReadinessGateError
@@ -439,6 +445,42 @@ class TeamGovernanceTests(unittest.TestCase):
 
         self.assertEqual(args.prompt, "build it")
         self.assertEqual(args.env_file, Path(".env"))
+
+    def test_cli_default_env_candidates_include_root_cwd_and_cli_parent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "target-project"
+            cwd = base / "launch-dir"
+            cli_file = base / "source-checkout" / "coding_agents" / "cli.py"
+            root.mkdir()
+            cwd.mkdir()
+            cli_file.parent.mkdir(parents=True)
+            cli_file.write_text("", encoding="utf-8")
+
+            with (
+                patch("coding_agents.cli.Path.cwd", return_value=cwd),
+                patch("coding_agents.cli.__file__", str(cli_file)),
+            ):
+                candidates = _environment_file_candidates(root, None)
+
+        self.assertEqual(
+            candidates,
+            (
+                root / ".env",
+                cwd / ".env",
+                cli_file.resolve().parent.parent / ".env",
+            ),
+        )
+
+    def test_cli_explicit_env_file_replaces_default_fallback_candidates(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "target-project"
+            explicit = Path(tmp) / "secrets.env"
+            root.mkdir()
+
+            candidates = _environment_file_candidates(root, explicit)
+
+        self.assertEqual(candidates, (root / ".env", explicit))
 
     def test_cli_accepts_repeated_implementation_write_paths(self) -> None:
         args = _parse_args(

@@ -179,9 +179,7 @@ def main(argv: Iterable[str] | None = None) -> int:
     )
     try:
         artifacts_dir = validate_artifacts_dir(args.artifacts_dir)
-        load_dotenv_file(args.root / ".env")
-        if args.env_file:
-            load_dotenv_file(args.env_file)
+        _load_environment_files(args.root, args.env_file)
         model = args.model or os.environ.get("CODING_AGENTS_MODEL", DEFAULT_MODEL)
         model_for_error = model
         reasoning_effort = args.reasoning_effort or os.environ.get(REASONING_EFFORT_ENV)
@@ -387,6 +385,47 @@ def _run_user_turn(
 
     print(f"\nmanager> {last_message_text(result)}")
     return agent, active_mode
+
+
+def _load_environment_files(root_dir: Path, explicit_env_file: Path | None) -> None:
+    """Load root and fallback .env files without overriding earlier values."""
+
+    for env_file in _environment_file_candidates(root_dir, explicit_env_file):
+        load_dotenv_file(env_file)
+
+
+def _environment_file_candidates(
+    root_dir: Path,
+    explicit_env_file: Path | None,
+) -> tuple[Path, ...]:
+    """Return .env files to try in load order."""
+
+    candidates = [Path(root_dir) / ".env"]
+    if explicit_env_file is not None:
+        candidates.append(explicit_env_file)
+    else:
+        candidates.extend(
+            [
+                Path.cwd() / ".env",
+                Path(__file__).resolve().parent.parent / ".env",
+            ]
+        )
+    return _dedupe_paths(candidates)
+
+
+def _dedupe_paths(paths: list[Path]) -> tuple[Path, ...]:
+    seen: set[Path] = set()
+    deduped: list[Path] = []
+    for path in paths:
+        try:
+            key = path.resolve()
+        except OSError:
+            key = path.absolute()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(path)
+    return tuple(deduped)
 
 
 def _agent_config(
