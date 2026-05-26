@@ -86,7 +86,7 @@ def create_development_team_agent(config: AgentTeamConfig | None = None) -> Deve
         checkpointer=checkpointer_handle.checkpointer,
         debug=config.debug,
     )
-    manager_tools = [*shared_tools, *resident_team.manager_tools()]
+    manager_tools = [*shared_tools, *resident_team.manager_tools(), *config.manager_tools]
     subagents = [
         create_scout_subagent(
             model=scout_model,
@@ -103,7 +103,11 @@ def create_development_team_agent(config: AgentTeamConfig | None = None) -> Deve
         name="engineering-manager",
         model=model,
         tools=manager_tools,
-        system_prompt=engineering_manager_prompt(config.mode, artifacts_dir),
+        system_prompt=engineering_manager_prompt(
+            config.mode,
+            artifacts_dir,
+            auto_transition=config.auto_transition,
+        ),
         subagents=subagents,
         backend=backend,
         permissions=filesystem_permissions(

@@ -7,6 +7,7 @@ from pathlib import Path
 from coding_agents.artifacts import ensure_agent_workflow_files
 from coding_agents.readiness import (
     ReadinessGateError,
+    approve_readiness_gate,
     assert_readiness_approved,
     read_readiness_gate,
     readiness_gate_path,
@@ -177,6 +178,62 @@ notes: Not approved.
 
             with self.assertRaisesRegex(ReadinessGateError, "approved must be true"):
                 assert_readiness_approved(root)
+
+    def test_auto_approval_updates_unapproved_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ensure_agent_workflow_files(root)
+
+            status = approve_readiness_gate(
+                root,
+                approved_by="auto-mode",
+                approved_date="2026-05-26",
+                notes="Approved automatically from a bounded handoff.",
+            )
+
+            self.assertTrue(status.approved)
+            self.assertEqual(status.approval_scope, "full_implementation")
+            self.assertEqual(status.approved_by, "auto-mode")
+            self.assertEqual(status.approved_date, "2026-05-26")
+            self.assertIn("bounded handoff", status.notes)
+            assert_readiness_approved(root)
+            markdown = (root / "docs/agent-workflow/readiness-gate.md").read_text(encoding="utf-8")
+            self.assertIn("Status: approved for implementation", markdown)
+            self.assertIn("Approved by: auto-mode", markdown)
+
+    def test_auto_approval_does_not_overwrite_existing_approved_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            gate_dir = root / "docs/agent-workflow"
+            gate_dir.mkdir(parents=True)
+            gate_path = gate_dir / "readiness-gate.yaml"
+            gate_path.write_text(APPROVED_GATE, encoding="utf-8")
+
+            status = approve_readiness_gate(
+                root,
+                approved_by="auto-mode",
+                approved_date="2026-05-26",
+                notes="New notes.",
+            )
+
+            self.assertEqual(status.approved_by, "Engineering Manager")
+            self.assertEqual(gate_path.read_text(encoding="utf-8"), APPROVED_GATE)
+
+    def test_auto_approval_rejects_invalid_existing_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            gate_dir = root / "docs/agent-workflow"
+            gate_dir.mkdir(parents=True)
+            gate_path = gate_dir / "readiness-gate.yaml"
+            gate_path.write_text("approved: maybe\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ReadinessGateError, "Invalid readiness gate"):
+                approve_readiness_gate(
+                    root,
+                    approved_by="auto-mode",
+                    approved_date="2026-05-26",
+                    notes="New notes.",
+                )
 
     def test_wrong_scope_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

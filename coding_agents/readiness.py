@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,7 @@ from coding_agents.config import DEFAULT_ARTIFACTS_DIR
 from coding_agents.paths import validate_artifacts_dir
 
 READINESS_GATE_FILENAME = "readiness-gate.yaml"
+READINESS_GATE_MARKDOWN_FILENAME = "readiness-gate.md"
 FULL_IMPLEMENTATION_SCOPE = "full_implementation"
 READINESS_GATE_KEYS = (
     "approved",
@@ -123,6 +125,63 @@ def assert_readiness_approved(
     return status
 
 
+def approve_readiness_gate(
+    root_dir: str | Path = ".",
+    artifacts_dir: str | Path = DEFAULT_ARTIFACTS_DIR,
+    *,
+    approved_by: str,
+    notes: str,
+    approved_date: str | None = None,
+) -> ReadinessGateStatus:
+    """Write an approved full-implementation readiness gate.
+
+    This is intended for trusted runtime orchestration, not for agent filesystem
+    tools. Existing malformed or symlinked gates still fail closed instead of
+    being overwritten.
+    """
+
+    path = readiness_gate_path(root_dir, artifacts_dir)
+    if path.exists() or _gate_filename_exists_exactly(path):
+        status = read_readiness_gate(root_dir, artifacts_dir)
+        if (
+            status.approved
+            and status.approval_scope == FULL_IMPLEMENTATION_SCOPE
+            and status.approved_by.strip()
+            and status.approved_date.strip()
+        ):
+            return status
+
+    if path.is_symlink():
+        raise ReadinessGateError(
+            f"Implementation mode denied: readiness gate file must not be a symlink at {path}."
+        )
+    markdown_path = path.with_name(READINESS_GATE_MARKDOWN_FILENAME)
+    if markdown_path.exists() and markdown_path.is_symlink():
+        raise ReadinessGateError(
+            f"Implementation mode denied: readiness gate markdown must not be a symlink at {markdown_path}."
+        )
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    approval_date = approved_date or date.today().isoformat()
+    path.write_text(
+        _format_approved_gate(
+            approved_by=approved_by,
+            approved_date=approval_date,
+            notes=notes,
+        ),
+        encoding="utf-8",
+    )
+    markdown_path.write_text(
+        _format_approved_gate_markdown(
+            approved_by=approved_by,
+            approved_date=approval_date,
+            notes=notes,
+        ),
+        encoding="utf-8",
+    )
+    return assert_readiness_approved(root_dir, artifacts_dir)
+
+
 def _parse_readiness_yaml(text: str, *, path: Path) -> dict[str, Any]:
     values: dict[str, Any] = {}
     for line_number, raw_line in enumerate(text.splitlines(), start=1):
@@ -215,3 +274,50 @@ def _status_from_values(values: dict[str, Any], *, path: Path) -> ReadinessGateS
         approved_date=string_values["approved_date"],
         notes=string_values["notes"],
     )
+
+
+def _format_approved_gate(*, approved_by: str, approved_date: str, notes: str) -> str:
+    return "\n".join(
+        [
+            "# Machine-readable readiness gate for implementation mode.",
+            "# Approved by the trusted CLI runtime after an auto-mode handoff.",
+            "approved: true",
+            f"approval_scope: {FULL_IMPLEMENTATION_SCOPE}",
+            f"approved_by: {_quoted_scalar(approved_by)}",
+            f"approved_date: {_quoted_scalar(approved_date)}",
+            f"notes: {_quoted_scalar(notes)}",
+            "",
+        ]
+    )
+
+
+def _quoted_scalar(value: str) -> str:
+    compact = " ".join(str(value).split())
+    return f'"{compact.replace(chr(34), chr(39))}"'
+
+
+def _format_approved_gate_markdown(*, approved_by: str, approved_date: str, notes: str) -> str:
+    compact_notes = " ".join(str(notes).split())
+    return f"""# Readiness Gate
+
+Status: approved for implementation
+
+Implementation mode is approved by the trusted CLI runtime after an auto-mode
+bounded handoff. The machine-readable readiness gate remains authoritative for
+runtime enforcement.
+
+## Approval
+
+- Approved: yes
+- Approval scope: `{FULL_IMPLEMENTATION_SCOPE}`
+- Approved by: {approved_by}
+- Approved date: {approved_date}
+- Notes: {compact_notes}
+
+## Checklist
+
+- [x] Product scope is bounded for this implementation handoff.
+- [x] Acceptance criteria are defined for the bounded task.
+- [x] Validation plan is defined for the bounded task.
+- [x] Runtime readiness gate records full implementation approval.
+"""

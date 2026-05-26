@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
@@ -13,6 +13,8 @@ from coding_agents.paths import validate_artifacts_dir
 
 
 AgentMode = Literal["shaping", "implementation"]
+WorkflowMode = Literal["auto", "shaping", "implementation"]
+ReadinessApprovalPolicy = Literal["auto", "confirm", "manual"]
 CheckpointerBackend = Literal["memory", "sqlite", "postgres"]
 ExecutionBackend = Literal["none", "local"]
 
@@ -49,6 +51,8 @@ class AgentTeamConfig:
     sqlite_checkpoint_path: str | Path | None = None
     postgres_checkpoint_url: str | None = None
     execution_backend: ExecutionBackend | None = None
+    manager_tools: tuple[Any, ...] = field(default_factory=tuple)
+    auto_transition: bool = False
     skills: tuple[str, ...] = field(default_factory=tuple)
     memory: tuple[str, ...] = field(default_factory=tuple)
     implementation_write_paths: tuple[str, ...] = field(default_factory=tuple)

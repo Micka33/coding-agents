@@ -428,6 +428,18 @@ class TeamGovernanceTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             _parse_args(["--artifacts-dir", "."])
 
+    def test_cli_defaults_to_auto_mode_with_auto_readiness_approval(self) -> None:
+        args = _parse_args([])
+
+        self.assertEqual(args.mode, "auto")
+        self.assertEqual(args.readiness_approval, "auto")
+
+    def test_cli_accepts_prompt_and_env_file_for_non_interactive_runs(self) -> None:
+        args = _parse_args(["--prompt", "build it", "--env-file", ".env"])
+
+        self.assertEqual(args.prompt, "build it")
+        self.assertEqual(args.env_file, Path(".env"))
+
     def test_cli_accepts_repeated_implementation_write_paths(self) -> None:
         args = _parse_args(
             [
