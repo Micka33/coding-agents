@@ -1,237 +1,124 @@
 # coding-agents
 
-A reusable Python module and minimal CLI for a development-agent team built on
+`coding-agents` est une équipe locale d'agents de développement basée sur
 LangChain Deep Agents.
 
-## V0 scope
+L'outil sert à développer dans un repo avec:
 
-- `engineering-manager` as the main Deep Agent
-- resident product and architecture agents with checkpointed thread memory
-- `scout` subagent for fast codebase reconnaissance before status/progress
-  answers
-- specialist subagents for development, review, QA, DevOps, security, and
-  documentation after readiness approval
-- web tools powered by Tavily: `web_search` and `fetch_url`
-- shaping mode by default
-- implementation mode only after readiness approval
-- workflow artifacts in `docs/agent-workflow/`
-- versioned files plus checkpointed thread state for V0 memory
+- un `engineering-manager` qui pilote la conversation;
+- deux agents persistants, `product analyst` et `software architect`;
+- des agents spécialisés non persistants, par exemple developer, reviewer, QA;
+- une Web UI locale pour lire l'historique, les outils appelés, les runs
+  d'agents et les estimations de coût.
 
-Resident product and architecture memory survives CLI restarts through the local
-SQLite LangGraph checkpointer by default. A Postgres checkpointer adapter is also
-available for shared deployments, and an in-memory backend is available for tests
-or disposable sessions.
+## Démarrage rapide
 
-See [Development Agent Team Architecture](docs/development-agent-team-architecture.md)
-for the full specification.
-
-## Runtime support
-
-V0 supports Python `>=3.11,<4.0`. The CI matrix validates Python 3.11, 3.12,
-3.13, and 3.14. The local `.python-version` is `3.11` so contributor defaults
-exercise the supported floor.
-
-## Installation and setup
-
-Install locked dependencies with `uv`:
+Installe les dépendances:
 
 ```bash
 uv sync --locked
 ```
 
-Set a model API key before starting the interactive agent. Set `TAVILY_API_KEY`
-when you want the web tools to work:
+Configure au minimum une clé OpenAI:
 
 ```bash
 export OPENAI_API_KEY="..."
-export TAVILY_API_KEY="..."  # optional until web tools are used
+export TAVILY_API_KEY="..."  # optionnel, utile pour les outils web
 ```
 
-Start the CLI through the package script:
+Lance une session agent pour développer dans ce repo:
 
 ```bash
-uv run coding-agents
+uv run coding-agents \
+  --root /Users/mickael/Documents/github/coding-agents \
+  --mode implementation \
+  --thread-id implementation-main
 ```
 
-The legacy launcher is also available:
+Dans un second terminal, lance la Web UI:
 
 ```bash
-uv run python main.py
+uv run python webui/server.py --db .coding-agents/checkpoints.sqlite --port 8766
 ```
 
-## Configuration
+Puis ouvre:
 
-You can configure defaults in `.env` or through CLI flags:
-
-```bash
-CODING_AGENTS_MODEL=openai:gpt-5.5
-CODING_AGENTS_REASONING_EFFORT=xhigh
-CODING_AGENTS_SCOUT_MODEL=openai:gpt-5.5
-CODING_AGENTS_SCOUT_REASONING_EFFORT=medium
-CODING_AGENTS_CHECKPOINTER=sqlite
-CODING_AGENTS_SQLITE_CHECKPOINT_PATH=.coding-agents/checkpoints.sqlite
-CODING_AGENTS_EXECUTION=none
+```text
+http://127.0.0.1:8766
 ```
 
-When an OpenAI model is used with `CODING_AGENTS_REASONING_EFFORT`, the module
-uses the OpenAI Responses API and requests reasoning summaries with
-`reasoning.summary=auto` so reasoning and function tools can work together and
-summaries can be persisted in checkpointed messages.
+## Développer avec la Web UI
 
-### Checkpointers
+La Web UI aide à comprendre ce que font les agents pendant le développement.
+Elle lit directement l'historique persistant LangGraph et se rafraîchit en live.
 
-SQLite is the default local backend:
+![Vue en colonnes de la Web UI](docs/assets/webui-overview.jpg)
 
-```bash
-uv run coding-agents --checkpointer sqlite
-```
+Tu peux:
 
-Use memory for disposable smoke tests or local experiments:
+- afficher un agent seul ou plusieurs agents en colonnes;
+- activer/désactiver les colonnes depuis les noms d'agents;
+- synchroniser le scroll quand les timestamps sont disponibles;
+- garder le Markdown activé pour lire les réponses LLM;
+- ouvrir les appels d'agents non persistants dans un panneau latéral;
+- voir les appels outils sans devoir tout expand, notamment les chemins de
+  fichiers et les commandes exécutées;
+- suivre une estimation de coût par thread, colonne ou run.
 
-```bash
-uv run coding-agents --checkpointer memory
-```
+Les appels outils et les payloads détaillés restent repliés par défaut pour
+garder l'historique lisible. Les commentaires et réflexions restent visibles
+quand ils contiennent du texte utile.
 
-Postgres checkpointing is available when needed:
+## Détails des runs
 
-```bash
-CODING_AGENTS_CHECKPOINTER=postgres
-CODING_AGENTS_POSTGRES_URL=postgresql://user:password@host:5432/dbname
-uv run coding-agents --checkpointer postgres
-```
+Quand le manager appelle un agent non persistant, par exemple `developer`, tu
+peux ouvrir son transcript complet dans le panneau latéral ou l'ajouter comme
+colonne temporaire.
 
-### Threads
+![Panneau latéral d'un run developer](docs/assets/webui-run-drawer.jpg)
 
-Use the same thread id to continue a previous conversation. The CLI restores the
-visible user/manager transcript before showing the next prompt:
+## Coût estimé
 
-```bash
-uv run coding-agents --thread-id feature-shaping
-```
+Les coûts sont calculés à partir des tokens d'usage stockés dans les messages et
+du catalogue de prix versionné dans `webui/pricing/`.
 
-### Model and reasoning overrides
+![Panneau de coût avec bar chart](docs/assets/webui-cost-breakdown.jpg)
 
-```bash
-uv run coding-agents --model openai:gpt-5.4
-uv run coding-agents --reasoning-effort xhigh
-uv run coding-agents --scout-reasoning-effort medium
-```
+Le détail affiche:
 
-## CLI workflow
+- input, input cache, output et reasoning tokens;
+- breakdown par modèle;
+- breakdown par source;
+- coût par heure, jour ou semaine;
+- tarif sélectionné : standard, batch, flex ou priority.
 
-Initialize workflow artifacts without starting the agent:
+## Commandes utiles
 
-```bash
-uv run coding-agents --init-only
-```
-
-By default the CLI starts in shaping mode:
-
-```bash
-uv run coding-agents --mode shaping
-```
-
-Use implementation mode only after `docs/agent-workflow/readiness-gate.yaml`
-records full implementation approval:
-
-```bash
-uv run coding-agents --mode implementation
-```
-
-The CLI prompt is a safe interactive smoke path in shaping mode and does not
-require implementation-mode approval. Type `/help` for commands and `/exit` or
-`/quit` to stop.
-
-## Execution and write boundaries
-
-Shaping and implementation modes use local command execution by default for
-trusted runs:
-
-```bash
-uv run coding-agents --mode shaping
-uv run coding-agents --mode implementation
-```
-
-Disable local command execution when you want a read/write-only session:
-
-```bash
-uv run coding-agents --mode shaping --execution none
-uv run coding-agents --mode implementation --execution none
-```
-
-Local execution exposes Deep Agents' `execute` tool to the engineering-manager
-graph. In implementation mode it also exposes `execute` to implementation
-specialists. Commands run on this machine with the current user's environment and
-permissions; filesystem permissions do not sandbox shell commands. Shell output
-is best-effort redacted before it is returned to the agent.
-
-Implementation mode has repo-wide filesystem write access by default after
-readiness approval, except for protected files such as the machine-readable
-readiness gate and common secret-like paths. Use repeated `--write-path`
-arguments only when you want to restrict an implementation run to specific files
-or directories:
-
-```bash
-uv run coding-agents --mode implementation --write-path coding_agents/ --write-path tests/
-```
-
-Scout and resident product/architecture agents remain without general shell
-execution. Scout uses scoped read tools and Python literal grep.
-
-## Tests, packaging, and CI
-
-Run the full local unit suite:
+Lancer les tests:
 
 ```bash
 uv run python -m unittest discover -s tests
 ```
 
-Run the suite against a specific supported Python version:
+Initialiser les artefacts de workflow sans lancer l'agent:
 
 ```bash
-uv run --python 3.11 python -m unittest discover -s tests
-uv run --python 3.14 python -m unittest discover -s tests
+uv run coding-agents --init-only
 ```
 
-Build the wheel:
+Continuer une conversation existante:
 
 ```bash
-uv build --wheel --out-dir dist
+uv run coding-agents \
+  --root /Users/mickael/Documents/github/coding-agents \
+  --mode implementation \
+  --thread-id implementation-main
 ```
 
-GitHub Actions CI is defined in `.github/workflows/ci.yml`. It runs on pushes and
-pull requests, validates Python 3.11 through 3.14, runs the unit suite, builds the
-wheel, installs it in a clean environment, and runs `coding-agents --init-only` as
-a CLI smoke check.
+## Documentation
 
-## Python API
-
-The V0 first-party API surface is intentionally small:
-
-```python
-from coding_agents import AgentTeamConfig, create_development_team_agent
-
-with create_development_team_agent(
-    AgentTeamConfig(
-        model="openai:gpt-5.5",
-        mode="shaping",
-        checkpointer_backend="sqlite",
-    )
-) as agent:
-    result = agent.invoke(
-        {"messages": [{"role": "user", "content": "Shape a new feature"}]},
-        config={"configurable": {"thread_id": "feature-shaping"}},
-    )
-```
-
-## Limitations
-
-- V0 is for local/repository use. It is not a production service or external SDK.
-- Do not claim production readiness from local validation alone; use the CI results
-  and workflow artifacts as release evidence.
-- Local shell execution is intentionally powerful. Use `--execution none` when a
-  run must not execute commands.
-- Tavily `fetch_url` sends requested URLs and extraction queries to Tavily; avoid
-  using it with private URLs or sensitive content unless that is acceptable.
-- Secret-file blocking and output redaction are best-effort safeguards, not a
-  replacement for avoiding secret reads or secret-printing commands.
+- [Development notes](development.md) pour la configuration, les checkpointers,
+  les tests, l'API Python et les limites connues.
+- [Development Agent Team Architecture](docs/development-agent-team-architecture.md)
+  pour la spécification complète de l'équipe d'agents.
+- [Web UI README](webui/README.md) pour les endpoints locaux de la Web UI.
