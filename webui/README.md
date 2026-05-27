@@ -19,7 +19,7 @@ http://127.0.0.1:8765
 
 ## Ce qui est affiché
 
-- vue par agent ou en trois colonnes;
+- vue par agent ou en colonnes dynamiques depuis le manifest runtime;
 - option de scroll synchronisé quand des timestamps existent;
 - blocs de réflexion collapsed par défaut;
 - appels outils collapsed par défaut;

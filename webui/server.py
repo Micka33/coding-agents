@@ -25,38 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WEBUI_DIR = Path(__file__).resolve().parent
 STATIC_DIR = WEBUI_DIR / "static"
 DEFAULT_DB_PATH = ROOT / ".coding-agents" / "checkpoints.sqlite"
-
-AGENT_DEFINITIONS = (
-    {
-        "id": "manager",
-        "name": "Engineering manager",
-        "shortName": "Manager",
-        "threadSuffix": "",
-        "kind": "resident",
-        "accent": "manager",
-    },
-    {
-        "id": "product-analyst",
-        "name": "Product analyst",
-        "shortName": "Product",
-        "threadSuffix": ":resident:product-analyst",
-        "kind": "resident",
-        "accent": "product",
-    },
-    {
-        "id": "software-architect",
-        "name": "Software architect",
-        "shortName": "Architect",
-        "threadSuffix": ":resident:software-architect",
-        "kind": "resident",
-        "accent": "architect",
-    },
-)
-
-RESIDENT_AGENT_TOOLS = {
-    "ask_product_analyst": "product-analyst",
-    "ask_software_architect": "software-architect",
-}
+PARENT_THREAD_TOKEN = "{parent_thread_id}"
 
 
 class CheckpointHistoryReader:
@@ -73,24 +42,14 @@ class CheckpointHistoryReader:
             raise FileNotFoundError(f"Checkpoint database not found: {self.db_path}")
 
         with self._connect() as conn:
-            threads = self._discover_manager_threads(conn)
-            active_thread_id = self._resolve_active_thread(threads, requested_thread_id)
-            task_runs = self._load_task_runs(conn, active_thread_id, include_messages=False)
-            agents = []
-            for definition in AGENT_DEFINITIONS:
-                thread_id = f"{active_thread_id}{definition['threadSuffix']}"
-                messages = self._load_thread_messages(conn, thread_id, definition["id"])
-                if definition["id"] == "manager":
-                    self._attach_task_runs(messages, task_runs)
-                agents.append(
-                    {
-                        **definition,
-                        "threadId": thread_id,
-                        "exists": self._thread_exists(conn, thread_id),
-                        "messages": messages,
-                        "stats": self._agent_stats(messages),
-                    }
-                )
+            manifests = self._load_runtime_manifests(conn)
+            checkpoint_thread_ids = self._checkpoint_thread_ids(conn)
+            threads = self._discover_manager_threads(conn, manifests, checkpoint_thread_ids)
+            active_thread_id = self._resolve_active_thread(threads, requested_thread_id, manifests)
+            manifest = self._select_runtime_manifest(manifests, active_thread_id, checkpoint_thread_ids)
+            runtime_lanes = self._runtime_lanes_for(manifest, active_thread_id)
+            relation_tool_targets = self._relation_tool_targets(runtime_lanes)
+            agents, task_runs = self._agent_columns_from_lanes(conn, runtime_lanes, relation_tool_targets)
 
             has_timestamps = any(
                 message.get("timestamp", {}).get("epochMs")
@@ -113,10 +72,12 @@ class CheckpointHistoryReader:
                 "threads": threads,
                 "agents": agents,
                 "taskRuns": task_runs,
+                "runtimeManifest": self._manifest_summary(manifest),
+                "runtimeLanes": runtime_lanes,
                 "cost": thread_cost,
                 "pricing": self._pricing_metadata(),
                 "hasTimestamps": has_timestamps,
-                "residentAgentTools": RESIDENT_AGENT_TOOLS,
+                "residentAgentTools": self._resident_agent_tools_payload(runtime_lanes),
             }
 
     def build_task_run(self, requested_thread_id: str | None, run_id: str) -> dict[str, Any]:
@@ -124,20 +85,38 @@ class CheckpointHistoryReader:
             raise FileNotFoundError(f"Checkpoint database not found: {self.db_path}")
 
         with self._connect() as conn:
-            threads = self._discover_manager_threads(conn)
-            active_thread_id = self._resolve_active_thread(threads, requested_thread_id)
-            task_runs = self._load_task_runs(conn, active_thread_id, include_messages=True)
-            manager_messages = self._load_thread_messages(conn, active_thread_id, "manager")
-            self._attach_task_runs(manager_messages, task_runs)
-            for run in task_runs:
-                if run["id"] == run_id:
-                    return {
-                        "dbPath": str(self.db_path),
-                        "generatedAt": _timestamp_info(datetime.now(UTC).isoformat()),
-                        "activeThreadId": active_thread_id,
-                        "pricing": self._pricing_metadata(),
-                        "run": run,
-                    }
+            manifests = self._load_runtime_manifests(conn)
+            checkpoint_thread_ids = self._checkpoint_thread_ids(conn)
+            threads = self._discover_manager_threads(conn, manifests, checkpoint_thread_ids)
+            active_thread_id = self._resolve_active_thread(threads, requested_thread_id, manifests)
+            manifest = self._select_runtime_manifest(manifests, active_thread_id, checkpoint_thread_ids)
+            runtime_lanes = self._runtime_lanes_for(manifest, active_thread_id)
+            relation_tool_targets = self._relation_tool_targets(runtime_lanes)
+
+            for lane in self._conversation_lanes(runtime_lanes):
+                task_runs = self._load_task_runs(
+                    conn,
+                    lane["threadId"],
+                    include_messages=True,
+                    relation_tool_targets=relation_tool_targets,
+                )
+                manager_messages = self._load_thread_messages(
+                    conn,
+                    lane["threadId"],
+                    lane["id"],
+                    source_agent_id=lane.get("agentId"),
+                    relation_tool_targets=relation_tool_targets,
+                )
+                self._attach_task_runs(manager_messages, task_runs)
+                for run in task_runs:
+                    if run["id"] == run_id:
+                        return {
+                            "dbPath": str(self.db_path),
+                            "generatedAt": _timestamp_info(datetime.now(UTC).isoformat()),
+                            "activeThreadId": active_thread_id,
+                            "pricing": self._pricing_metadata(),
+                            "run": run,
+                        }
         raise KeyError(f"Task run not found: {run_id}")
 
     def _connect(self) -> sqlite3.Connection:
@@ -145,7 +124,16 @@ class CheckpointHistoryReader:
         conn.row_factory = sqlite3.Row
         return conn
 
-    def _discover_manager_threads(self, conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    def _checkpoint_thread_ids(self, conn: sqlite3.Connection) -> set[str]:
+        rows = conn.execute("SELECT DISTINCT thread_id FROM checkpoints WHERE checkpoint_ns = ''").fetchall()
+        return {str(row["thread_id"]) for row in rows}
+
+    def _discover_manager_threads(
+        self,
+        conn: sqlite3.Connection,
+        manifests: list[dict[str, Any]],
+        checkpoint_thread_ids: set[str],
+    ) -> list[dict[str, Any]]:
         rows = conn.execute(
             """
             SELECT c.thread_id, c.checkpoint_id, c.type, c.checkpoint, counts.count AS checkpoint_count
@@ -163,10 +151,11 @@ class CheckpointHistoryReader:
             """
         ).fetchall()
 
+        relation_thread_ids = self._relation_thread_ids(checkpoint_thread_ids, manifests)
         threads: list[dict[str, Any]] = []
         for row in rows:
             thread_id = str(row["thread_id"])
-            if ":resident:" in thread_id:
+            if thread_id in relation_thread_ids:
                 continue
             checkpoint = self._loads_typed(row["type"], row["checkpoint"], {})
             updated_at = _timestamp_info(checkpoint.get("ts") if isinstance(checkpoint, dict) else None)
@@ -184,15 +173,364 @@ class CheckpointHistoryReader:
         self,
         threads: list[dict[str, Any]],
         requested_thread_id: str | None,
+        manifests: list[dict[str, Any]],
     ) -> str:
         if requested_thread_id:
-            base_thread_id = requested_thread_id.split(":resident:", 1)[0]
+            base_thread_id = self._parent_thread_id_for_relation(requested_thread_id, manifests) or requested_thread_id
             if any(thread["id"] == base_thread_id for thread in threads):
                 return base_thread_id
             return base_thread_id
         if threads:
             return threads[0]["id"]
         return "default"
+
+    def _load_runtime_manifests(self, conn: sqlite3.Connection) -> list[dict[str, Any]]:
+        if not self._table_exists(conn, "team_runtime_lanes"):
+            return []
+
+        manifest_metadata: dict[str, dict[str, Any]] = {}
+        if self._table_exists(conn, "team_runtime_manifests"):
+            rows = conn.execute(
+                """
+                SELECT team_id, manifest_version, created_at, manifest_json
+                FROM team_runtime_manifests
+                """
+            ).fetchall()
+            for row in rows:
+                manifest_metadata[str(row["team_id"])] = {
+                    "teamId": str(row["team_id"]),
+                    "manifestVersion": row["manifest_version"],
+                    "createdAt": row["created_at"],
+                    "manifestJson": row["manifest_json"],
+                }
+
+        lane_rows = conn.execute(
+            """
+            SELECT
+                team_id,
+                lane_id,
+                kind,
+                agent_id,
+                agent_name,
+                source_agent_id,
+                target_agent_id,
+                tool_name,
+                thread_id_pattern
+            FROM team_runtime_lanes
+            ORDER BY team_id ASC, lane_id ASC
+            """
+        ).fetchall()
+
+        by_team: dict[str, dict[str, Any]] = {}
+        for row in lane_rows:
+            team_id = str(row["team_id"])
+            manifest = by_team.setdefault(
+                team_id,
+                {
+                    "teamId": team_id,
+                    "manifestVersion": manifest_metadata.get(team_id, {}).get("manifestVersion"),
+                    "createdAt": manifest_metadata.get(team_id, {}).get("createdAt"),
+                    "lanes": [],
+                },
+            )
+            manifest["lanes"].append(
+                {
+                    "id": str(row["lane_id"]),
+                    "laneId": str(row["lane_id"]),
+                    "kind": str(row["kind"]),
+                    "agentId": _optional_str(row["agent_id"]),
+                    "agentName": _optional_str(row["agent_name"]),
+                    "sourceAgentId": _optional_str(row["source_agent_id"]),
+                    "targetAgentId": _optional_str(row["target_agent_id"]),
+                    "toolName": _optional_str(row["tool_name"]),
+                    "threadIdPattern": _optional_str(row["thread_id_pattern"]),
+                }
+            )
+
+        for manifest in by_team.values():
+            manifest["lanes"] = self._sorted_runtime_lanes(manifest["lanes"])
+        return list(by_team.values())
+
+    def _sorted_runtime_lanes(self, lanes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        entrypoint_agent_id = next(
+            (lane.get("agentId") for lane in lanes if lane.get("kind") == "entrypoint"),
+            None,
+        )
+
+        def sort_key(lane: dict[str, Any]) -> tuple[int, str]:
+            if lane.get("kind") == "entrypoint":
+                rank = 0
+            elif lane.get("kind") == "tool-relation" and lane.get("sourceAgentId") == entrypoint_agent_id:
+                rank = 1
+            elif lane.get("kind") == "tool-relation":
+                rank = 2
+            elif lane.get("kind") == "task-subagent-type":
+                rank = 3
+            else:
+                rank = 4
+            return (rank, str(lane.get("laneId") or lane.get("id") or ""))
+
+        return sorted(lanes, key=sort_key)
+
+    def _table_exists(self, conn: sqlite3.Connection, name: str) -> bool:
+        row = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
+            (name,),
+        ).fetchone()
+        return row is not None
+
+    def _select_runtime_manifest(
+        self,
+        manifests: list[dict[str, Any]],
+        active_thread_id: str,
+        checkpoint_thread_ids: set[str],
+    ) -> dict[str, Any] | None:
+        if not manifests:
+            return None
+        if len(manifests) == 1:
+            return manifests[0]
+
+        def score(manifest: dict[str, Any]) -> tuple[int, int, str]:
+            relation_matches = sum(
+                1
+                for lane in manifest.get("lanes", [])
+                if lane.get("kind") == "tool-relation"
+                and self._lane_thread_id(lane, active_thread_id) in checkpoint_thread_ids
+            )
+            exact_team_match = 1 if manifest.get("teamId") == active_thread_id else 0
+            return (relation_matches, exact_team_match, str(manifest.get("createdAt") or ""))
+
+        return max(manifests, key=score)
+
+    def _runtime_lanes_for(self, manifest: dict[str, Any] | None, parent_thread_id: str) -> list[dict[str, Any]]:
+        if manifest is None:
+            return [
+                {
+                    "id": "entrypoint",
+                    "laneId": "entrypoint",
+                    "kind": "entrypoint",
+                    "agentId": "entrypoint",
+                    "agentName": "Entrypoint",
+                    "sourceAgentId": None,
+                    "targetAgentId": None,
+                    "toolName": None,
+                    "threadIdPattern": PARENT_THREAD_TOKEN,
+                    "threadId": parent_thread_id,
+                }
+            ]
+
+        lanes = []
+        for lane in manifest.get("lanes", []):
+            next_lane = dict(lane)
+            thread_id = self._lane_thread_id(next_lane, parent_thread_id)
+            if thread_id is not None:
+                next_lane["threadId"] = thread_id
+            lanes.append(next_lane)
+        return lanes
+
+    def _manifest_summary(self, manifest: dict[str, Any] | None) -> dict[str, Any] | None:
+        if manifest is None:
+            return None
+        return {
+            "teamId": manifest.get("teamId"),
+            "manifestVersion": manifest.get("manifestVersion"),
+            "createdAt": manifest.get("createdAt"),
+        }
+
+    def _conversation_lanes(self, runtime_lanes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return [lane for lane in runtime_lanes if lane.get("threadId")]
+
+    def _lane_thread_id(self, lane: dict[str, Any], parent_thread_id: str) -> str | None:
+        if lane.get("kind") == "task-subagent-type":
+            return None
+        pattern = lane.get("threadIdPattern")
+        if not pattern:
+            return parent_thread_id if lane.get("kind") == "entrypoint" else None
+        return str(pattern).replace(PARENT_THREAD_TOKEN, parent_thread_id)
+
+    def _relation_thread_ids(self, thread_ids: set[str], manifests: list[dict[str, Any]]) -> set[str]:
+        relation_thread_ids = set()
+        for thread_id in thread_ids:
+            parent_thread_id = self._parent_thread_id_for_relation(thread_id, manifests)
+            if parent_thread_id in thread_ids:
+                relation_thread_ids.add(thread_id)
+        return relation_thread_ids
+
+    def _parent_thread_id_for_relation(self, thread_id: str, manifests: list[dict[str, Any]]) -> str | None:
+        for manifest in manifests:
+            for lane in manifest.get("lanes", []):
+                if lane.get("kind") != "tool-relation":
+                    continue
+                parent_thread_id = self._parent_from_thread_pattern(thread_id, lane.get("threadIdPattern"))
+                if parent_thread_id:
+                    return parent_thread_id
+        return None
+
+    def _parent_from_thread_pattern(self, thread_id: str, pattern: str | None) -> str | None:
+        if not pattern or PARENT_THREAD_TOKEN not in pattern:
+            return None
+        prefix, suffix = pattern.split(PARENT_THREAD_TOKEN, 1)
+        if prefix or not suffix or not thread_id.endswith(suffix):
+            return None
+        parent_thread_id = thread_id[: -len(suffix)]
+        return parent_thread_id or None
+
+    def _relation_tool_targets(self, runtime_lanes: list[dict[str, Any]]) -> dict[tuple[str, str], str]:
+        targets: dict[tuple[str, str], str] = {}
+        for lane in runtime_lanes:
+            if lane.get("kind") != "tool-relation":
+                continue
+            source_agent_id = lane.get("sourceAgentId")
+            tool_name = lane.get("toolName")
+            target_agent_id = lane.get("targetAgentId") or lane.get("agentId")
+            if source_agent_id and tool_name and target_agent_id:
+                targets[(str(source_agent_id), str(tool_name))] = str(target_agent_id)
+        return targets
+
+    def _resident_agent_tools_payload(self, runtime_lanes: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            lane["id"]: {
+                "sourceAgentId": lane.get("sourceAgentId"),
+                "targetAgentId": lane.get("targetAgentId") or lane.get("agentId"),
+                "toolName": lane.get("toolName"),
+            }
+            for lane in runtime_lanes
+            if lane.get("kind") == "tool-relation"
+        }
+
+    def _agent_columns_from_lanes(
+        self,
+        conn: sqlite3.Connection,
+        runtime_lanes: list[dict[str, Any]],
+        relation_tool_targets: dict[tuple[str, str], str],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        columns: dict[str, dict[str, Any]] = {}
+        task_runs: list[dict[str, Any]] = []
+
+        for lane in self._conversation_lanes(runtime_lanes):
+            thread_id = lane["threadId"]
+            exists = self._thread_exists(conn, thread_id)
+            lane_task_runs = self._load_task_runs(
+                conn,
+                thread_id,
+                include_messages=False,
+                relation_tool_targets=relation_tool_targets,
+            )
+            messages = self._load_thread_messages(
+                conn,
+                thread_id,
+                lane["id"],
+                source_agent_id=lane.get("agentId"),
+                relation_tool_targets=relation_tool_targets,
+            )
+            if lane.get("kind") != "entrypoint" and not exists and not messages and not lane_task_runs:
+                continue
+
+            self._attach_task_runs(messages, lane_task_runs)
+            task_runs.extend(lane_task_runs)
+
+            agent_id = str(lane.get("agentId") or lane["id"])
+            column = columns.setdefault(agent_id, self._agent_column_shell(agent_id, lane))
+            section_count = len(column["_sections"])
+            include_marker = lane.get("kind") != "entrypoint" or section_count > 0
+            column["_sections"].append(lane)
+            column["_statMessages"].extend(messages)
+            column["messages"].extend(self._messages_for_agent_column(lane, messages, include_marker))
+            column["exists"] = bool(column["exists"] or exists or messages or lane_task_runs)
+            if lane.get("kind") == "entrypoint":
+                column["accent"] = "manager"
+
+        agents = []
+        for column in columns.values():
+            section_count = len(column["_sections"])
+            column["threadId"] = self._column_thread_label(column["_sections"])
+            column["stats"] = self._agent_stats(column["_statMessages"])
+            del column["_sections"]
+            del column["_statMessages"]
+            if section_count > 1:
+                column["kind"] = "agent-group"
+            agents.append(column)
+        return agents, task_runs
+
+    def _agent_column_shell(self, agent_id: str, lane: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": agent_id,
+            "laneId": None,
+            "agentId": agent_id,
+            "name": str(lane.get("agentName") or lane.get("agentId") or agent_id),
+            "shortName": str(lane.get("agentName") or lane.get("agentId") or agent_id),
+            "kind": "agent",
+            "accent": self._lane_accent(lane),
+            "threadId": "",
+            "exists": False,
+            "messages": [],
+            "stats": self._agent_stats([]),
+            "_sections": [],
+            "_statMessages": [],
+        }
+
+    def _messages_for_agent_column(
+        self,
+        lane: dict[str, Any],
+        messages: list[dict[str, Any]],
+        include_marker: bool,
+    ) -> list[dict[str, Any]]:
+        prefixed_messages = [
+            {
+                **message,
+                "id": f"{lane['id']}:{message.get('id') or message.get('index')}",
+                "sourceLaneId": lane["id"],
+                "sourceThreadId": lane.get("threadId"),
+            }
+            for message in messages
+        ]
+        if not include_marker:
+            return prefixed_messages
+        return [self._lane_section_marker(lane), *prefixed_messages]
+
+    def _lane_section_marker(self, lane: dict[str, Any]) -> dict[str, Any]:
+        label = self._lane_section_label(lane)
+        detail = lane.get("threadId") or lane.get("threadIdPattern") or lane["id"]
+        return {
+            "id": f"{lane['id']}:section-marker",
+            "index": -1,
+            "agentId": lane.get("agentId") or lane["id"],
+            "type": "session",
+            "name": "Conversation",
+            "toolCallId": None,
+            "contentText": f"{label}\n{detail}",
+            "blocks": [{"type": "text", "phase": "conversation", "text": f"{label}\n{detail}"}],
+            "toolCalls": [],
+            "timestamp": {"iso": None, "epochMs": None},
+            "usage": None,
+            "responseMetadata": None,
+            "rawType": "ConversationMarker",
+        }
+
+    def _lane_section_label(self, lane: dict[str, Any]) -> str:
+        if lane.get("kind") == "entrypoint":
+            return "Conversation racine"
+        source = lane.get("sourceAgentId")
+        tool_name = lane.get("toolName")
+        if source and tool_name:
+            return f"Depuis {source} via {tool_name}"
+        if source:
+            return f"Depuis {source}"
+        return str(lane.get("laneId") or lane["id"])
+
+    def _column_thread_label(self, sections: list[dict[str, Any]]) -> str:
+        if len(sections) == 1:
+            return str(sections[0].get("threadId") or sections[0].get("threadIdPattern") or "")
+        return f"{len(sections)} conversations"
+
+    def _lane_accent(self, lane: dict[str, Any]) -> str:
+        if lane.get("kind") == "entrypoint":
+            return "manager"
+        if lane.get("kind") == "tool-relation":
+            return "resident"
+        if lane.get("kind") == "task-subagent-type":
+            return "disposable"
+        return "resident"
 
     def _thread_exists(self, conn: sqlite3.Connection, thread_id: str) -> bool:
         row = conn.execute(
@@ -206,6 +544,9 @@ class CheckpointHistoryReader:
         conn: sqlite3.Connection,
         thread_id: str,
         agent_id: str,
+        *,
+        source_agent_id: str | None = None,
+        relation_tool_targets: dict[tuple[str, str], str] | None = None,
         checkpoint_ns: str = "",
     ) -> list[dict[str, Any]]:
         rows = conn.execute(
@@ -261,6 +602,8 @@ class CheckpointHistoryReader:
                 index=index,
                 agent_id=agent_id,
                 timestamp=timestamps_by_id.get(_message_id(message) or ""),
+                source_agent_id=source_agent_id,
+                relation_tool_targets=relation_tool_targets,
             )
             for index, message in enumerate(messages)
         ]
@@ -271,6 +614,7 @@ class CheckpointHistoryReader:
         thread_id: str,
         *,
         include_messages: bool,
+        relation_tool_targets: dict[tuple[str, str], str] | None = None,
     ) -> list[dict[str, Any]]:
         rows = conn.execute(
             """
@@ -291,7 +635,13 @@ class CheckpointHistoryReader:
         runs: list[dict[str, Any]] = []
         for row in rows:
             checkpoint_ns = str(row["checkpoint_ns"])
-            messages = self._load_thread_messages(conn, thread_id, "task-run", checkpoint_ns)
+            messages = self._load_thread_messages(
+                conn,
+                thread_id,
+                "task-run",
+                relation_tool_targets=relation_tool_targets,
+                checkpoint_ns=checkpoint_ns,
+            )
             target_agent = _infer_task_run_agent(messages)
             stats = self._agent_stats(messages)
             run = {
@@ -366,9 +716,9 @@ class CheckpointHistoryReader:
                     thinking_blocks += 1
             for call in message["toolCalls"]:
                 tool_calls += 1
-                if call["name"] in RESIDENT_AGENT_TOOLS:
+                if call["kind"] == "resident-agent":
                     resident_calls += 1
-                if call["name"] == "task":
+                if call["kind"] == "disposable-agent":
                     disposable_agent_calls += 1
 
         return {
@@ -439,12 +789,19 @@ def _normalize_message(
     index: int,
     agent_id: str,
     timestamp: dict[str, Any] | None,
+    source_agent_id: str | None = None,
+    relation_tool_targets: dict[tuple[str, str], str] | None = None,
 ) -> dict[str, Any]:
     message_id = _message_id(message) or f"{agent_id}:{index}"
     message_type = _message_type(message)
     content = _message_content(message)
     blocks = _normalize_content_blocks(content)
-    tool_calls = _extract_tool_calls(message, content)
+    tool_calls = _extract_tool_calls(
+        message,
+        content,
+        source_agent_id=source_agent_id,
+        relation_tool_targets=relation_tool_targets,
+    )
     content_text = _content_to_text(content)
 
     return {
@@ -585,7 +942,13 @@ def _summary_text(summary: Any) -> str:
     return str(summary).strip()
 
 
-def _extract_tool_calls(message: Any, content: Any) -> list[dict[str, Any]]:
+def _extract_tool_calls(
+    message: Any,
+    content: Any,
+    *,
+    source_agent_id: str | None = None,
+    relation_tool_targets: dict[tuple[str, str], str] | None = None,
+) -> list[dict[str, Any]]:
     calls: dict[str, dict[str, Any]] = {}
 
     for raw_call in _jsonable(getattr(message, "tool_calls", None)) or []:
@@ -600,8 +963,16 @@ def _extract_tool_calls(message: Any, content: Any) -> list[dict[str, Any]]:
             "args": _jsonable(raw_call.get("args") or {}),
             "rawArguments": None,
             "status": raw_call.get("status"),
-            "kind": _tool_call_kind(str(raw_call.get("name") or "")),
-            "targetAgent": _target_agent(raw_call),
+            "kind": _tool_call_kind(
+                str(raw_call.get("name") or ""),
+                source_agent_id=source_agent_id,
+                relation_tool_targets=relation_tool_targets,
+            ),
+            "targetAgent": _target_agent(
+                raw_call,
+                source_agent_id=source_agent_id,
+                relation_tool_targets=relation_tool_targets,
+            ),
         }
 
     if isinstance(content, list):
@@ -621,8 +992,16 @@ def _extract_tool_calls(message: Any, content: Any) -> list[dict[str, Any]]:
                     "args": _jsonable(parsed_args if isinstance(parsed_args, dict) else {}),
                     "rawArguments": block.get("arguments"),
                     "status": block.get("status"),
-                    "kind": _tool_call_kind(name),
-                    "targetAgent": _target_agent({"name": name, "args": parsed_args}),
+                    "kind": _tool_call_kind(
+                        name,
+                        source_agent_id=source_agent_id,
+                        relation_tool_targets=relation_tool_targets,
+                    ),
+                    "targetAgent": _target_agent(
+                        {"name": name, "args": parsed_args},
+                        source_agent_id=source_agent_id,
+                        relation_tool_targets=relation_tool_targets,
+                    ),
                 },
             )
             calls[call_id]["rawFunctionId"] = block.get("id")
@@ -630,24 +1009,43 @@ def _extract_tool_calls(message: Any, content: Any) -> list[dict[str, Any]]:
             calls[call_id]["status"] = block.get("status") or calls[call_id].get("status")
             if not calls[call_id].get("args") and isinstance(parsed_args, dict):
                 calls[call_id]["args"] = _jsonable(parsed_args)
-            calls[call_id]["targetAgent"] = _target_agent(calls[call_id])
-            calls[call_id]["kind"] = _tool_call_kind(name)
+            calls[call_id]["targetAgent"] = _target_agent(
+                calls[call_id],
+                source_agent_id=source_agent_id,
+                relation_tool_targets=relation_tool_targets,
+            )
+            calls[call_id]["kind"] = _tool_call_kind(
+                name,
+                source_agent_id=source_agent_id,
+                relation_tool_targets=relation_tool_targets,
+            )
 
     return list(calls.values())
 
 
-def _tool_call_kind(name: str) -> str:
-    if name in RESIDENT_AGENT_TOOLS:
+def _tool_call_kind(
+    name: str,
+    *,
+    source_agent_id: str | None = None,
+    relation_tool_targets: dict[tuple[str, str], str] | None = None,
+) -> str:
+    if _relation_tool_target(name, source_agent_id, relation_tool_targets):
         return "resident-agent"
     if name == "task":
         return "disposable-agent"
     return "tool"
 
 
-def _target_agent(raw_call: dict[str, Any]) -> str | None:
+def _target_agent(
+    raw_call: dict[str, Any],
+    *,
+    source_agent_id: str | None = None,
+    relation_tool_targets: dict[tuple[str, str], str] | None = None,
+) -> str | None:
     name = str(raw_call.get("name") or "")
-    if name in RESIDENT_AGENT_TOOLS:
-        return RESIDENT_AGENT_TOOLS[name]
+    relation_target = _relation_tool_target(name, source_agent_id, relation_tool_targets)
+    if relation_target:
+        return relation_target
 
     args = raw_call.get("args")
     if isinstance(args, dict):
@@ -658,6 +1056,22 @@ def _target_agent(raw_call: dict[str, Any]) -> str | None:
         for line in description.splitlines():
             if line.lower().startswith("role:"):
                 return line.split(":", 1)[1].strip()
+    return None
+
+
+def _relation_tool_target(
+    name: str,
+    source_agent_id: str | None,
+    relation_tool_targets: dict[tuple[str, str], str] | None,
+) -> str | None:
+    if not relation_tool_targets:
+        return None
+    if source_agent_id and (source_agent_id, name) in relation_tool_targets:
+        return relation_tool_targets[(source_agent_id, name)]
+
+    matches = {target for (source, tool_name), target in relation_tool_targets.items() if tool_name == name}
+    if len(matches) == 1:
+        return next(iter(matches))
     return None
 
 
@@ -739,6 +1153,10 @@ def _jsonable(value: Any) -> Any:
         except Exception:
             pass
     return str(value)
+
+
+def _optional_str(value: Any) -> str | None:
+    return str(value) if value is not None else None
 
 
 class AgentHistoryRequestHandler(BaseHTTPRequestHandler):

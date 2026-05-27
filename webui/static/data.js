@@ -35,9 +35,26 @@ export function columnOptions(data) {
   }));
 
   const taskGroups = new Map();
+  (data?.runtimeLanes || [])
+    .filter((lane) => lane.kind === "task-subagent-type")
+    .forEach((lane) => {
+      const agentName = taskLaneAgentName(lane);
+      const id = lane.id || lane.laneId || taskAgentColumnId(agentName);
+      taskGroups.set(id, {
+        id,
+        name: agentName,
+        shortName: agentName,
+        kind: "task-agent-group",
+        stats: emptyStats(),
+        runIds: [],
+        runCount: 0,
+        matchNames: taskLaneMatchNames(lane),
+      });
+    });
+
   (data?.taskRuns || []).forEach((run) => {
     const agentName = taskAgentName(run);
-    const id = taskAgentColumnId(agentName);
+    const id = taskGroupIdForRun(taskGroups, agentName);
     if (!taskGroups.has(id)) {
       taskGroups.set(id, {
         id,
@@ -47,6 +64,7 @@ export function columnOptions(data) {
         stats: emptyStats(),
         runIds: [],
         runCount: 0,
+        matchNames: new Set([agentName]),
       });
     }
     const option = taskGroups.get(id);
@@ -59,7 +77,9 @@ export function columnOptions(data) {
 }
 
 export function defaultColumnIds(data) {
-  return (data?.agents || []).map((agent) => agent.id);
+  return columnOptions(data)
+    .filter((option) => option.kind !== "task-agent-group" || option.runCount > 0)
+    .map((option) => option.id);
 }
 
 export function reconcileSelectedColumnIds(data, selectedColumnIds) {
@@ -153,6 +173,26 @@ export function runAsAgent(run) {
 
 function taskAgentName(run) {
   return String(run.targetAgent || run.shortName || run.name || "agent").replace(/^Run\s+/i, "").trim() || "agent";
+}
+
+function taskLaneAgentName(lane) {
+  return String(lane.agentName || lane.agentId || lane.targetAgentId || "agent").trim() || "agent";
+}
+
+function taskLaneMatchNames(lane) {
+  return new Set(
+    [lane.agentId, lane.agentName, lane.targetAgentId]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean),
+  );
+}
+
+function taskGroupIdForRun(taskGroups, agentName) {
+  const normalized = String(agentName || "").trim();
+  for (const [id, group] of taskGroups) {
+    if (group.matchNames?.has(normalized)) return id;
+  }
+  return taskAgentColumnId(agentName);
 }
 
 function emptyStats() {

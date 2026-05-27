@@ -1,0 +1,72 @@
+schema_version: 1
+id: hello-world
+description: Minimal multilingual hello-world team with German and English agents.
+
+defaults:
+  root_dir: "."
+  model:
+    env: CODING_AGENTS_MODEL
+    default: openai:gpt-5.5
+  reasoning_effort:
+    env: CODING_AGENTS_REASONING_EFFORT
+    default: none
+  checkpointer:
+    env: CODING_AGENTS_CHECKPOINTER
+    default: sqlite
+    sqlite_path:
+      env: CODING_AGENTS_SQLITE_CHECKPOINT_PATH
+      default: .coding-agents/hello-world-checkpoints.sqlite
+    postgres_url:
+      env:
+        - CODING_AGENTS_POSTGRES_URL
+        - DATABASE_URL
+      default: null
+  execution_backend:
+    env: CODING_AGENTS_EXECUTION
+    default: none
+  memory:
+    error_when_missing: false
+    candidates: []
+
+agents:
+  german-speaker:
+    kind: deepagent
+    config: ./agents/german-speaker.mdc
+    entrypoint: true
+
+  english-speaker:
+    kind: deepagent
+    config: ./agents/english-speaker.mdc
+
+  translator:
+    kind: subagent
+    config: ./agents/translator.mdc
+
+relations:
+  - from: german-speaker
+    to: translator
+    relation: subagent
+
+  - from: english-speaker
+    to: translator
+    relation: subagent
+
+  - from: german-speaker
+    to: english-speaker
+    relation: tool
+    tool_name: ask_english_speaker
+    input_schema:
+      message: string
+    description: >
+      Send a message to the English-speaking agent. The English-speaking agent
+      only understands English and replies only in English.
+
+  - from: english-speaker
+    to: german-speaker
+    relation: tool
+    tool_name: ask_german_speaker
+    input_schema:
+      message: string
+    description: >
+      Send a message to the German-speaking agent. The German-speaking agent
+      only understands German and replies only in German.

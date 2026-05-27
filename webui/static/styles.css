@@ -576,6 +576,16 @@ select {
   border-left-color: var(--role-architect-accent);
 }
 
+.message.resident,
+.message-card.resident {
+  border-left-color: var(--role-resident-accent);
+}
+
+.message.disposable,
+.message-card.disposable {
+  border-left-color: var(--role-disposable-accent);
+}
+
 .message.human,
 .message-card.human {
   background: var(--message-human-background);

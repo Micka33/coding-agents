@@ -313,44 +313,43 @@ changelog entries, release notes, migration notes, and decision summaries.
 """ + CLARIFICATION_RULE
 
 
+IMPLEMENTATION_AGENT_DEFINITIONS: dict[str, tuple[str, str]] = {
+    "developer": (
+        "Implements a bounded development task after readiness approval, then reports changed files, tests, and risks.",
+        DEVELOPER_PROMPT,
+    ),
+    "code-reviewer": (
+        "Reviews code changes like a pull request and reports actionable findings ordered by severity.",
+        CODE_REVIEWER_PROMPT,
+    ),
+    "qa-engineer": (
+        "Validates acceptance criteria, defines and runs or recommends tests, and reports residual quality risk.",
+        QA_ENGINEER_PROMPT,
+    ),
+    "devops-engineer": (
+        "Handles build, CI, environment, packaging, deployment, and operational concerns.",
+        DEVOPS_ENGINEER_PROMPT,
+    ),
+    "security-reviewer": (
+        "Reviews security-sensitive changes, secrets, permissions, user input, shell execution, and unsafe operations.",
+        SECURITY_REVIEWER_PROMPT,
+    ),
+    "technical-writer": (
+        "Writes and updates documentation, changelogs, usage notes, release notes, and decision summaries.",
+        TECHNICAL_WRITER_PROMPT,
+    ),
+}
+
+
 def implementation_subagents(tools: Sequence[BaseTool]) -> list[dict[str, Any]]:
     """Return disposable implementation-mode subagent specs."""
 
     return [
         {
-            "name": "developer",
-            "description": "Implements a bounded development task after readiness approval, then reports changed files, tests, and risks.",
-            "system_prompt": DEVELOPER_PROMPT,
+            "name": name,
+            "description": description,
+            "system_prompt": system_prompt,
             "tools": list(tools),
-        },
-        {
-            "name": "code-reviewer",
-            "description": "Reviews code changes like a pull request and reports actionable findings ordered by severity.",
-            "system_prompt": CODE_REVIEWER_PROMPT,
-            "tools": list(tools),
-        },
-        {
-            "name": "qa-engineer",
-            "description": "Validates acceptance criteria, defines and runs or recommends tests, and reports residual quality risk.",
-            "system_prompt": QA_ENGINEER_PROMPT,
-            "tools": list(tools),
-        },
-        {
-            "name": "devops-engineer",
-            "description": "Handles build, CI, environment, packaging, deployment, and operational concerns.",
-            "system_prompt": DEVOPS_ENGINEER_PROMPT,
-            "tools": list(tools),
-        },
-        {
-            "name": "security-reviewer",
-            "description": "Reviews security-sensitive changes, secrets, permissions, user input, shell execution, and unsafe operations.",
-            "system_prompt": SECURITY_REVIEWER_PROMPT,
-            "tools": list(tools),
-        },
-        {
-            "name": "technical-writer",
-            "description": "Writes and updates documentation, changelogs, usage notes, release notes, and decision summaries.",
-            "system_prompt": TECHNICAL_WRITER_PROMPT,
-            "tools": list(tools),
-        },
+        }
+        for name, (description, system_prompt) in IMPLEMENTATION_AGENT_DEFINITIONS.items()
     ]
