@@ -433,11 +433,14 @@ select {
   grid-template-columns: repeat(var(--lane-count, 3), minmax(280px, 1fr));
   gap: 14px;
   height: 100%;
+  min-width: 0;
 }
 
 .lane,
 .single-chat {
+  min-width: 0;
   min-height: 0;
+  max-width: 100%;
   overflow: hidden;
   border: 1px solid var(--app-border);
   border-radius: 8px;
@@ -448,11 +451,13 @@ select {
 .lane {
   position: relative;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr);
 }
 
 .single-chat {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr);
   width: min(980px, 100%);
   height: 100%;
@@ -466,6 +471,8 @@ select {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  min-width: 0;
+  max-width: 100%;
   padding: 12px 14px;
   border-bottom: 1px solid var(--app-border);
   background: var(--panel-header-background);
@@ -500,12 +507,15 @@ select {
   flex-wrap: wrap;
   justify-content: flex-end;
   min-width: 92px;
+  max-width: 100%;
 }
 
 .lane-header-side {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .lane-close-button {
@@ -526,7 +536,9 @@ select {
 
 .message-list,
 .timeline-scroll {
+  min-width: 0;
   min-height: 0;
+  max-width: 100%;
   overflow: auto;
   overscroll-behavior: contain;
 }
@@ -545,11 +557,16 @@ select {
 }
 
 .message {
+  min-width: 0;
+  max-width: 100%;
   margin: 0 0 12px;
+  overflow-wrap: anywhere;
 }
 
 .message,
 .message-card {
+  min-width: 0;
+  max-width: 100%;
   padding: 11px 12px;
   border: 1px solid var(--app-border);
   border-left-width: 4px;
@@ -618,6 +635,93 @@ select {
   box-shadow: none;
 }
 
+.message.conversation-boundary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.conversation-boundary-line {
+  flex: 0 0 18px;
+  height: 1px;
+  background: var(--app-border);
+}
+
+.conversation-boundary-label {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--app-text-muted);
+  font-size: 0.74rem;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message.task-run-marker {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.task-run-marker-line {
+  flex: 0 0 18px;
+  height: 1px;
+  margin-top: 16px;
+  background: var(--app-border);
+}
+
+.task-run-marker-body {
+  min-width: 0;
+  max-width: 100%;
+  flex: 1 1 auto;
+  padding: 7px 9px;
+  border: 1px dashed var(--tool-call-disposable-border);
+  border-radius: 8px;
+  background: var(--tool-call-disposable-background);
+}
+
+.task-run-marker-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.task-run-marker-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--app-text);
+  font-size: 0.8rem;
+  font-weight: 740;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-run-input {
+  margin-top: 6px;
+}
+
+.task-run-input summary {
+  color: var(--app-text-muted);
+  cursor: pointer;
+  font-size: 0.76rem;
+}
+
+.task-run-input .tool-pre {
+  max-height: 170px;
+  margin-top: 6px;
+}
+
 .message.event-shell > .tool-call:first-child,
 .message.event-shell > details.thinking:first-child {
   margin-top: 0;
@@ -657,6 +761,8 @@ select {
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
+  min-width: 0;
+  max-width: 100%;
   margin-bottom: 8px;
 }
 
@@ -675,6 +781,8 @@ select {
 
 .text-block,
 .tool-pre {
+  min-width: 0;
+  max-width: 100%;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   line-height: 1.45;
@@ -686,7 +794,10 @@ select {
 
 .markdown-block,
 .markdown-body {
+  min-width: 0;
+  max-width: 100%;
   white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .markdown-body > :first-child {
@@ -724,6 +835,7 @@ select {
 }
 
 .markdown-body pre {
+  max-width: 100%;
   overflow: auto;
   padding: 9px 10px;
   border: 1px solid var(--app-border);
@@ -747,6 +859,7 @@ select {
 .markdown-body table {
   display: block;
   width: 100%;
+  max-width: 100%;
   overflow-x: auto;
   border-collapse: collapse;
 }
@@ -771,6 +884,8 @@ select {
 
 details.thinking,
 .tool-call {
+  min-width: 0;
+  max-width: 100%;
   margin-top: 8px;
   border: 1px solid var(--app-border);
   border-radius: 8px;
@@ -784,6 +899,8 @@ details.task-call-payload summary {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  min-width: 0;
+  max-width: 100%;
   padding: 8px 10px;
   color: var(--app-text-muted);
   cursor: pointer;
@@ -799,6 +916,8 @@ details.task-call-payload[open] summary {
 
 .thinking-body,
 .tool-body {
+  min-width: 0;
+  max-width: 100%;
   padding: 10px;
 }
 

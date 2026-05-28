@@ -125,32 +125,36 @@ function taskAgentGroupAsAgent(option, taskRunCache) {
 }
 
 function runMessagesWithSessionMarker(run, index) {
-  const firstMessage = run.messages?.[0];
+  const messages = run.messages || [];
+  const firstMessage = messages[0];
+  const inputIndex = messages.findIndex((message) => message.type === "human");
+  const inputMessage = inputIndex >= 0 ? messages[inputIndex] : null;
+  const promptText = inputMessage?.contentText || run.preview || "";
+  const sourceLabel = run.sourceAgent ? `Appel de ${run.sourceAgent}` : `Session ${index + 1}`;
+  const targetLabel = run.targetAgent || run.shortName || "agent";
   const marker = {
     id: `${run.id}:session-marker`,
     index: -1,
-    agentId: run.targetAgent || "agent",
+    agentId: targetLabel,
     type: "session",
-    name: `Session ${index + 1}`,
+    name: sourceLabel,
     toolCallId: null,
-    contentText: run.preview || run.checkpointNs || run.id,
-    blocks: [
-      {
-        type: "text",
-        phase: run.shortName || run.targetAgent || "agent",
-        text: `${run.checkpointNs || run.id}\n${run.preview || ""}`.trim(),
-      },
-    ],
+    contentText: [sourceLabel, targetLabel, promptText, run.checkpointNs || run.id].filter(Boolean).join("\n"),
+    blocks: [],
     toolCalls: [],
     timestamp: firstMessage?.timestamp || { iso: null, epochMs: null },
     usage: null,
     responseMetadata: null,
-    rawType: "SessionMarker",
+    rawType: "TaskRunMarker",
+    sourceAgent: run.sourceAgent,
+    targetAgent: targetLabel,
+    promptText,
+    checkpointNs: run.checkpointNs || run.id,
   };
 
   return [
     marker,
-    ...(run.messages || []).map((message) => ({
+    ...messages.filter((_, messageIndex) => messageIndex !== inputIndex).map((message) => ({
       ...message,
       id: `${run.id}:${message.id || message.index}`,
       sourceRunId: run.id,
@@ -412,7 +416,7 @@ export function buildTimelineRows(agents, resultMaps, search) {
 
   agents.forEach((agent) => {
     const maps = resultMaps.get(agent.id);
-    renderableMessages(agent, maps, search).forEach((message) => {
+    renderableMessages(agent, maps, search).filter(isTimelineMessage).forEach((message) => {
       const epochMs = message.timestamp?.epochMs;
       const key = epochMs
         ? String(Math.floor(epochMs / 1000) * 1000)
@@ -436,6 +440,10 @@ export function buildTimelineRows(agents, resultMaps, search) {
     if (b.epochMs) return 1;
     return a.key.localeCompare(b.key);
   });
+}
+
+function isTimelineMessage(message) {
+  return message.rawType !== "ConversationMarker";
 }
 
 export function searchableText(message, maps) {

@@ -27,6 +27,8 @@ http://127.0.0.1:8765
   résultat dans la colonne manager;
 - appels `task` vers les agents non persistants visibles depuis la colonne
   manager, avec ouverture d'un drawer de transcript complet;
+- compteurs d'en-tête qui distinguent les consultations d'agents persistants
+  des appels `task` vers les sous-agents non persistants;
 - ajout temporaire d'un run non persistant comme colonne dans la vue
   multi-colonnes;
 - rafraîchissement live par polling, avec auto-scroll seulement si la vue est

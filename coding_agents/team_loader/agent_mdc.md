@@ -62,8 +62,27 @@ Short description of the agent role.
 description: Validates acceptance criteria, defines and runs or recommends tests, and reports residual quality risk.
 ```
 
-For subagents, this is used as the subagent description. For the entrypoint, it
-is optional unless the runtime needs a display summary.
+For subagents, this is used as the subagent description exposed to parent agents
+that declare a `relation: subagent` to this agent in `team.yaml`. Parent agents
+see the subagent `name` and `description` in their available subagent list, and
+use that text to decide when to delegate through the `task` tool. The full
+Markdown body remains the subagent's own system prompt; it is not copied into
+the parent agent prompt.
+
+Example: if `translator.mdc` declares:
+
+```yaml
+name: translator
+description: Translates messages among English, German, and Japanese.
+```
+
+and `english-philosopher`, `german-philosopher`, and `japanese-philosopher` each
+declare `relation: subagent` to `translator`, those three agents can see
+`translator: Translates messages among English, German, and Japanese.` when
+choosing a subagent.
+
+For the entrypoint, `description` is optional unless the runtime needs a display
+summary.
 
 ### `model`
 

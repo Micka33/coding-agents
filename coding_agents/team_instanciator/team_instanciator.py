@@ -9,6 +9,7 @@ from .agent_graph_registry import AgentGraphRegistry
 from .agent_runtime_resolver import AgentRuntimeResolver
 from .backend_factory import BackendFactory
 from .checkpointer_factory import CheckpointerFactory
+from .checkpoint_metadata_factory import CheckpointMetadataFactory
 from .deep_agent_factory import DeepAgentFactory
 from .instantiated_team import InstantiatedTeam
 from .langchain_agent_factory import LangChainAgentFactory
@@ -49,6 +50,7 @@ class TeamInstanciator:
         toolset_resolver = ToolsetResolver(configuration, checkpointer_handle)
         relation_tool_factory = RelationToolFactory()
         thread_id_factory = ThreadIdFactory()
+        checkpoint_metadata_factory = CheckpointMetadataFactory()
         runtime_manifest = TeamRuntimeManifestBuilder(thread_id_factory).build(team)
         langchain_agent_factory = LangChainAgentFactory(model_resolver, toolset_resolver)
         subagent_factory = SubagentFactory(
@@ -57,6 +59,7 @@ class TeamInstanciator:
             toolset_resolver,
             relation_tool_factory,
             thread_id_factory,
+            checkpoint_metadata_factory,
         )
         deep_agent_factory = DeepAgentFactory(
             model_resolver,
@@ -73,6 +76,7 @@ class TeamInstanciator:
             subagent_factory,
             relation_tool_factory,
             thread_id_factory,
+            checkpoint_metadata_factory,
         )
         entrypoint = team.entrypoint()
         if entrypoint is None:

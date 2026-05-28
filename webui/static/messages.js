@@ -72,6 +72,13 @@ export function restoreDetailsState(root, openDetails, overrides = new Map()) {
 function renderMessage(message, agent, maps, context) {
   const key = messageKey(agent, message);
   const signature = messageSignature(message, maps, context);
+  if (message.rawType === "ConversationMarker") {
+    return renderConversationBoundary(message, key, signature);
+  }
+  if (message.rawType === "TaskRunMarker") {
+    return renderTaskRunMarker(message, key, signature);
+  }
+
   const speaker = speakerLabel(message, agent);
   const time = message.timestamp?.epochMs ? formatTime(message.timestamp.epochMs) : "";
   const accent = agent.accent || agent.id;
@@ -123,6 +130,54 @@ function renderMessage(message, agent, maps, context) {
     <article class="${messageClass(accent, message, selectedRunClass)}" data-message-id="${escapeAttr(message.id)}" data-message-key="${escapeAttr(key)}" data-render-hash="${escapeAttr(signature)}" data-ts="${message.timestamp?.epochMs || ""}">
       ${header}
       ${cardBody}
+    </article>
+  `;
+}
+
+function renderConversationBoundary(message, key, signature) {
+  const lines = String(message.contentText || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const title = lines[0] || "Conversation déléguée";
+  const source = lines[1] || "";
+  const toolName = source.match(/\bvia\s+(.+)$/)?.[1];
+  const label = toolName ? `Appel via ${toolName}` : source || title;
+  const fullText = lines.join("\n");
+  return `
+    <article class="message conversation-boundary" title="${escapeAttr(fullText)}" data-message-id="${escapeAttr(message.id)}" data-message-key="${escapeAttr(key)}" data-render-hash="${escapeAttr(signature)}" data-ts="">
+      <div class="conversation-boundary-line"></div>
+      <div class="conversation-boundary-label">${escapeHtml(label)}</div>
+    </article>
+  `;
+}
+
+function renderTaskRunMarker(message, key, signature) {
+  const source = message.sourceAgent || "agent appelant";
+  const target = message.targetAgent || message.agentId || "agent";
+  const prompt = String(message.promptText || "").trim();
+  const checkpoint = message.checkpointNs || "";
+  const title = `Appel de ${source} vers ${target}`;
+  const fullText = [title, checkpoint, prompt].filter(Boolean).join("\n");
+  const promptDetails = prompt
+    ? `
+      <details class="task-run-input" data-detail-key="${escapeAttr(`${key}:input`)}">
+        <summary>Prompt reçu</summary>
+        <pre class="tool-pre">${escapeHtml(prompt)}</pre>
+      </details>
+    `
+    : "";
+
+  return `
+    <article class="message task-run-marker" title="${escapeAttr(fullText)}" data-message-id="${escapeAttr(message.id)}" data-message-key="${escapeAttr(key)}" data-render-hash="${escapeAttr(signature)}" data-ts="${message.timestamp?.epochMs || ""}">
+      <div class="task-run-marker-line"></div>
+      <div class="task-run-marker-body">
+        <div class="task-run-marker-heading">
+          <span class="task-run-marker-title">${escapeHtml(title)}</span>
+          <span class="badge disposable">agent non persistant</span>
+        </div>
+        ${promptDetails}
+      </div>
     </article>
   `;
 }
@@ -466,7 +521,9 @@ function messageContainsRun(message, runId) {
 
 function speakerLabel(message, agent) {
   if (message.type === "human") {
-    return agent.id === "manager" ? "Humain" : "Manager";
+    if (agent.kind === "disposable-run" || agent.kind === "task-agent-group") return "Prompt reçu";
+    if (message.senderAgentId) return displayAgentName(message.senderAgentId);
+    return agent.id === "manager" || agent.accent === "manager" ? "Humain" : "Manager";
   }
   if (message.type === "ai") return agent.name;
   if (message.type === "tool") return `Outil: ${message.name || "résultat"}`;

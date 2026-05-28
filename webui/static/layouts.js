@@ -129,13 +129,38 @@ function renderLaneHeader(agent, className) {
         <div class="stats">
           <span class="stat">${stats.messages || 0} msg</span>
           <span class="stat">${stats.toolCalls || 0} outils</span>
-          <span class="stat">${stats.disposableAgentCalls || 0} agents</span>
+          ${renderAgentCallStats(stats)}
           ${renderCostPill(stats.cost, "column", agent.id)}
         </div>
         ${closeButton}
       </div>
     </header>
   `;
+}
+
+function renderAgentCallStats(stats) {
+  const residentCalls = stats.residentAgentCalls || 0;
+  const disposableCalls = stats.disposableAgentCalls || 0;
+  const parts = [];
+  if (residentCalls > 0) {
+    parts.push(renderStat(
+      `${residentCalls} ${pluralize(residentCalls, "consultation", "consultations")}`,
+      "Appels vers des agents persistants.",
+    ));
+  }
+  parts.push(renderStat(
+    `${disposableCalls} ${pluralize(disposableCalls, "sous-agent", "sous-agents")}`,
+    "Appels task vers des sous-agents non persistants.",
+  ));
+  return parts.join("");
+}
+
+function renderStat(label, title) {
+  return `<span class="stat" title="${escapeAttr(title)}">${escapeHtml(label)}</span>`;
+}
+
+function pluralize(count, singular, plural) {
+  return count === 1 ? singular : plural;
 }
 
 function reconcileTimelineHeaders(grid, agents) {

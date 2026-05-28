@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from langchain.tools import ToolRuntime
 
 from coding_agents.team_loader.relation_definition import RelationDefinition
 
+from .runnable_config_metadata_injector import RunnableConfigMetadataInjector
 from .thread_id_factory import ThreadIdFactory
 
 
@@ -16,11 +18,15 @@ class RelationTool:
         registry: Any,
         parent_thread_id: str,
         thread_id_factory: ThreadIdFactory,
+        checkpoint_metadata: Mapping[str, Any],
+        metadata_injector: RunnableConfigMetadataInjector | None = None,
     ) -> None:
         self._relation = relation
         self._registry = registry
         self._fallback_parent_thread_id = parent_thread_id
         self._thread_id_factory = thread_id_factory
+        self._checkpoint_metadata = dict(checkpoint_metadata)
+        self._metadata_injector = metadata_injector or RunnableConfigMetadataInjector()
 
     def run(self, message: str, runtime: ToolRuntime) -> str:
         """Send a message to a related agent."""
@@ -29,7 +35,10 @@ class RelationTool:
         thread_id = self._thread_id_factory.relation(self._parent_thread_id(runtime), self._relation)
         result = graph.invoke(
             {"messages": [{"role": "user", "content": message}]},
-            config={"configurable": {"thread_id": thread_id}},
+            config=self._metadata_injector.inject(
+                {"configurable": {"thread_id": thread_id}},
+                self._checkpoint_metadata,
+            ),
         )
         return self._last_message_text(result)
 

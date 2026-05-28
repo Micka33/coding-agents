@@ -167,16 +167,30 @@ async function refreshOpenRuns(force) {
   if (!force && !runIds.size) return;
 
   await Promise.all(
-    [...runIds].map((runId) => ensureTaskRunLoaded(runId, { force }).catch(() => null)),
+    [...runIds]
+      .filter((runId) => force || shouldRefreshTaskRun(runId))
+      .map((runId) => ensureTaskRunLoaded(runId, { force }).catch(() => null)),
   );
 }
 
 async function refreshSelectedAgentRuns(force) {
   const runIds = selectedTaskRunIds(state.data, state.selectedColumnIds).filter((runId) => {
-    return force || !state.taskRunCache.get(runId)?.messages;
+    return force || shouldRefreshTaskRun(runId);
   });
   if (!runIds.length) return;
   await Promise.all(runIds.map((runId) => ensureTaskRunLoaded(runId, { force }).catch(() => null)));
+}
+
+function shouldRefreshTaskRun(runId) {
+  const cached = state.taskRunCache.get(runId);
+  if (!cached?.messages) return true;
+
+  const latest = (state.data?.taskRuns || []).find((run) => run.id === runId);
+  if (!latest) return false;
+  return (
+    cached.checkpointCount !== latest.checkpointCount
+    || cached.lastCheckpointId !== latest.lastCheckpointId
+  );
 }
 
 function render(options = {}) {
@@ -304,7 +318,7 @@ function closeRunColumn(runId) {
 }
 
 async function ensureTaskRunLoaded(runId, options = {}) {
-  if (!options.force && state.taskRunCache.get(runId)?.messages) {
+  if (!options.force && !shouldRefreshTaskRun(runId)) {
     return state.taskRunCache.get(runId);
   }
   if (state.taskRunPromises.has(runId)) return state.taskRunPromises.get(runId);

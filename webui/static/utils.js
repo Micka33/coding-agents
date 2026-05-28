@@ -51,7 +51,9 @@ export function restorePinnedScrollers(pinned, firstLoad = false) {
 
       const shouldPin = firstLoad || !previous || previous.nearBottom;
       if (shouldPin) {
-        scrollRegionToBottom(element);
+        scrollRegionToBottom(element, {
+          smooth: Boolean(previous && previous.nearBottom && !firstLoad),
+        });
       } else {
         restoreScrollRegion(element, previous);
       }
@@ -70,8 +72,14 @@ export function restoreScrollRegion(element, previous) {
   element.scrollTop = Math.min(previous.scrollTop, maxScrollTop);
 }
 
-export function scrollRegionToBottom(element) {
-  element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
+export function scrollRegionToBottom(element, options = {}) {
+  const top = Math.max(0, element.scrollHeight - element.clientHeight);
+  if (options.smooth && typeof element.scrollTo === "function") {
+    element.scrollTo({ top, behavior: "smooth" });
+    return;
+  }
+
+  element.scrollTop = top;
   const lastChild = element.lastElementChild;
   if (lastChild && typeof lastChild.scrollIntoView === "function") {
     lastChild.scrollIntoView({ block: "end", inline: "nearest" });
@@ -88,11 +96,11 @@ function didScrollAfterCapture(element, previous) {
 }
 
 function scrollContentSignature(element) {
-  const children = Array.from(element.children);
-  const firstKey = children[0]?.dataset.messageKey || children[0]?.dataset.rowKey || "";
-  const lastKey = children.at(-1)?.dataset.messageKey || children.at(-1)?.dataset.rowKey || "";
-  const firstHash = children[0]?.dataset.renderHash || "";
-  const lastHash = children.at(-1)?.dataset.renderHash || "";
+  const children = scrollSignatureChildren(element);
+  const firstKey = signatureKey(children[0]);
+  const lastKey = signatureKey(children.at(-1));
+  const firstHash = signatureHash(children[0]);
+  const lastHash = signatureHash(children.at(-1));
   return [
     children.length,
     firstKey,
@@ -100,6 +108,19 @@ function scrollContentSignature(element) {
     lastKey,
     lastHash,
   ].join(":");
+}
+
+function scrollSignatureChildren(element) {
+  const nested = Array.from(element.querySelectorAll("[data-message-key], [data-row-key]"));
+  return nested.length ? nested : Array.from(element.children);
+}
+
+function signatureKey(element) {
+  return element?.dataset.messageKey || element?.dataset.rowKey || "";
+}
+
+function signatureHash(element) {
+  return element?.dataset.renderHash || "";
 }
 
 export function formatTime(epochMs) {

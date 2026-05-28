@@ -44,10 +44,12 @@ class CheckpointHistoryReader:
         with self._connect() as conn:
             manifests = self._load_runtime_manifests(conn)
             checkpoint_thread_ids = self._checkpoint_thread_ids(conn)
-            threads = self._discover_manager_threads(conn, manifests, checkpoint_thread_ids)
+            checkpoint_metadata = self._checkpoint_metadata_by_thread(conn)
+            threads = self._discover_manager_threads(conn, manifests, checkpoint_thread_ids, checkpoint_metadata)
             active_thread_id = self._resolve_active_thread(threads, requested_thread_id, manifests)
             manifest = self._select_runtime_manifest(manifests, active_thread_id, checkpoint_thread_ids)
             runtime_lanes = self._runtime_lanes_for(manifest, active_thread_id)
+            runtime_lanes = self._merge_checkpoint_metadata_lanes(runtime_lanes, checkpoint_metadata, active_thread_id)
             relation_tool_targets = self._relation_tool_targets(runtime_lanes)
             agents, task_runs = self._agent_columns_from_lanes(conn, runtime_lanes, relation_tool_targets)
 
@@ -87,10 +89,12 @@ class CheckpointHistoryReader:
         with self._connect() as conn:
             manifests = self._load_runtime_manifests(conn)
             checkpoint_thread_ids = self._checkpoint_thread_ids(conn)
-            threads = self._discover_manager_threads(conn, manifests, checkpoint_thread_ids)
+            checkpoint_metadata = self._checkpoint_metadata_by_thread(conn)
+            threads = self._discover_manager_threads(conn, manifests, checkpoint_thread_ids, checkpoint_metadata)
             active_thread_id = self._resolve_active_thread(threads, requested_thread_id, manifests)
             manifest = self._select_runtime_manifest(manifests, active_thread_id, checkpoint_thread_ids)
             runtime_lanes = self._runtime_lanes_for(manifest, active_thread_id)
+            runtime_lanes = self._merge_checkpoint_metadata_lanes(runtime_lanes, checkpoint_metadata, active_thread_id)
             relation_tool_targets = self._relation_tool_targets(runtime_lanes)
 
             for lane in self._conversation_lanes(runtime_lanes):
@@ -105,9 +109,16 @@ class CheckpointHistoryReader:
                     lane["threadId"],
                     lane["id"],
                     source_agent_id=lane.get("agentId"),
+                    incoming_source_agent_id=lane.get("sourceAgentId") if lane.get("kind") == "tool-relation" else None,
                     relation_tool_targets=relation_tool_targets,
                 )
-                self._attach_task_runs(manager_messages, task_runs)
+                self._attach_task_runs(
+                    manager_messages,
+                    task_runs,
+                    source_agent_id=lane.get("agentId"),
+                    source_lane_id=lane.get("id"),
+                    source_thread_id=lane.get("threadId"),
+                )
                 for run in task_runs:
                     if run["id"] == run_id:
                         return {
@@ -133,6 +144,7 @@ class CheckpointHistoryReader:
         conn: sqlite3.Connection,
         manifests: list[dict[str, Any]],
         checkpoint_thread_ids: set[str],
+        checkpoint_metadata: dict[str, dict[str, Any]],
     ) -> list[dict[str, Any]]:
         rows = conn.execute(
             """
@@ -155,7 +167,9 @@ class CheckpointHistoryReader:
         threads: list[dict[str, Any]] = []
         for row in rows:
             thread_id = str(row["thread_id"])
-            if thread_id in relation_thread_ids:
+            if thread_id in relation_thread_ids or self._is_relation_checkpoint_metadata(
+                checkpoint_metadata.get(thread_id)
+            ):
                 continue
             checkpoint = self._loads_typed(row["type"], row["checkpoint"], {})
             updated_at = _timestamp_info(checkpoint.get("ts") if isinstance(checkpoint, dict) else None)
@@ -250,6 +264,110 @@ class CheckpointHistoryReader:
         for manifest in by_team.values():
             manifest["lanes"] = self._sorted_runtime_lanes(manifest["lanes"])
         return list(by_team.values())
+
+    def _checkpoint_metadata_by_thread(self, conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
+        rows = conn.execute(
+            """
+            SELECT thread_id, checkpoint_id, metadata
+            FROM checkpoints
+            WHERE checkpoint_ns = ''
+              AND metadata IS NOT NULL
+            ORDER BY thread_id ASC, checkpoint_id ASC
+            """
+        ).fetchall()
+
+        metadata_by_thread: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            metadata = self._loads_checkpoint_metadata(row["metadata"])
+            if self._is_lane_checkpoint_metadata(metadata):
+                metadata_by_thread[str(row["thread_id"])] = metadata
+        return metadata_by_thread
+
+    def _loads_checkpoint_metadata(self, value: Any) -> dict[str, Any]:
+        if value is None:
+            return {}
+        if isinstance(value, bytes):
+            try:
+                value = value.decode("utf-8")
+            except UnicodeDecodeError:
+                return {}
+        if not isinstance(value, str):
+            return {}
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+
+    def _is_lane_checkpoint_metadata(self, metadata: dict[str, Any]) -> bool:
+        return bool(metadata.get("team_id") and metadata.get("agent_id") and metadata.get("thread_kind"))
+
+    def _is_relation_checkpoint_metadata(self, metadata: dict[str, Any] | None) -> bool:
+        return bool(metadata and metadata.get("thread_kind") == "tool-relation")
+
+    def _merge_checkpoint_metadata_lanes(
+        self,
+        runtime_lanes: list[dict[str, Any]],
+        checkpoint_metadata: dict[str, dict[str, Any]],
+        active_thread_id: str,
+    ) -> list[dict[str, Any]]:
+        metadata_lanes = [
+            lane
+            for thread_id, metadata in checkpoint_metadata.items()
+            if (lane := self._lane_from_checkpoint_metadata(thread_id, metadata, active_thread_id))
+        ]
+        if not metadata_lanes:
+            return runtime_lanes
+
+        merged = [
+            lane
+            for lane in runtime_lanes
+            if not (lane.get("id") == "entrypoint" and lane.get("agentId") == "entrypoint")
+        ]
+        lanes_by_id = {str(lane.get("id") or lane.get("laneId")): lane for lane in merged}
+        lanes_by_thread = {str(lane.get("threadId")): lane for lane in merged if lane.get("threadId")}
+
+        for metadata_lane in metadata_lanes:
+            existing = lanes_by_id.get(str(metadata_lane["id"])) or lanes_by_thread.get(str(metadata_lane["threadId"]))
+            if existing is None:
+                merged.append(metadata_lane)
+                lanes_by_id[str(metadata_lane["id"])] = metadata_lane
+                lanes_by_thread[str(metadata_lane["threadId"])] = metadata_lane
+                continue
+            for key, value in metadata_lane.items():
+                if value is not None:
+                    existing[key] = value
+
+        return self._sorted_runtime_lanes(merged)
+
+    def _lane_from_checkpoint_metadata(
+        self,
+        thread_id: str,
+        metadata: dict[str, Any],
+        active_thread_id: str,
+    ) -> dict[str, Any] | None:
+        kind = str(metadata.get("thread_kind") or "")
+        if kind not in {"entrypoint", "agent", "tool-relation"}:
+            return None
+        if kind in {"entrypoint", "agent"} and thread_id != active_thread_id:
+            return None
+        if kind == "tool-relation" and not thread_id.startswith(f"{active_thread_id}:"):
+            return None
+
+        lane_id = str(metadata.get("lane_id") or f"{kind}:{metadata.get('agent_id') or thread_id}")
+        agent_id = str(metadata.get("target_agent_id") or metadata.get("agent_id") or lane_id)
+        return {
+            "id": lane_id,
+            "laneId": lane_id,
+            "kind": kind,
+            "agentId": agent_id,
+            "agentName": _optional_str(metadata.get("agent_name")) or agent_id,
+            "sourceAgentId": _optional_str(metadata.get("source_agent_id")),
+            "targetAgentId": _optional_str(metadata.get("target_agent_id")) or agent_id,
+            "toolName": _optional_str(metadata.get("tool_name")),
+            "threadIdPattern": None,
+            "threadId": thread_id,
+        }
 
     def _sorted_runtime_lanes(self, lanes: list[dict[str, Any]]) -> list[dict[str, Any]]:
         entrypoint_agent_id = next(
@@ -421,12 +539,19 @@ class CheckpointHistoryReader:
                 thread_id,
                 lane["id"],
                 source_agent_id=lane.get("agentId"),
+                incoming_source_agent_id=lane.get("sourceAgentId") if lane.get("kind") == "tool-relation" else None,
                 relation_tool_targets=relation_tool_targets,
             )
             if lane.get("kind") != "entrypoint" and not exists and not messages and not lane_task_runs:
                 continue
 
-            self._attach_task_runs(messages, lane_task_runs)
+            self._attach_task_runs(
+                messages,
+                lane_task_runs,
+                source_agent_id=lane.get("agentId"),
+                source_lane_id=lane.get("id"),
+                source_thread_id=thread_id,
+            )
             task_runs.extend(lane_task_runs)
 
             agent_id = str(lane.get("agentId") or lane["id"])
@@ -489,8 +614,10 @@ class CheckpointHistoryReader:
         return [self._lane_section_marker(lane), *prefixed_messages]
 
     def _lane_section_marker(self, lane: dict[str, Any]) -> dict[str, Any]:
-        label = self._lane_section_label(lane)
+        source_label = self._lane_section_label(lane)
+        label = "Conversation déléguée"
         detail = lane.get("threadId") or lane.get("threadIdPattern") or lane["id"]
+        text = f"{label}\n{source_label}\n{detail}"
         return {
             "id": f"{lane['id']}:section-marker",
             "index": -1,
@@ -498,8 +625,8 @@ class CheckpointHistoryReader:
             "type": "session",
             "name": "Conversation",
             "toolCallId": None,
-            "contentText": f"{label}\n{detail}",
-            "blocks": [{"type": "text", "phase": "conversation", "text": f"{label}\n{detail}"}],
+            "contentText": text,
+            "blocks": [{"type": "text", "phase": "conversation", "text": text}],
             "toolCalls": [],
             "timestamp": {"iso": None, "epochMs": None},
             "usage": None,
@@ -546,6 +673,7 @@ class CheckpointHistoryReader:
         agent_id: str,
         *,
         source_agent_id: str | None = None,
+        incoming_source_agent_id: str | None = None,
         relation_tool_targets: dict[tuple[str, str], str] | None = None,
         checkpoint_ns: str = "",
     ) -> list[dict[str, Any]]:
@@ -603,6 +731,7 @@ class CheckpointHistoryReader:
                 agent_id=agent_id,
                 timestamp=timestamps_by_id.get(_message_id(message) or ""),
                 source_agent_id=source_agent_id,
+                incoming_source_agent_id=incoming_source_agent_id,
                 relation_tool_targets=relation_tool_targets,
             )
             for index, message in enumerate(messages)
@@ -669,6 +798,10 @@ class CheckpointHistoryReader:
         self,
         manager_messages: list[dict[str, Any]],
         task_runs: list[dict[str, Any]],
+        *,
+        source_agent_id: str | None = None,
+        source_lane_id: str | None = None,
+        source_thread_id: str | None = None,
     ) -> None:
         task_calls = [
             call
@@ -679,10 +812,14 @@ class CheckpointHistoryReader:
 
         for call, run in zip(task_calls, task_runs, strict=False):
             target_agent = run.get("targetAgent") or call.get("targetAgent")
+            call["sourceAgent"] = source_agent_id
             call["runId"] = run["id"]
             call["runCheckpointNs"] = run["checkpointNs"]
             call["runStats"] = run["stats"]
             run["callId"] = call["id"]
+            run["sourceAgent"] = source_agent_id
+            run["sourceLaneId"] = source_lane_id
+            run["sourceThreadId"] = source_thread_id
             run["targetAgent"] = target_agent
             run["name"] = f"Run {target_agent or 'agent'}"
             run["shortName"] = target_agent or run.get("shortName") or "agent"
@@ -790,6 +927,7 @@ def _normalize_message(
     agent_id: str,
     timestamp: dict[str, Any] | None,
     source_agent_id: str | None = None,
+    incoming_source_agent_id: str | None = None,
     relation_tool_targets: dict[tuple[str, str], str] | None = None,
 ) -> dict[str, Any]:
     message_id = _message_id(message) or f"{agent_id}:{index}"
@@ -810,6 +948,7 @@ def _normalize_message(
         "agentId": agent_id,
         "type": message_type,
         "name": _message_name(message),
+        "senderAgentId": incoming_source_agent_id if message_type == "human" else None,
         "toolCallId": _message_tool_call_id(message),
         "contentText": content_text,
         "blocks": blocks,
