@@ -46,7 +46,7 @@ class TeamInstanciator:
         RuntimeConfigurationValidator(configuration).validate(team)
         checkpointer_handle = CheckpointerFactory(configuration).create(team)
         model_resolver = ModelResolver(configuration)
-        toolset_resolver = ToolsetResolver(configuration)
+        toolset_resolver = ToolsetResolver(configuration, checkpointer_handle)
         relation_tool_factory = RelationToolFactory()
         thread_id_factory = ThreadIdFactory()
         runtime_manifest = TeamRuntimeManifestBuilder(thread_id_factory).build(team)

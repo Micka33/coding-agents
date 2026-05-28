@@ -198,9 +198,7 @@ Declares custom tool factories that `toolsets` can reference.
 ```yaml
 custom_tools:
   scoped_read_tools:
-    factory: coding_agents.scout:scout_tools
-    args:
-      root_dir: "{root_dir}"
+    factory: coding_agents.team_instanciator.scoped_read_tools_factory:create_scoped_read_tools
     exposes:
       - ls
       - read_file
@@ -211,15 +209,138 @@ custom_tools:
 Each key under `custom_tools` is a custom tool id.
 
 `factory` is an import path in `module:function` format. This function is called
-to create the tools.
+to create the tools. The function must use the standard custom-tool factory
+signature:
+
+```python
+from collections.abc import Mapping, Sequence
+
+from langchain_core.tools import BaseTool
+
+from coding_agents.team_instanciator import CustomToolContext
+
+
+def create_tools(
+    context: CustomToolContext,
+    args: Mapping[str, object],
+) -> Sequence[BaseTool]:
+    ...
+```
+
+The factory receives two inputs:
+
+- `context`: runtime values provided by the team instantiator.
+- `args`: the user-defined mapping from `custom_tools.<id>.args` after variable
+  substitution.
+
+Every custom factory receives the same `CustomToolContext`:
+
+- `context.root_dir`: resolved repository root for this team.
+- `context.env`: read-only environment view. Use `context.env.get("NAME")` for
+  optional values and `context.env.require("NAME")` for required values.
+- `context.runtime_config`: runtime configuration values passed to the
+  instantiator, including values loaded from `.env` or CLI `--config`.
+- `context.agent_config`: the agent definition that requested this tool through
+  one of its `toolsets`.
+- `context.team_config`: the full loaded team definition.
+- `context.history`: high-level conversation-history helpers for the current
+  tool call.
+- `context.checkpointer`: the underlying LangGraph checkpointer when direct
+  checkpoint access is necessary.
+
+Tool functions should expose only task-specific parameters to the model. Do not
+add `root_dir`, environment values, agent config, team config, or checkpointer
+parameters to the tool input schema; they are already available through
+`context`.
 
 `args` is a mapping of named arguments passed to the factory after variable
-substitution.
+substitution. Use it for user-visible configuration such as limits, labels,
+allowed paths, or feature toggles.
+
+For example, the scoped read tools use `context.root_dir` by default. Do not set
+`args.root_dir` unless this tool must deliberately read from another root or a
+subdirectory:
+
+```yaml
+custom_tools:
+  docs_read_tools:
+    factory: coding_agents.team_instanciator.scoped_read_tools_factory:create_scoped_read_tools
+    args:
+      root_dir: "{root_dir}/docs"
+    exposes:
+      - ls
+      - read_file
+      - glob
+      - grep
+```
+
+Configuration strings support single-brace substitutions. These substitutions
+are resolved before factories are called.
+
+| Substitution | Source | Effect |
+| --- | --- | --- |
+| `{root_dir}` | `defaults.root_dir` | Inserts the team root exactly as configured in `team.yaml`. Use it only when a config value must explicitly contain that path; custom factories already receive the resolved root as `context.root_dir`. |
+| `{name}` | A template variable passed to `TeamInstanciator.instantiate(..., variables={...})` or the instantiator CLI `--var name=value` | Inserts that user-provided value wherever the placeholder appears. Use this for team-file parameters that should vary between runs, such as labels, tool limits, or path suffixes. |
+| Unknown placeholders | No matching built-in or user-provided variable | Remain unchanged in the loaded configuration, for example `{missing}` stays `{missing}`. |
 
 `exposes` is the whitelist of tools the factory must expose. Every listed tool
 must be returned by the factory, otherwise the configuration is invalid. Any tool
 returned by the factory but absent from `exposes` also makes the configuration
 invalid.
+
+Factories should return tools whose result is immediately useful to the calling
+agent. Prefer dictionaries or concise strings that say what happened and include
+the values the agent needs for its next step.
+
+Example custom factory:
+
+```python
+from collections.abc import Mapping, Sequence
+
+from langchain.tools import ToolRuntime
+from langchain_core.tools import BaseTool, StructuredTool
+
+from coding_agents.team_instanciator import CustomToolContext
+
+
+def create_tools(
+    context: CustomToolContext,
+    args: Mapping[str, object],
+) -> Sequence[BaseTool]:
+    label = str(args.get("label", context.agent_config.id))
+    keep_last = int(args.get("keep_last", 20))
+
+    def conversation_stats(runtime: ToolRuntime) -> dict[str, object]:
+        """Return visible conversation statistics for the current thread."""
+
+        messages = context.history.current_messages(runtime)
+        return {
+            "label": label,
+            "thread_id": context.history.thread_id(runtime),
+            "message_counts": context.history.count_messages(messages),
+        }
+
+    def compact_context(summary: str, runtime: ToolRuntime):
+        """Replace old context with a summary and keep recent messages."""
+
+        return context.history.compact_messages_command(
+            runtime,
+            summary=summary,
+            keep_last=keep_last,
+            visible_result=f"Context compacted for {label}; kept the last {keep_last} messages.",
+        )
+
+    return [
+        StructuredTool.from_function(conversation_stats, name="conversation_stats"),
+        StructuredTool.from_function(compact_context, name="compact_context"),
+    ]
+```
+
+When a tool changes conversation history, use `context.history` helpers and
+return a LangGraph `Command` with a visible `ToolMessage`. The helper
+`compact_messages_command` already does this. Avoid writing directly to the
+checkpointer for normal state updates; direct checkpointer writes are reserved
+for advanced recovery or inspection tools.
 
 ### `toolsets`
 

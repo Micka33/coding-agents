@@ -2,8 +2,20 @@ from __future__ import annotations
 
 import glob as glob_module
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.tools import StructuredTool
+
+if TYPE_CHECKING:
+    from .custom_tool_context import CustomToolContext
+
+
+def create_scoped_read_tools(context: CustomToolContext, args: dict[str, Any]) -> list[StructuredTool]:
+    raw_root = args.get("root_dir", context.root_dir)
+    custom_root = Path(str(raw_root))
+    if not custom_root.is_absolute():
+        custom_root = (context.root_dir / custom_root).resolve()
+    return ScopedReadToolsFactory().create(custom_root)
 
 
 class ScopedReadToolsFactory:

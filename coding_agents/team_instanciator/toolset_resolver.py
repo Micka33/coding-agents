@@ -8,6 +8,8 @@ from coding_agents.team_loader.agent_definition import AgentDefinition
 from coding_agents.team_loader.team_definition import TeamDefinition
 
 from .builtin_tool_factory import BuiltinToolFactory
+from .checkpointer_handle import CheckpointerHandle
+from .custom_tool_context import ConversationHistory, CustomToolContext, EnvView
 from .custom_tool_factory import CustomToolFactory
 from .root_dir_resolver import RootDirResolver
 from .runtime_configuration import RuntimeConfiguration
@@ -19,8 +21,14 @@ class ToolsetResolver:
     )
     _SELF_CONTAINED_TOOL_NAMES = frozenset({"web_search", "fetch_url"})
 
-    def __init__(self, configuration: RuntimeConfiguration | None = None) -> None:
-        self._builtin_factory = BuiltinToolFactory(configuration)
+    def __init__(
+        self,
+        configuration: RuntimeConfiguration | None = None,
+        checkpointer_handle: CheckpointerHandle | None = None,
+    ) -> None:
+        self._configuration = configuration or RuntimeConfiguration()
+        self._checkpointer_handle = checkpointer_handle
+        self._builtin_factory = BuiltinToolFactory(self._configuration)
         self._custom_factory = CustomToolFactory()
         self._root_dir_resolver = RootDirResolver()
 
@@ -37,7 +45,10 @@ class ToolsetResolver:
             toolset = team.toolsets[toolset_name]
             for reference in toolset.tools:
                 if reference.custom:
-                    custom_tools = self._custom_factory.create(team.custom_tools[reference.custom], root_dir)
+                    custom_tools = self._custom_factory.create(
+                        team.custom_tools[reference.custom],
+                        self._custom_context(team, agent, root_dir),
+                    )
                     tools.extend(
                         tool
                         for tool in custom_tools
@@ -59,3 +70,15 @@ class ToolsetResolver:
 
     def _root_dir(self, team: TeamDefinition) -> Path:
         return self._root_dir_resolver.resolve(team)
+
+    def _custom_context(self, team: TeamDefinition, agent: AgentDefinition, root_dir: Path) -> CustomToolContext:
+        checkpointer = self._checkpointer_handle.checkpointer if self._checkpointer_handle else None
+        return CustomToolContext(
+            root_dir=root_dir,
+            env=EnvView(self._configuration),
+            runtime_config=self._configuration,
+            agent_config=agent,
+            team_config=team,
+            history=ConversationHistory(checkpointer),
+            checkpointer=checkpointer,
+        )

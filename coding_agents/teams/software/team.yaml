@@ -32,9 +32,7 @@ defaults:
 
 custom_tools:
   scoped_read_tools:
-    factory: coding_agents.scout:scout_tools
-    args:
-      root_dir: "{root_dir}"
+    factory: coding_agents.team_instanciator.scoped_read_tools_factory:create_scoped_read_tools
     exposes:
       - ls
       - read_file
