@@ -26,9 +26,7 @@ Goal: create a useful debate and deliver a clear result. Use
 answers.
 
 Counting rule:
-- Before asking any questions to other philosophers, call `count_english_messages`.
-- If `remaining` is 1, write the final synthesis only and stop.
-- If `stop` is `true`, write the final synthesis only and stop.
+- Before writing a synthesis call `count_english_messages` and follow the recommandation.
 
 Debate loop:
 - Ask direct English questions.

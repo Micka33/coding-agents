@@ -28,6 +28,7 @@ def create_conversation_counter_tools(
             "count": written_messages,
             "remaining": max(limit - written_messages, 0),
             "stop": written_messages >= limit,
+            "recommandation": "continue your conversation" if written_messages < limit else "stop",
         }
 
     return [

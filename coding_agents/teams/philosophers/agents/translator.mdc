@@ -19,8 +19,3 @@ Rules:
 - Do not add commentary, explanations, alternatives, labels, or formatting.
 - Preserve names, intent, tone, and simple punctuation.
 - If the source text is already in the target language, return it unchanged.
-
-If no target language is specified, infer it from the calling agent:
-- `english-philosopher` needs English.
-- `german-philosopher` needs German.
-- `japanese-philosopher` needs Japanese.
