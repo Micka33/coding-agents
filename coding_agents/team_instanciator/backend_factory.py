@@ -20,7 +20,7 @@ class BackendFactory:
         root_dir = self._root_dir_resolver.resolve(team)
         filesystem = FilesystemBackend(root_dir=root_dir, virtual_mode=True)
         if self._execution_backend(team) == "local" and "shell" in agent.toolsets:
-            shell = LocalShellBackend(root_dir=root_dir, virtual_mode=True)
+            shell = LocalShellBackend(root_dir=root_dir, virtual_mode=True, env={"PATH": os.environ.get("PATH", "")})
             return CompositeBackend(default=shell, routes={"/": filesystem})
         return filesystem
 
