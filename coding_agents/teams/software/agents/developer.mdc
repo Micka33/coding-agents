@@ -2,7 +2,7 @@
 schema_version: 1
 name: developer
 
-description: Implements a bounded development task after readiness approval, then reports changed files, tests, and risks.
+description: Use to implement a bounded development task.
 
 toolsets:
   - scoped_read_tools

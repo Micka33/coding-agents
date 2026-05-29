@@ -724,7 +724,7 @@ class CheckpointHistoryReader:
 
             _register_missing_timestamps(messages, timestamps_by_id, checkpoint_ts)
 
-        return [
+        normalized_messages = [
             _normalize_message(
                 message,
                 index=index,
@@ -736,6 +736,8 @@ class CheckpointHistoryReader:
             )
             for index, message in enumerate(messages)
         ]
+        _attach_tool_results(normalized_messages)
+        return normalized_messages
 
     def _load_task_runs(
         self,
@@ -940,7 +942,7 @@ def _normalize_message(
         source_agent_id=source_agent_id,
         relation_tool_targets=relation_tool_targets,
     )
-    content_text = _content_to_text(content)
+    content_text = _tool_result_content_to_text(content) if message_type == "tool" else _content_to_text(content)
 
     return {
         "id": message_id,
@@ -948,6 +950,7 @@ def _normalize_message(
         "agentId": agent_id,
         "type": message_type,
         "name": _message_name(message),
+        "status": _message_status(message),
         "senderAgentId": incoming_source_agent_id if message_type == "human" else None,
         "toolCallId": _message_tool_call_id(message),
         "contentText": content_text,
@@ -957,6 +960,35 @@ def _normalize_message(
         "usage": _jsonable(getattr(message, "usage_metadata", None)),
         "responseMetadata": _jsonable(getattr(message, "response_metadata", None)),
         "rawType": type(message).__name__,
+    }
+
+
+def _attach_tool_results(messages: list[dict[str, Any]]) -> None:
+    results_by_call_id = {
+        message["toolCallId"]: _tool_result_payload(message)
+        for message in messages
+        if message.get("type") == "tool" and message.get("toolCallId")
+    }
+    if not results_by_call_id:
+        return
+    for message in messages:
+        for call in message.get("toolCalls", []):
+            result = results_by_call_id.get(call.get("id"))
+            if result is not None:
+                call["result"] = result
+
+
+def _tool_result_payload(message: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": message.get("id"),
+        "agentId": message.get("agentId"),
+        "type": message.get("type"),
+        "name": message.get("name"),
+        "status": message.get("status"),
+        "toolCallId": message.get("toolCallId"),
+        "contentText": message.get("contentText", ""),
+        "timestamp": message.get("timestamp"),
+        "rawType": message.get("rawType"),
     }
 
 
@@ -979,6 +1011,14 @@ def _message_name(message: Any) -> str | None:
         value = message.get("name")
     else:
         value = getattr(message, "name", None)
+    return str(value) if value else None
+
+
+def _message_status(message: Any) -> str | None:
+    if isinstance(message, dict):
+        value = message.get("status")
+    else:
+        value = getattr(message, "status", None)
     return str(value) if value else None
 
 
@@ -1245,6 +1285,17 @@ def _content_to_text(content: Any) -> str:
             elif block:
                 parts.append(str(block))
         return "\n".join(parts).strip()
+    return str(content).strip()
+
+
+def _tool_result_content_to_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, (list, tuple, dict)):
+        try:
+            return json.dumps(_jsonable(content), ensure_ascii=False)
+        except TypeError:
+            return str(content).strip()
     return str(content).strip()
 
 

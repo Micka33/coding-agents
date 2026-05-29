@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
 from webui.server import CheckpointHistoryReader
@@ -101,6 +101,46 @@ class WebUiServerTests(unittest.TestCase):
         human_messages = [message for message in english_agent["messages"] if message["type"] == "human"]
         self.assertEqual(human_messages[0]["senderAgentId"], "german-speaker")
 
+    def test_tool_call_result_is_attached_and_empty_list_is_visible(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = Path(tmp_dir) / "checkpoints.sqlite"
+            with sqlite3.connect(db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                self._create_checkpoint_tables(conn)
+                self._insert_checkpoint(conn, "tool-thread", "0001")
+                self._insert_write(
+                    conn,
+                    "tool-thread",
+                    "0001",
+                    AIMessage(
+                        content="",
+                        tool_calls=[
+                            {
+                                "id": "call_glob",
+                                "name": "glob",
+                                "args": {"pattern": "tests/architecture/**/*"},
+                            }
+                        ],
+                    ),
+                    idx=0,
+                )
+                self._insert_write(
+                    conn,
+                    "tool-thread",
+                    "0001",
+                    ToolMessage(content=[], name="glob", tool_call_id="call_glob", status="success"),
+                    idx=1,
+                )
+
+                messages = CheckpointHistoryReader(db_path)._load_thread_messages(conn, "tool-thread", "scout")
+
+        tool_call = messages[0]["toolCalls"][0]
+        tool_result = messages[1]
+
+        self.assertEqual(tool_result["contentText"], "[]")
+        self.assertEqual(tool_call["result"]["contentText"], "[]")
+        self.assertEqual(tool_call["result"]["status"], "success")
+
     def _create_checkpoint_tables(self, conn: sqlite3.Connection) -> None:
         conn.execute(
             """
@@ -191,14 +231,16 @@ class WebUiServerTests(unittest.TestCase):
         thread_id: str,
         checkpoint_id: str,
         message: object,
+        *,
+        idx: int = 0,
     ) -> None:
         type_name, value = self.serde.dumps_typed(message)
         conn.execute(
             """
             INSERT INTO writes (thread_id, checkpoint_ns, checkpoint_id, task_id, idx, channel, type, value)
-            VALUES (?, '', ?, 'task-1', 0, 'messages', ?, ?)
+            VALUES (?, '', ?, 'task-1', ?, 'messages', ?, ?)
             """,
-            (thread_id, checkpoint_id, type_name, value),
+            (thread_id, checkpoint_id, idx, type_name, value),
         )
 
     def _insert_hello_world_manifest(self, conn: sqlite3.Connection) -> None:

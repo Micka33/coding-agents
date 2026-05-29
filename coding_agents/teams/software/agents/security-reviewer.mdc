@@ -2,7 +2,7 @@
 schema_version: 1
 name: security-reviewer
 
-description: Reviews security-sensitive changes, secrets, permissions, user input, shell execution, and unsafe operations.
+description: Use to review security-sensitive changes, secrets, permissions, user input, shell execution, and unsafe operations.
 
 toolsets:
   - scoped_read_tools

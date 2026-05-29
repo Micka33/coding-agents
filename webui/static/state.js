@@ -6,7 +6,7 @@ export const state = {
   selectedThreadId: null,
   selectedAgentId: "manager",
   view: "columns",
-  syncScroll: false,
+  syncScroll: true,
   live: true,
   formatMarkdown: preferences.formatMarkdown,
   theme: preferences.theme,

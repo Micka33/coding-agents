@@ -116,6 +116,17 @@ relations:
       dependency, risk, or decision-record question. This resident agent keeps
       conversation history across calls and durable-checkpointer restarts.
 
+  - from: product-analyst
+    to: software-architect
+    relation: tool
+    tool_name: ask_software_architect
+    input_schema:
+      message: string
+    description: >
+      Ask the resident software architect an architecture, technical-design,
+      dependency, risk, or decision-record question. This resident agent keeps
+      conversation history across calls and durable-checkpointer restarts.
+
   - from: developer
     to: qa-engineer
     relation: tool
@@ -150,5 +161,29 @@ relations:
     relation: subagent
 
   - from: engineering-manager
+    to: technical-writer
+    relation: subagent
+
+  - from: developer
+    to: scout
+    relation: subagent
+
+  - from: developer
+    to: code-reviewer
+    relation: subagent
+
+  - from: developer
+    to: qa-engineer
+    relation: subagent
+
+  - from: developer
+    to: devops-engineer
+    relation: subagent
+
+  - from: developer
+    to: security-reviewer
+    relation: subagent
+
+  - from: developer
     to: technical-writer
     relation: subagent

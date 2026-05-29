@@ -2,7 +2,7 @@
 schema_version: 1
 name: devops-engineer
 
-description: Handles build, CI, environment, packaging, deployment, and operational concerns.
+description: Use to handles build, CI, environment, packaging, deployment, and operational concerns.
 
 toolsets:
   - scoped_read_tools

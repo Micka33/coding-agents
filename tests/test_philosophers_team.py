@@ -93,7 +93,8 @@ class PhilosophersTeamTests(unittest.TestCase):
         self.assertEqual(result["count"], 2)
         self.assertEqual(result["remaining"], 1)
         self.assertIs(result["stop"], False)
-        self.assertEqual(set(result), {"count", "remaining", "stop"})
+        self.assertEqual(result["recommandation"], "continue your conversation")
+        self.assertEqual(set(result), {"count", "remaining", "stop", "recommandation"})
 
 
 if __name__ == "__main__":

@@ -45,9 +45,9 @@ export function renderControls(els, state, agents, columnOptions) {
   });
 
   document.querySelector(".agent-field").classList.toggle("hidden", state.view !== "single");
-  els.syncToggle.disabled = state.view !== "columns" || !state.data?.hasTimestamps;
-  if (els.syncToggle.disabled) state.syncScroll = false;
-  els.syncToggle.checked = state.syncScroll;
+  const syncAvailable = state.view === "columns" && state.data?.hasTimestamps;
+  els.syncToggle.disabled = !syncAvailable;
+  els.syncToggle.checked = syncAvailable && state.syncScroll;
   els.liveToggle.checked = state.live;
   els.markdownToggle.checked = state.formatMarkdown;
   els.themeToggle.checked = state.theme === "dark";

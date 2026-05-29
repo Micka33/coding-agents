@@ -1,8 +1,11 @@
 ---
 schema_version: 1
 name: scout
+model: openai:gpt-5.5
+reasoning_effort: high
 
-description: Fast codebase recon that returns compressed context for handoff to other agents.
+
+description: Use for fast codebase recon that returns compressed context for handoff to other agents.
 
 toolsets:
   - scoped_read_tools

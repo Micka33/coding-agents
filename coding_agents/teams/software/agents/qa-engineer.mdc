@@ -2,7 +2,7 @@
 schema_version: 1
 name: qa-engineer
 
-description: Validates acceptance criteria, defines and runs or recommends tests, and reports residual quality risk.
+description: Use to validate acceptance criteria, define and run or recommend tests, and report residual quality risk.
 
 toolsets:
   - scoped_read_tools

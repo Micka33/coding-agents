@@ -2,7 +2,7 @@
 schema_version: 1
 name: code-reviewer
 
-description: Reviews code changes like a pull request and reports actionable findings ordered by severity.
+description: Use to review code changes as if it was a pull request.
 
 toolsets:
   - scoped_read_tools

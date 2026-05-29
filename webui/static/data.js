@@ -1,5 +1,7 @@
 import { prettyJson } from "./utils.js";
 
+const DEFAULT_COLUMN_IDS_LIMIT = 3;
+
 export function visibleAgents(data, selectedColumnIds, tempRunIds, taskRunCache) {
   const selected = selectedColumnIds || new Set(defaultColumnIds(data));
   const options = columnOptions(data);
@@ -79,6 +81,7 @@ export function columnOptions(data) {
 export function defaultColumnIds(data) {
   return columnOptions(data)
     .filter((option) => option.kind !== "task-agent-group" || option.runCount > 0)
+    .slice(0, DEFAULT_COLUMN_IDS_LIMIT)
     .map((option) => option.id);
 }
 
@@ -386,13 +389,20 @@ export function buildResultMaps(agents) {
       if (message.type === "tool" && message.toolCallId) {
         byToolCallId.set(message.toolCallId, message);
       }
+      message.toolCalls.forEach((call) => {
+        if (call.result?.toolCallId) {
+          byToolCallId.set(call.result.toolCallId, call.result);
+        } else if (call.result && call.id) {
+          byToolCallId.set(call.id, call.result);
+        }
+      });
     });
 
     const pairedToolResultIds = new Set();
     agent.messages.forEach((message) => {
       message.toolCalls.forEach((call) => {
         const result = byToolCallId.get(call.id);
-        if (result) pairedToolResultIds.add(result.id);
+        if (result?.id) pairedToolResultIds.add(result.id);
       });
     });
 

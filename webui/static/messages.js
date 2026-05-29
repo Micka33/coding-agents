@@ -24,7 +24,7 @@ export function messageKey(agent, message) {
 
 export function messageSignature(message, maps, context) {
   const relatedResults = (message.toolCalls || []).map((call) => {
-    const result = maps?.byToolCallId.get(call.id);
+    const result = toolCallResult(call, maps?.byToolCallId.get(call.id));
     const run = call.runId ? context.taskRunById.get(call.runId) : null;
     return {
       callId: call.id,
@@ -92,7 +92,7 @@ function renderMessage(message, agent, maps, context) {
   const internalBlocks = renderedBlocks.filter((block) => block.internal).map((block) => block.html).join("");
   const cardBlocks = renderedBlocks.filter((block) => !block.internal).map((block) => block.html).join("");
   const calls = message.toolCalls
-    .map((call, index) => renderToolCall(call, maps?.byToolCallId.get(call.id), message, agent, index, context))
+    .map((call, index) => renderToolCall(call, toolCallResult(call, maps?.byToolCallId.get(call.id)), message, agent, index, context))
     .join("");
   const fallback = !renderedBlocks.length && !calls && message.contentText
     ? renderTextBlock(message.contentText, context)
@@ -287,7 +287,7 @@ function renderToolCall(call, result, message, agent, index, context) {
     return renderDisposableAgentCall(call, result, detailKey, context);
   }
 
-  const resultText = result?.contentText || "Résultat pas encore disponible.";
+  const resultText = toolResultText(result);
   return `
     <details class="tool-call generic-tool" data-detail-key="${escapeAttr(detailKey)}">
       <summary>
@@ -382,7 +382,7 @@ function oneLine(value) {
 function renderDisposableAgentCall(call, result, detailKey, context) {
   const target = call.targetAgent || "agent";
   const description = call.args?.description || prettyJson(call.args);
-  const resultText = result?.contentText || "Résultat pas encore disponible.";
+  const resultText = toolResultText(result);
   const run = call.runId ? context.taskRunById.get(call.runId) : null;
   const stats = call.runStats || run?.stats || {};
   const isColumnOpen = Boolean(call.runId && context.tempRunIds?.includes(call.runId));
@@ -425,6 +425,15 @@ function renderDisposableAgentCall(call, result, detailKey, context) {
       </details>
     </div>
   `;
+}
+
+function toolCallResult(call, mappedResult) {
+  return call?.result || mappedResult || null;
+}
+
+function toolResultText(result) {
+  if (!result) return "Résultat pas encore disponible.";
+  return result.contentText || "Résultat vide.";
 }
 
 function renderToolPathSummary(paths) {

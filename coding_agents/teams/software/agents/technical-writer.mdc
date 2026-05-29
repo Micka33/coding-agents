@@ -2,7 +2,7 @@
 schema_version: 1
 name: technical-writer
 
-description: Writes and updates documentation, changelogs, usage notes, release notes, and decision summaries.
+description: Use to write and update documentation, changelogs, usage notes, release notes, and decision summaries.
 
 toolsets:
   - scoped_read_tools
