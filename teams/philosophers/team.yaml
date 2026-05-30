@@ -38,49 +38,19 @@ toolsets:
   conversation_counter:
     - custom: english_message_counter
 
-conversation:
-  mentions:
-    max_parallel_agents: 2
-    max_cascade_turns: null
-  identity_refresh_after_tokens: 10000
-  # human_input:
-  #   default_targets:
-  #     - Francis-Bacon
-
 agents:
   Francis-Bacon:
     kind: deepagent
     config: ./agents/francis-bacon.mdc
     entrypoint: true
-    conversation:
-      aliases:
-        - Francis
-        - Bacon
-        - FrancisBacon
-        - Francis_Bacon
-        - Francis-Bacon
 
   Friedrich-Nietzsche:
     kind: deepagent
     config: ./agents/friedrich-nietzsche.mdc
-    conversation:
-      aliases:
-        - Friedrich
-        - Nietzsche
-        - FriedrichNietzsche
-        - Friedrich_Nietzsche
-        - Friedrich-Nietzsche
 
   Hayashi-Razan:
     kind: deepagent
     config: ./agents/hayashi-razan.mdc
-    conversation:
-      aliases:
-        - Hayashi
-        - Razan
-        - HayashiRazan
-        - Hayashi_Razan
-        - Hayashi-Razan
 
   translator:
     kind: subagent
