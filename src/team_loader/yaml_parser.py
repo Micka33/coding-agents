@@ -60,9 +60,10 @@ class YamlParser:
             index = self._skip_blank(index)
             if index >= len(self._lines) or self._indent_of(index) < indent:
                 break
-            if self._indent_of(index) != indent or not self._stripped(index).startswith("- "):
+            stripped = self._stripped(index)
+            if self._indent_of(index) != indent or (stripped != "-" and not stripped.startswith("- ")):
                 break
-            item_text = self._stripped(index)[2:].strip()
+            item_text = "" if stripped == "-" else stripped[2:].strip()
             if item_text == "":
                 next_index = self._skip_blank(index + 1)
                 if next_index >= len(self._lines) or self._indent_of(next_index) <= indent:

@@ -30,6 +30,4 @@ class BackendFactory:
             configured = self._configuration.get(env)
             if configured:
                 return str(configured)
-            if os.environ.get(env):
-                return os.environ[env]
         return team.defaults.execution_backend.default or "none"

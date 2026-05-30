@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
 
 from langchain.chat_models import init_chat_model
@@ -61,8 +60,6 @@ class ModelResolver:
         value = self._configuration.get(env)
         if value:
             return str(value)
-        if os.environ.get(env):
-            return os.environ[env]
         return None
 
     def _normalize_reasoning_effort(self, value: str | None) -> str | None:

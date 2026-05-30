@@ -105,8 +105,6 @@ class ConversationHistory:
         for message in messages:
             role = self._message_role(message)
             counts[role] += 1
-            if role not in {"human", "ai", "system", "tool"}:
-                counts["other"] += 1
             tool_call_requests += self._tool_call_count(message)
             usage_input, usage_output, usage_total = self._usage_counts(message)
             input_tokens += usage_input

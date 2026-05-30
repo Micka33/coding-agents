@@ -16,7 +16,7 @@ class SkillsResolver:
         self._root_dir_resolver = RootDirResolver()
 
     def resolve(self, team: TeamDefinition, agent: AgentDefinition) -> list[str] | None:
-        if agent.skills in {None, "inherit"}:
+        if agent.skills is None or agent.skills == "inherit":
             return None
         if agent.skills == "none":
             return None

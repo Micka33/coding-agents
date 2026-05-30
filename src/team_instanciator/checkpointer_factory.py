@@ -36,8 +36,6 @@ class CheckpointerFactory:
             configured = self._configuration.get(env)
             if configured:
                 return str(configured)
-            if os.environ.get(env):
-                return os.environ[env]
         return team.defaults.checkpointer.default or "memory"
 
     def _sqlite_handle(self, team: TeamDefinition) -> CheckpointerHandle:
@@ -55,6 +53,4 @@ class CheckpointerFactory:
             configured = self._configuration.get(env)
             if configured:
                 return str(configured)
-            if os.environ.get(env):
-                return os.environ[env]
         return team.defaults.checkpointer.sqlite_path_default or ".team-instanciator/checkpoints.sqlite"
