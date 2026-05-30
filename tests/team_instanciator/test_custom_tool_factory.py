@@ -5,9 +5,9 @@ from unittest.mock import patch
 
 from langchain_core.tools import StructuredTool
 
-from src.team_instanciator.custom_tool_factory import CustomToolFactory
-from src.team_instanciator.team_instanciator_error import TeamInstanciatorError
-from src.team_loader.custom_tool_definition import CustomToolDefinition
+from src.team_instanciator.factories.custom_tool_factory import CustomToolFactory
+from src.team_instanciator.errors.team_instanciator_error import TeamInstanciatorError
+from src.team_loader.models.custom_tool_definition import CustomToolDefinition
 
 
 NOT_CALLABLE = "value"
@@ -87,7 +87,7 @@ class CustomToolFactoryTests(unittest.TestCase):
     def test_signature_validation_ignores_value_error_from_inspect(self) -> None:
         definition = CustomToolDefinition(id="probe", factory="module:function", args={}, exposes=())
 
-        with patch("src.team_instanciator.custom_tool_factory.inspect.signature", side_effect=ValueError):
+        with patch("src.team_instanciator.factories.custom_tool_factory.inspect.signature", side_effect=ValueError):
             CustomToolFactory()._validate_signature(definition, object(), object())
 
 

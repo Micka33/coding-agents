@@ -6,7 +6,7 @@ from typing import Any
 from langchain.tools import ToolRuntime
 from langchain_core.tools import BaseTool, StructuredTool
 
-from src.team_instanciator.custom_tool_context import CustomToolContext
+from src.team_instanciator.tools.custom_tool_context import CustomToolContext
 
 
 def create_conversation_counter_tools(

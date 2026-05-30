@@ -1,4 +1,4 @@
-from src.team_instanciator.cli import main
+from src.team_instanciator.interfaces.cli import main
 
 
 if __name__ == "__main__":

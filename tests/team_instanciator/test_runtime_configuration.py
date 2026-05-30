@@ -4,7 +4,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from src.team_instanciator.runtime_configuration import RuntimeConfiguration
+from src.team_instanciator.configuration.runtime_configuration import RuntimeConfiguration
 
 
 class RuntimeConfigurationTests(unittest.TestCase):

@@ -6,12 +6,13 @@ import runpy
 import sys
 import unittest
 import warnings
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from src.team_instanciator import cli as cli_module
+from src.team_instanciator.interfaces import cli as cli_module
+from src.team_instanciator.interfaces import cli_support
 
 
 class CliTeam(SimpleNamespace):
@@ -42,6 +43,56 @@ class FakeInstantiatedTeam:
         self.closed = True
 
 
+class FakeConversation:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def append_human_message(self, message, wait=True):
+        self.calls.append((message, wait))
+        return SimpleNamespace(
+            event=SimpleNamespace(seq=1, to_dict=lambda: {"seq": 1, "author_id": "human", "content": message}),
+            deliveries=(
+                SimpleNamespace(
+                    status="failed",
+                    to_dict=lambda: {
+                        "agent_id": "agent",
+                        "status": "failed",
+                        "error": "boom",
+                    },
+                ),
+            ),
+            failures=(
+                SimpleNamespace(
+                    status="failed",
+                    to_dict=lambda: {
+                        "agent_id": "agent",
+                        "status": "failed",
+                        "error": "boom",
+                    },
+                ),
+            ),
+        )
+
+    def state(self):
+        return {"events": [{"seq": 1, "author_id": "human", "content": "Hi"}]}
+
+
+class FakeConversationTeam(FakeInstantiatedTeam):
+    def __init__(self) -> None:
+        super().__init__()
+        self.conversation = FakeConversation()
+
+    def conversation_for(self, thread_id):
+        return self.conversation
+
+
+class FakeLauncher:
+    calls = []
+
+    def launch(self, **kwargs):
+        self.__class__.calls.append(kwargs)
+
+
 class FakeTeamInstanciator:
     calls = []
     instance = FakeInstantiatedTeam()
@@ -58,13 +109,14 @@ class CliTests(unittest.TestCase):
     def setUp(self) -> None:
         FakeTeamInstanciator.calls = []
         FakeTeamInstanciator.instance = FakeInstantiatedTeam()
+        FakeLauncher.calls = []
 
     def test_main_prints_json_summary_and_passes_variables_and_config(self) -> None:
         output = io.StringIO()
 
         with (
-            patch("src.team_instanciator.cli.TeamInstanciator", FakeTeamInstanciator),
-            patch("src.team_instanciator.cli.DotEnvLoader.load", return_value={"ENV_VALUE": "from-file"}),
+            patch("src.team_instanciator.interfaces.cli.TeamInstanciator", FakeTeamInstanciator),
+            patch("src.team_instanciator.interfaces.cli.DotEnvLoader.load", return_value={"ENV_VALUE": "from-file"}),
             redirect_stdout(output),
         ):
             exit_code = cli_module.main(
@@ -106,7 +158,7 @@ class CliTests(unittest.TestCase):
     def test_message_invocation_prints_json_and_uses_thread_id(self) -> None:
         output = io.StringIO()
 
-        with patch("src.team_instanciator.cli.TeamInstanciator", FakeTeamInstanciator), redirect_stdout(output):
+        with patch("src.team_instanciator.interfaces.cli.TeamInstanciator", FakeTeamInstanciator), redirect_stdout(output):
             cli_module.TeamInstanciatorCli().main(["team.yaml", "--no-env-file", "--message", "Hi", "--thread-id", "thread-1", "--json"])
 
         self.assertEqual(
@@ -142,13 +194,87 @@ class CliTests(unittest.TestCase):
         self.assertEqual(cli._messages("not-a-dict"), [])
         self.assertEqual(cli._message({"role": "tool", "name": "tool", "content": None}), {"role": "tool", "name": "tool", "content": "", "tool_calls": []})
 
+    def test_cli_support_builds_config_variables_from_env_file_args_and_keys(self) -> None:
+        args = SimpleNamespace(
+            no_env_file=False,
+            env_file=".env.custom",
+            config=["runtime=value", "ignored"],
+            openai_api_key="openai",
+            tavily_api_key="tavily",
+        )
+
+        with patch("src.team_instanciator.interfaces.cli_support.DotEnvLoader.load", return_value={"ENV": "value"}) as load:
+            values = cli_support.build_config_variables(args)
+
+        load.assert_called_once_with(Path(".env.custom"))
+        self.assertEqual(
+            values,
+            {
+                "ENV": "value",
+                "runtime": "value",
+                "openai_api_key": "openai",
+                "tavily_api_key": "tavily",
+            },
+        )
+
+    def test_conversation_message_prints_json_failures_and_skips_direct_graph(self) -> None:
+        conversation_team = FakeConversationTeam()
+        FakeTeamInstanciator.instance = conversation_team
+        output = io.StringIO()
+
+        with patch("src.team_instanciator.interfaces.cli.TeamInstanciator", FakeTeamInstanciator), redirect_stdout(output):
+            cli_module.TeamInstanciatorCli().main(["team.yaml", "--no-env-file", "--message", "Hi", "--json"])
+
+        payload = json.loads(output.getvalue())
+        self.assertEqual(conversation_team.conversation.calls, [("Hi", True)])
+        self.assertEqual(conversation_team.invoke_calls, [])
+        self.assertEqual(payload["failures"][0]["error"], "boom")
+
+    def test_conversation_plain_message_prints_failures_to_stderr(self) -> None:
+        conversation_team = FakeConversationTeam()
+        FakeTeamInstanciator.instance = conversation_team
+        output = io.StringIO()
+        errors = io.StringIO()
+
+        with (
+            patch("src.team_instanciator.interfaces.cli.TeamInstanciator", FakeTeamInstanciator),
+            redirect_stdout(output),
+            redirect_stderr(errors),
+        ):
+            cli_module.TeamInstanciatorCli().main(["team.yaml", "--no-env-file", "--message", "Hi"])
+
+        self.assertIn("human: Hi", output.getvalue())
+        self.assertIn("warning: delivery to agent", errors.getvalue())
+
+    def test_conversation_team_without_message_auto_launches_webapp(self) -> None:
+        conversation_team = FakeConversationTeam()
+        FakeTeamInstanciator.instance = conversation_team
+
+        with (
+            patch("src.team_instanciator.interfaces.cli.TeamInstanciator", FakeTeamInstanciator),
+            patch("src.webapp.server.ConversationWebAppLauncher", return_value=FakeLauncher()),
+        ):
+            cli_module.TeamInstanciatorCli().main(
+                ["team.yaml", "--no-env-file", "--thread-id", "thread-1", "--webapp-port", "9999"]
+            )
+
+        self.assertEqual(FakeLauncher.calls[0]["conversation_id"], "thread-1")
+        self.assertEqual(FakeLauncher.calls[0]["port"], 9999)
+
+    def test_webapp_subcommand_delegates_to_webapp_main(self) -> None:
+        with patch("src.webapp.server.main", return_value=7) as webapp_main:
+            exit_code = cli_module.TeamInstanciatorCli().main(["webapp", "team.yaml"])
+
+        self.assertEqual(exit_code, 7)
+        webapp_main.assert_called_once_with(["team.yaml"])
+
     def test_module_main_guard_runs(self) -> None:
         output = io.StringIO()
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", RuntimeWarning)
             with patch.object(sys, "argv", ["cli.py", "--help"]), redirect_stdout(output), self.assertRaises(SystemExit) as raised:
-                runpy.run_module("src.team_instanciator.cli", run_name="__main__")
+                runpy.run_module("src.team_instanciator.interfaces.cli", run_name="__main__")
 
         self.assertEqual(raised.exception.code, 0)
         self.assertIn("Instantiate a team graph", output.getvalue())

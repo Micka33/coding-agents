@@ -1,0 +1,30 @@
+from __future__ import annotations
+
+from typing import NotRequired, TypedDict
+
+from src.type_defs import JsonValue
+
+from .agent_delivery_state import AgentDeliveryStateDict
+from .conversation_delivery import ConversationDeliveryDict
+from .conversation_event import ConversationEventDict
+from .conversation_runtime_state import ConversationRuntimeStateDict
+
+
+class MessageSummaryDict(TypedDict):
+    type: str
+    name: str | None
+    content: str
+    tool_calls: JsonValue
+
+
+class ConversationStateDict(TypedDict):
+    team_id: str
+    conversation_id: str
+    participants: list[str]
+    runtime: ConversationRuntimeStateDict
+    events: list[ConversationEventDict]
+    agent_states: list[AgentDeliveryStateDict]
+    deliveries: list[ConversationDeliveryDict]
+    activity: AgentDeliveryStateDict | None
+    private_thread_id: NotRequired[str]
+    private_messages: NotRequired[list[MessageSummaryDict]]

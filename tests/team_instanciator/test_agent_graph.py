@@ -4,7 +4,7 @@ import asyncio
 import unittest
 from typing import Any
 
-from src.team_instanciator.agent_graph import AgentGraph
+from src.team_instanciator.core.agent_graph import AgentGraph
 
 
 class RecordingGraph:

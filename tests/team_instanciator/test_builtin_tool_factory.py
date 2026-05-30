@@ -8,8 +8,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from src.team_instanciator.builtin_tool_factory import BuiltinToolFactory
-from src.team_instanciator.runtime_configuration import RuntimeConfiguration
+from src.team_instanciator.factories.builtin_tool_factory import BuiltinToolFactory
+from src.team_instanciator.configuration.runtime_configuration import RuntimeConfiguration
 
 
 class UrlOpenResponse:
@@ -84,7 +84,7 @@ class BuiltinToolFactoryTests(unittest.TestCase):
             factory = BuiltinToolFactory()
             factory.create("write_file", root)
 
-            with patch("src.team_instanciator.builtin_tool_factory.urllib.request.urlopen", return_value=UrlOpenResponse()):
+            with patch("src.team_instanciator.factories.builtin_tool_factory.urllib.request.urlopen", return_value=UrlOpenResponse()):
                 self.assertEqual(factory.fetch_url("https://example.test"), "hello")
 
             self.assertEqual(factory.write_file("/nested/file.txt", "alpha beta"), "Wrote nested/file.txt.")

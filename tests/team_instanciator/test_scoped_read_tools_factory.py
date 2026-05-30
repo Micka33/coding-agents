@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 from deepagents.backends.protocol import ReadResult
 
-from src.team_instanciator.scoped_read_tools_factory import (
+from src.team_instanciator.tools.scoped_read_tools_factory import (
     ScopedReadToolsFactory,
     _ScopedReadToolAdapter,
     create_scoped_read_tools,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from src.team_instanciator.instantiated_team import InstantiatedTeam
+from src.team_instanciator.core.instantiated_team import InstantiatedTeam
 from tests.support import FakeClosable, FakeGraph, team
 
 
@@ -20,6 +20,25 @@ class InstantiatedTeamTests(unittest.TestCase):
             self.assertIs(entered, instantiated)
 
         self.assertTrue(handle.closed)
+
+    def test_conversation_for_returns_none_default_or_requested_thread(self) -> None:
+        default_conversation = object()
+        requested_conversation = object()
+        conversation = FakeGraph(default_conversation)
+        conversation.with_conversation_id = lambda conversation_id: requested_conversation
+
+        without_conversation = InstantiatedTeam(team(), FakeGraph(), FakeClosable(), runtime_manifest="manifest")
+        with_conversation = InstantiatedTeam(
+            team(),
+            FakeGraph(),
+            FakeClosable(),
+            runtime_manifest="manifest",
+            conversation=conversation,
+        )
+
+        self.assertIsNone(without_conversation.conversation_for("thread"))
+        self.assertIs(with_conversation.conversation_for(None), conversation)
+        self.assertIs(with_conversation.conversation_for("thread"), requested_conversation)
 
 
 if __name__ == "__main__":

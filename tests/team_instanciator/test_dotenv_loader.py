@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.team_instanciator.dotenv_loader import DotEnvLoader
+from src.team_instanciator.configuration.dotenv_loader import DotEnvLoader
 
 
 class DotEnvLoaderTests(unittest.TestCase):

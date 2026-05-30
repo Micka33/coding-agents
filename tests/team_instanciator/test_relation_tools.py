@@ -3,10 +3,10 @@ from __future__ import annotations
 import unittest
 from types import SimpleNamespace
 
-from src.team_instanciator.relation_tool import RelationTool
-from src.team_instanciator.relation_tool_factory import RelationToolFactory
-from src.team_instanciator.team_instanciator_error import TeamInstanciatorError
-from src.team_instanciator.thread_id_factory import ThreadIdFactory
+from src.team_instanciator.tools.relation_tool import RelationTool
+from src.team_instanciator.factories.relation_tool_factory import RelationToolFactory
+from src.team_instanciator.errors.team_instanciator_error import TeamInstanciatorError
+from src.team_instanciator.runtime.thread_id_factory import ThreadIdFactory
 from tests.support import FakeGraph, agent, relation, team
 
 

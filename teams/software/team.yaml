@@ -30,9 +30,18 @@ defaults:
       - /AGENTS.md
       - /docs/development-agent-team-architecture.md
 
+conversation:
+  mentions:
+    max_parallel_agents: 2
+    max_cascade_turns: null
+  identity_refresh_after_tokens: 10000
+  human_input:
+    default_targets:
+      - engineering-manager
+
 custom_tools:
   scoped_read_tools:
-    factory: src.team_instanciator.scoped_read_tools_factory:create_scoped_read_tools
+    factory: src.team_instanciator.tools.scoped_read_tools_factory:create_scoped_read_tools
     exposes:
       - ls
       - read_file
@@ -56,14 +65,24 @@ agents:
     kind: deepagent
     config: ./agents/engineering-manager.mdc
     entrypoint: true
+    conversation: {}
 
   product-analyst:
     kind: deepagent
     config: ./agents/product-analyst.mdc
+    conversation:
+      aliases:
+        - product
+        - product-analyst
 
   software-architect:
     kind: deepagent
     config: ./agents/software-architect.mdc
+    conversation:
+      aliases:
+        - architect
+        - architecture
+        - software-architect
 
   scout:
     kind: subagent

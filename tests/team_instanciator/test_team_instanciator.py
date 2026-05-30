@@ -5,8 +5,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from src.team_instanciator.runtime_configuration import RuntimeConfiguration
-from src.team_instanciator.team_instanciator import TeamInstanciator
+from src.team_instanciator.configuration.runtime_configuration import RuntimeConfiguration
+from src.team_instanciator.core.team_instanciator import TeamInstanciator
 from tests.support import agent, defaults, team
 
 
@@ -69,8 +69,8 @@ class TeamInstanciatorTests(unittest.TestCase):
         loader = Loader(loaded_team)
 
         with (
-            patch("src.team_instanciator.team_instanciator.CheckpointerFactory", FakeCheckpointerFactory),
-            patch("src.team_instanciator.team_instanciator.AgentGraphRegistry", FakeRegistry),
+            patch("src.team_instanciator.core.team_instanciator.CheckpointerFactory", FakeCheckpointerFactory),
+            patch("src.team_instanciator.core.team_instanciator.AgentGraphRegistry", FakeRegistry),
         ):
             instantiated = TeamInstanciator(loader, config_variables={"BASE": "one"}).instantiate("team.yaml", {"topic": "ai"}, {"EXTRA": "two"})
 
@@ -85,8 +85,8 @@ class TeamInstanciatorTests(unittest.TestCase):
         loaded_team = team(agents={"worker": agent("worker")}, team_defaults=defaults(root_dir=Path.cwd()))
 
         with (
-            patch("src.team_instanciator.team_instanciator.CheckpointerFactory", FakeCheckpointerFactory),
-            patch("src.team_instanciator.team_instanciator.AgentGraphRegistry", FakeRegistry),
+            patch("src.team_instanciator.core.team_instanciator.CheckpointerFactory", FakeCheckpointerFactory),
+            patch("src.team_instanciator.core.team_instanciator.AgentGraphRegistry", FakeRegistry),
             self.assertRaisesRegex(ValueError, "no entrypoint"),
         ):
             TeamInstanciator(Loader(loaded_team)).instantiate("team.yaml")
@@ -98,8 +98,8 @@ class TeamInstanciatorTests(unittest.TestCase):
         FakeRegistry.graph_exception = RuntimeError("boom")
 
         with (
-            patch("src.team_instanciator.team_instanciator.CheckpointerFactory", FakeCheckpointerFactory),
-            patch("src.team_instanciator.team_instanciator.AgentGraphRegistry", FakeRegistry),
+            patch("src.team_instanciator.core.team_instanciator.CheckpointerFactory", FakeCheckpointerFactory),
+            patch("src.team_instanciator.core.team_instanciator.AgentGraphRegistry", FakeRegistry),
             self.assertRaisesRegex(RuntimeError, "boom"),
         ):
             TeamInstanciator(Loader(loaded_team)).instantiate("team.yaml")

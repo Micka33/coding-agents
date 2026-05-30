@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Conversation</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <h1>Conversation</h1>
+          <p id="roomMeta"></p>
+        </div>
+        <div class="controls">
+          <label class="toggle">
+            <input id="hookToggle" type="checkbox" checked />
+            <span>Mentions</span>
+          </label>
+          <label class="limit">
+            <span>Cascade</span>
+            <input id="cascadeLimit" type="number" min="1" placeholder="unlimited" />
+          </label>
+        </div>
+      </header>
+      <section id="messages" class="messages" aria-live="polite"></section>
+      <button id="activityHint" class="activity hidden" type="button"></button>
+      <form id="composer" class="composer">
+        <textarea id="messageInput" rows="3" placeholder="@agent-id"></textarea>
+        <div class="composerActions">
+          <input id="fileInput" type="file" multiple />
+          <button type="submit">Send</button>
+        </div>
+      </form>
+      <aside id="activityPanel" class="panel hidden"></aside>
+    </main>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

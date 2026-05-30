@@ -4,9 +4,10 @@ import json
 import sqlite3
 import unittest
 
-from src.team_instanciator.checkpointer_handle import CheckpointerHandle
-from src.team_instanciator.team_runtime_manifest_builder import TeamRuntimeManifestBuilder
-from src.team_instanciator.team_runtime_manifest_store import TeamRuntimeManifestStore
+from src.team_instanciator.runtime.checkpointer_handle import CheckpointerHandle
+from src.team_instanciator.manifest.team_runtime_manifest_builder import TeamRuntimeManifestBuilder
+from src.team_instanciator.manifest.team_runtime_manifest_store import TeamRuntimeManifestStore
+from src.team_loader.models.conversation_settings import AgentConversationSettings, TeamConversationSettings
 from tests.support import agent, relation, team
 
 
@@ -42,6 +43,47 @@ class TeamRuntimeManifestTests(unittest.TestCase):
         manifest = TeamRuntimeManifestBuilder().build(team(agents={"worker": agent("worker")}))
 
         self.assertEqual(manifest.lanes, ())
+
+    def test_builder_adds_mention_lanes_for_conversation_participants(self) -> None:
+        team_config = team(
+            team_id="product",
+            agents={
+                "entry": agent("entry", name="Entry", entrypoint=True),
+                "architect": agent("architect", name="Architect"),
+            },
+            agent_references={
+                "entry": agent("entry", entrypoint=True),
+                "architect": agent("architect"),
+            },
+            conversation=TeamConversationSettings.from_mapping({}),
+        )
+        team_config.agent_references["entry"].conversation = AgentConversationSettings()
+        team_config.agent_references["architect"].conversation = AgentConversationSettings()
+
+        manifest = TeamRuntimeManifestBuilder().build(team_config)
+
+        mention_lanes = [lane for lane in manifest.lanes if lane.kind == "mention"]
+        self.assertEqual([lane.lane_id for lane in mention_lanes], ["mention:entry", "mention:architect"])
+        self.assertEqual(mention_lanes[0].thread_id_pattern, "{parent_thread_id}:mention:entry")
+
+    def test_builder_skips_nonparticipants_when_conversation_is_enabled(self) -> None:
+        team_config = team(
+            agents={
+                "entry": agent("entry", entrypoint=True),
+                "architect": agent("architect"),
+            },
+            agent_references={
+                "entry": agent("entry", entrypoint=True),
+                "architect": agent("architect"),
+            },
+            conversation=TeamConversationSettings.from_mapping({}),
+        )
+        team_config.agent_references["entry"].conversation = AgentConversationSettings()
+        team_config.agent_references["architect"].conversation = None
+
+        manifest = TeamRuntimeManifestBuilder().build(team_config)
+
+        self.assertEqual([lane.lane_id for lane in manifest.lanes if lane.kind == "mention"], ["mention:entry"])
 
     def test_store_persists_manifest_and_replaces_lanes_when_connection_exists(self) -> None:
         connection = sqlite3.connect(":memory:")

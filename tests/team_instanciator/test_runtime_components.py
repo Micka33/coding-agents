@@ -4,16 +4,16 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.team_instanciator.agent_runtime_resolver import AgentRuntimeResolver
-from src.team_instanciator.memory_resolver import MemoryResolver
-from src.team_instanciator.permissions_factory import PermissionsFactory
-from src.team_instanciator.root_dir_resolver import RootDirResolver
-from src.team_instanciator.runtime_configuration import RuntimeConfiguration
-from src.team_instanciator.runtime_lane import RuntimeLane
-from src.team_instanciator.skills_resolver import SkillsResolver
-from src.team_instanciator.team_instanciator_error import TeamInstanciatorError
-from src.team_instanciator.team_runtime_manifest import TeamRuntimeManifest
-from src.team_instanciator.thread_id_factory import ThreadIdFactory
+from src.team_instanciator.resolvers.agent_runtime_resolver import AgentRuntimeResolver
+from src.team_instanciator.resolvers.memory_resolver import MemoryResolver
+from src.team_instanciator.factories.permissions_factory import PermissionsFactory
+from src.team_instanciator.resolvers.root_dir_resolver import RootDirResolver
+from src.team_instanciator.configuration.runtime_configuration import RuntimeConfiguration
+from src.team_instanciator.runtime.runtime_lane import RuntimeLane
+from src.team_instanciator.resolvers.skills_resolver import SkillsResolver
+from src.team_instanciator.errors.team_instanciator_error import TeamInstanciatorError
+from src.team_instanciator.manifest.team_runtime_manifest import TeamRuntimeManifest
+from src.team_instanciator.runtime.thread_id_factory import ThreadIdFactory
 from tests.support import agent, defaults, relation, team
 
 
@@ -78,6 +78,8 @@ class RuntimeComponentsTests(unittest.TestCase):
         self.assertEqual(thread_factory.root("team"), "team")
         self.assertEqual(thread_factory.relation("root", relation_config), "root:entry:tool:worker")
         self.assertEqual(thread_factory.relation_pattern(relation_config), "{parent_thread_id}:entry:tool:worker")
+        self.assertEqual(thread_factory.mention("root", "architect"), "root:mention:architect")
+        self.assertEqual(thread_factory.mention_pattern("architect"), "{parent_thread_id}:mention:architect")
         self.assertEqual(thread_factory.parse_relation_thread_id("root:entry:ask_worker:worker").tool_name, "ask_worker")
         self.assertIsNone(thread_factory.parse_relation_thread_id("bad"))
         self.assertIsNone(thread_factory.parse_relation_thread_id("root:entry::worker"))

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import unittest
 
-from src.team_instanciator.runtime_configuration import RuntimeConfiguration
-from src.team_instanciator.runtime_configuration_validator import RuntimeConfigurationValidator
-from src.team_instanciator.team_instanciator_error import TeamInstanciatorError
+from src.team_instanciator.configuration.runtime_configuration import RuntimeConfiguration
+from src.team_instanciator.configuration.runtime_configuration_validator import RuntimeConfigurationValidator
+from src.team_instanciator.errors.team_instanciator_error import TeamInstanciatorError
 from tests.support import agent, defaults, team
 
 

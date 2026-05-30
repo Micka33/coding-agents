@@ -10,13 +10,13 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from teams.philosophers.conversation_counter_tools import (
     create_conversation_counter_tools,
 )
-from src.team_instanciator.custom_tool_context import (
+from src.team_instanciator.tools.custom_tool_context import (
     ConversationHistory,
     CustomToolContext,
     EnvView,
 )
-from src.team_instanciator.runtime_configuration import RuntimeConfiguration
-from src.team_loader.team_loader import TeamLoader
+from src.team_instanciator.configuration.runtime_configuration import RuntimeConfiguration
+from src.team_loader.loading.team_loader import TeamLoader
 
 
 class PhilosophersTeamTests(unittest.TestCase):

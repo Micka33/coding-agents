@@ -3,9 +3,9 @@ from __future__ import annotations
 import unittest
 from typing import Any
 
-from src.team_instanciator.agent_graph import AgentGraph
-from src.team_instanciator.agent_graph_registry import AgentGraphRegistry
-from src.team_instanciator.checkpointer_handle import CheckpointerHandle
+from src.team_instanciator.core.agent_graph import AgentGraph
+from src.team_instanciator.core.agent_graph_registry import AgentGraphRegistry
+from src.team_instanciator.runtime.checkpointer_handle import CheckpointerHandle
 from tests.support import FakeGraph, agent, relation, team
 
 
@@ -59,7 +59,7 @@ class AgentGraphRegistryTests(unittest.TestCase):
             deep_factory,
             subagent_factory,
             relation_factory,
-            thread_id_factory=__import__("src.team_instanciator.thread_id_factory", fromlist=["ThreadIdFactory"]).ThreadIdFactory(),
+            thread_id_factory=__import__("src.team_instanciator.runtime.thread_id_factory", fromlist=["ThreadIdFactory"]).ThreadIdFactory(),
         )
 
         entry_graph = registry.graph("entry")

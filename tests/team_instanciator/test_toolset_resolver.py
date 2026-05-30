@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from langchain_core.tools import StructuredTool
 
-from src.team_instanciator.toolset_resolver import ToolsetResolver
+from src.team_instanciator.resolvers.toolset_resolver import ToolsetResolver
 from tests.support import agent, defaults, team
 
 

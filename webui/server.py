@@ -303,7 +303,7 @@ class CheckpointHistoryReader:
         return bool(metadata.get("team_id") and metadata.get("agent_id") and metadata.get("thread_kind"))
 
     def _is_relation_checkpoint_metadata(self, metadata: dict[str, Any] | None) -> bool:
-        return bool(metadata and metadata.get("thread_kind") == "tool-relation")
+        return bool(metadata and metadata.get("thread_kind") in {"tool-relation", "mention"})
 
     def _merge_checkpoint_metadata_lanes(
         self,
@@ -347,11 +347,11 @@ class CheckpointHistoryReader:
         active_thread_id: str,
     ) -> dict[str, Any] | None:
         kind = str(metadata.get("thread_kind") or "")
-        if kind not in {"entrypoint", "agent", "tool-relation"}:
+        if kind not in {"entrypoint", "agent", "tool-relation", "mention"}:
             return None
         if kind in {"entrypoint", "agent"} and thread_id != active_thread_id:
             return None
-        if kind == "tool-relation" and not thread_id.startswith(f"{active_thread_id}:"):
+        if kind in {"tool-relation", "mention"} and not thread_id.startswith(f"{active_thread_id}:"):
             return None
 
         lane_id = str(metadata.get("lane_id") or f"{kind}:{metadata.get('agent_id') or thread_id}")
@@ -378,14 +378,16 @@ class CheckpointHistoryReader:
         def sort_key(lane: dict[str, Any]) -> tuple[int, str]:
             if lane.get("kind") == "entrypoint":
                 rank = 0
-            elif lane.get("kind") == "tool-relation" and lane.get("sourceAgentId") == entrypoint_agent_id:
+            elif lane.get("kind") == "mention":
                 rank = 1
-            elif lane.get("kind") == "tool-relation":
+            elif lane.get("kind") == "tool-relation" and lane.get("sourceAgentId") == entrypoint_agent_id:
                 rank = 2
-            elif lane.get("kind") == "task-subagent-type":
+            elif lane.get("kind") == "tool-relation":
                 rank = 3
-            else:
+            elif lane.get("kind") == "task-subagent-type":
                 rank = 4
+            else:
+                rank = 5
             return (rank, str(lane.get("laneId") or lane.get("id") or ""))
 
         return sorted(lanes, key=sort_key)
@@ -477,7 +479,7 @@ class CheckpointHistoryReader:
     def _parent_thread_id_for_relation(self, thread_id: str, manifests: list[dict[str, Any]]) -> str | None:
         for manifest in manifests:
             for lane in manifest.get("lanes", []):
-                if lane.get("kind") != "tool-relation":
+                if lane.get("kind") not in {"tool-relation", "mention"}:
                     continue
                 parent_thread_id = self._parent_from_thread_pattern(thread_id, lane.get("threadIdPattern"))
                 if parent_thread_id:
@@ -637,6 +639,8 @@ class CheckpointHistoryReader:
     def _lane_section_label(self, lane: dict[str, Any]) -> str:
         if lane.get("kind") == "entrypoint":
             return "Conversation racine"
+        if lane.get("kind") == "mention":
+            return "Conversation publique"
         source = lane.get("sourceAgentId")
         tool_name = lane.get("toolName")
         if source and tool_name:
@@ -654,6 +658,8 @@ class CheckpointHistoryReader:
         if lane.get("kind") == "entrypoint":
             return "manager"
         if lane.get("kind") == "tool-relation":
+            return "resident"
+        if lane.get("kind") == "mention":
             return "resident"
         if lane.get("kind") == "task-subagent-type":
             return "disposable"

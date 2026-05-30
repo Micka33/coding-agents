@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import unittest
 
-from src.team_loader.team_loader_error import TeamLoaderError
-from src.team_loader.yaml_parser import YamlParser
+from src.team_loader.errors.team_loader_error import TeamLoaderError
+from src.team_loader.parsing.yaml_parser import YamlParser
 
 
 class YamlParserTests(unittest.TestCase):
@@ -34,6 +34,8 @@ items:
   - name:
     value: 1
   - https://example.test
+empty_dict: {}
+empty_list: []
 """.strip()
             ),
             {
@@ -47,6 +49,8 @@ items:
                 "literal": "alpha\n\nbeta",
                 "empty": None,
                 "items": [{"name": None, "value": 1}, "https://example.test"],
+                "empty_dict": {},
+                "empty_list": [],
             },
         )
 

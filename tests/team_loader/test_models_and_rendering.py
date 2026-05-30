@@ -4,16 +4,16 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.team_loader.agent_reference import AgentReference
-from src.team_loader.checkpointer_default import CheckpointerDefault
-from src.team_loader.custom_tool_definition import CustomToolDefinition
-from src.team_loader.include_resolver import IncludeResolver
-from src.team_loader.mdc_parser import MdcParser
-from src.team_loader.team_definition import TeamDefinition
-from src.team_loader.team_loader import TeamLoader
-from src.team_loader.team_loader_error import TeamLoaderError
-from src.team_loader.template_renderer import TemplateRenderer
-from src.team_loader.tool_reference import ToolReference
+from src.team_loader.models.agent_reference import AgentReference
+from src.team_loader.models.checkpointer_default import CheckpointerDefault
+from src.team_loader.models.custom_tool_definition import CustomToolDefinition
+from src.team_loader.parsing.include_resolver import IncludeResolver
+from src.team_loader.parsing.mdc_parser import MdcParser
+from src.team_loader.models.team_definition import TeamDefinition
+from src.team_loader.loading.team_loader import TeamLoader
+from src.team_loader.errors.team_loader_error import TeamLoaderError
+from src.team_loader.parsing.template_renderer import TemplateRenderer
+from src.team_loader.models.tool_reference import ToolReference
 from tests.support import agent
 
 
@@ -96,7 +96,22 @@ class ModelsAndRenderingTests(unittest.TestCase):
             )
             team_file = root / "team.yaml"
             team_file.write_text(
-                "schema_version: 1\nid: product\nagents:\n  entry:\n    kind: deepagent\n    config: agents/entry.mdc\n    entrypoint: true\n",
+                "\n".join(
+                    [
+                        "schema_version: 1",
+                        "id: product",
+                        "conversation:",
+                        "  human_input:",
+                        "    default_targets:",
+                        "      - entry",
+                        "agents:",
+                        "  entry:",
+                        "    kind: deepagent",
+                        "    config: agents/entry.mdc",
+                        "    entrypoint: true",
+                        "    conversation: {}",
+                    ]
+                ),
                 encoding="utf-8",
             )
 
@@ -104,6 +119,8 @@ class ModelsAndRenderingTests(unittest.TestCase):
 
             self.assertEqual(loaded.entrypoint().prompt, "Hello Ada 2 {{ missing }}")
             self.assertEqual(loaded.agents["entry"].variables["count"], 2)
+            self.assertEqual(loaded.conversation.human_input.default_targets, ("entry",))
+            self.assertEqual(loaded.agent_references["entry"].conversation.aliases, ())
             self.assertIsNone(TeamDefinition.from_mapping(Path("team.yaml"), {"schema_version": 1, "id": "empty"}, {"worker": agent("worker")}).entrypoint())
             with self.assertRaisesRegex(TeamLoaderError, "does not exist"):
                 TeamLoader()._load_team_mapping(root / "missing.yaml")

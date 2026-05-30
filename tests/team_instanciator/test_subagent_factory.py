@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import unittest
 
-from src.team_instanciator.subagent_factory import SubagentFactory
-from src.team_instanciator.thread_id_factory import ThreadIdFactory
+from src.team_instanciator.factories.subagent_factory import SubagentFactory
+from src.team_instanciator.runtime.thread_id_factory import ThreadIdFactory
 from tests.support import agent, relation, team
 
 

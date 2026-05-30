@@ -6,11 +6,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from src.team_instanciator.backend_factory import BackendFactory
-from src.team_instanciator.checkpointer_factory import CheckpointerFactory
-from src.team_instanciator.checkpointer_handle import CheckpointerHandle
-from src.team_instanciator.runtime_configuration import RuntimeConfiguration
-from src.team_instanciator.team_instanciator_error import TeamInstanciatorError
+from src.team_instanciator.factories.backend_factory import BackendFactory
+from src.team_instanciator.factories.checkpointer_factory import CheckpointerFactory
+from src.team_instanciator.runtime.checkpointer_handle import CheckpointerHandle
+from src.team_instanciator.configuration.runtime_configuration import RuntimeConfiguration
+from src.team_instanciator.errors.team_instanciator_error import TeamInstanciatorError
 from tests.support import agent, defaults, team
 
 

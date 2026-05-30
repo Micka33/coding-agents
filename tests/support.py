@@ -125,6 +125,7 @@ def team(
     toolsets: dict[str, Any] | None = None,
     agent_references: dict[str, Any] | None = None,
     schema_version: int = 1,
+    conversation: Any | None = None,
 ) -> FakeTeam:
     resolved_agents = agents or {"entry": agent("entry", entrypoint=True)}
     return FakeTeam(
@@ -136,6 +137,7 @@ def team(
         custom_tools=custom_tools or {},
         toolsets=toolsets or {},
         agent_references=agent_references if agent_references is not None else resolved_agents,
+        conversation=conversation,
         path=Path("team.yaml"),
         raw={},
     )

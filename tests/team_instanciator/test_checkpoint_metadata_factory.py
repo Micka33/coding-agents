@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from src.team_instanciator.checkpoint_metadata_factory import CheckpointMetadataFactory
+from src.team_instanciator.factories.checkpoint_metadata_factory import CheckpointMetadataFactory
 from tests.support import agent, relation, team
 
 
@@ -15,6 +15,17 @@ class CheckpointMetadataFactoryTests(unittest.TestCase):
 
         self.assertEqual(factory.entrypoint(team_config, entry)["lane_id"], "entrypoint:entry")
         self.assertEqual(factory.direct_agent(team_config, worker)["thread_kind"], "agent")
+        self.assertEqual(
+            factory.mention(team_config, worker),
+            {
+                "team_id": "product",
+                "agent_id": "worker",
+                "agent_name": "Worker",
+                "thread_kind": "mention",
+                "lane_id": "mention:worker",
+                "target_agent_id": "worker",
+            },
+        )
         self.assertEqual(
             factory.tool_relation(team_config, relation(source="entry", target="worker", tool_name=None)),
             {

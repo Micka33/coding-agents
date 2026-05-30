@@ -198,7 +198,7 @@ Declares custom tool factories that `toolsets` can reference.
 ```yaml
 custom_tools:
   scoped_read_tools:
-    factory: src.team_instanciator.scoped_read_tools_factory:create_scoped_read_tools
+    factory: src.team_instanciator.tools.scoped_read_tools_factory:create_scoped_read_tools
     exposes:
       - ls
       - read_file
@@ -217,7 +217,7 @@ from collections.abc import Mapping, Sequence
 
 from langchain_core.tools import BaseTool
 
-from src.team_instanciator import CustomToolContext
+from src.team_instanciator.tools.custom_tool_context import CustomToolContext
 
 
 def create_tools(
@@ -264,7 +264,7 @@ subdirectory:
 ```yaml
 custom_tools:
   docs_read_tools:
-    factory: src.team_instanciator.scoped_read_tools_factory:create_scoped_read_tools
+    factory: src.team_instanciator.tools.scoped_read_tools_factory:create_scoped_read_tools
     args:
       root_dir: "{root_dir}/docs"
     exposes:
@@ -300,7 +300,7 @@ from collections.abc import Mapping, Sequence
 from langchain.tools import ToolRuntime
 from langchain_core.tools import BaseTool, StructuredTool
 
-from src.team_instanciator import CustomToolContext
+from src.team_instanciator.tools.custom_tool_context import CustomToolContext
 
 
 def create_tools(
@@ -430,6 +430,46 @@ entrypoint: true
 
 There must be exactly one entrypoint. `thread_id` values are managed
 automatically and must not be written in `team.yaml`.
+
+### `conversation`
+
+Top-level `conversation` opts the team into the public mention-router
+conversation bus. If this key is absent, no public conversation is created.
+
+```yaml
+conversation:
+  mentions:
+    max_parallel_agents: 2
+    max_cascade_turns: null
+  identity_refresh_after_tokens: 10000
+  human_input:
+    default_targets:
+      - engineering-manager
+```
+
+`conversation.mentions.max_parallel_agents` defaults to `2`.
+`conversation.mentions.max_cascade_turns` defaults to `null`, which means
+unlimited. `identity_refresh_after_tokens` defaults to `10000`.
+
+`human_input.default_targets` defaults to `[]`. Use it when an unmentioned
+human message should wake one or more public participants.
+
+An agent becomes mentionable only when its agent reference contains an
+`agents.<agent_id>.conversation` block. Participants must be `kind: deepagent`.
+
+```yaml
+agents:
+  product-analyst:
+    kind: deepagent
+    config: ./agents/product-analyst.mdc
+    conversation:
+      aliases:
+        - product
+        - product-analyst
+```
+
+Aliases live in `team.yaml` and resolve to canonical agent ids. Unknown mentions
+and mentions of non-participants remain visible text and do not wake agents.
 
 ### `relations`
 

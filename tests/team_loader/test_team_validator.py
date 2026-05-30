@@ -3,13 +3,14 @@ from __future__ import annotations
 import unittest
 from types import SimpleNamespace
 
-from src.team_loader.team_loader_error import TeamLoaderError
-from src.team_loader.team_validator import TeamValidator
+from src.team_loader.errors.team_loader_error import TeamLoaderError
+from src.team_loader.validation.team_validator import TeamValidator
+from src.team_loader.models.conversation_settings import AgentConversationSettings, TeamConversationSettings
 from tests.support import agent
 
 
-def reference(kind: str = "deepagent", config: str = "entry.mdc") -> SimpleNamespace:
-    return SimpleNamespace(kind=kind, config=config)
+def reference(kind: str = "deepagent", config: str = "entry.mdc", conversation=None) -> SimpleNamespace:
+    return SimpleNamespace(kind=kind, config=config, conversation=conversation)
 
 
 def valid_team(**overrides) -> SimpleNamespace:
@@ -21,6 +22,7 @@ def valid_team(**overrides) -> SimpleNamespace:
         "agent_references": {"entry": reference()},
         "agents": {"entry": agent("entry", entrypoint=True)},
         "relations": (),
+        "conversation": None,
     }
     data.update(overrides)
     return SimpleNamespace(**data)
@@ -67,6 +69,92 @@ class TeamValidatorTests(unittest.TestCase):
         self.assert_invalid(valid_team(relations=(SimpleNamespace(source="entry", target="entry", relation="peer", tool_name=None),)), "invalid type")
         self.assert_invalid(valid_team(relations=(SimpleNamespace(source="entry", target="entry", relation="tool", tool_name=None),)), "requires tool_name")
         self.assert_invalid(valid_team(relations=(SimpleNamespace(source="entry", target="entry", relation="subagent", tool_name="ask"),)), "must not define")
+
+    def test_conversation_validation(self) -> None:
+        conversation = TeamConversationSettings.from_mapping(
+            {
+                "mentions": {"max_parallel_agents": 2, "max_cascade_turns": None},
+                "human_input": {"default_targets": ["entry"]},
+            }
+        )
+        TeamValidator().validate(
+            valid_team(
+                conversation=conversation,
+                agent_references={"entry": reference(conversation=AgentConversationSettings())},
+            )
+        )
+
+        self.assert_invalid(
+            valid_team(
+                conversation=conversation,
+                agent_references={"entry": reference(kind="subagent", conversation=AgentConversationSettings())},
+            ),
+            "kind: deepagent",
+        )
+        self.assert_invalid(
+            valid_team(
+                conversation=TeamConversationSettings.from_mapping({"human_input": {"default_targets": ["missing"]}}),
+                agent_references={"entry": reference(conversation=AgentConversationSettings())},
+            ),
+            "non-participant",
+        )
+        self.assert_invalid(
+            valid_team(
+                conversation=TeamConversationSettings.from_mapping({"mentions": {"max_cascade_turns": 0}}),
+                agent_references={"entry": reference(conversation=AgentConversationSettings())},
+            ),
+            "max_cascade_turns",
+        )
+        self.assert_invalid(
+            valid_team(
+                conversation=TeamConversationSettings.from_mapping({"mentions": {"max_parallel_agents": 0}}),
+                agent_references={"entry": reference(conversation=AgentConversationSettings())},
+            ),
+            "max_parallel_agents",
+        )
+        self.assert_invalid(
+            valid_team(
+                conversation=TeamConversationSettings.from_mapping({"mentions": {"max_agent_failures": 0}}),
+                agent_references={"entry": reference(conversation=AgentConversationSettings())},
+            ),
+            "max_agent_failures",
+        )
+        self.assert_invalid(
+            valid_team(
+                conversation=TeamConversationSettings.from_mapping({"identity_refresh_after_tokens": 0}),
+                agent_references={"entry": reference(conversation=AgentConversationSettings())},
+            ),
+            "identity_refresh_after_tokens",
+        )
+        self.assert_invalid(
+            valid_team(
+                conversation=TeamConversationSettings.from_mapping({}),
+                agent_references={"entry": reference(conversation=AgentConversationSettings(("helper", "HELPER")))},
+            ),
+            "duplicated",
+        )
+        self.assert_invalid(
+            valid_team(
+                conversation=TeamConversationSettings.from_mapping({}),
+                agent_references={
+                    "entry": reference(conversation=AgentConversationSettings(("other",))),
+                    "other": reference(config="other.mdc", conversation=AgentConversationSettings()),
+                },
+                agents={"entry": agent("entry", entrypoint=True), "other": agent("other")},
+            ),
+            "conflicts",
+        )
+        self.assert_invalid(
+            valid_team(
+                conversation=TeamConversationSettings.from_mapping({}),
+                agent_references={
+                    "entry": reference(conversation=AgentConversationSettings(("helper",))),
+                    "other": reference(config="other.mdc", conversation=AgentConversationSettings(("helper",))),
+                },
+                agents={"entry": agent("entry", entrypoint=True), "other": agent("other")},
+            ),
+            "used by both",
+        )
 
 
 if __name__ == "__main__":

@@ -25,7 +25,7 @@ dev = [
 ]
 
 [project.scripts]
-coding-agents = "src.team_instanciator.cli:main"
+coding-agents = "src.team_instanciator.interfaces.cli:main"
 
 [tool.coverage.run]
 source = ["src"]

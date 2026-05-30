@@ -3,9 +3,9 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from src.team_instanciator.checkpointer_handle import CheckpointerHandle
-from src.team_instanciator.deep_agent_factory import DeepAgentFactory
-from src.team_instanciator.langchain_agent_factory import LangChainAgentFactory
+from src.team_instanciator.runtime.checkpointer_handle import CheckpointerHandle
+from src.team_instanciator.factories.deep_agent_factory import DeepAgentFactory
+from src.team_instanciator.factories.langchain_agent_factory import LangChainAgentFactory
 from tests.support import agent, team
 
 
@@ -38,7 +38,7 @@ class AgentFactoryTests(unittest.TestCase):
         team_config = team()
         agent_config = agent("entry", name="Entry", prompt="System", debug=True)
 
-        with patch("src.team_instanciator.deep_agent_factory.create_deep_agent", return_value="graph") as create_deep_agent:
+        with patch("src.team_instanciator.factories.deep_agent_factory.create_deep_agent", return_value="graph") as create_deep_agent:
             created = DeepAgentFactory(
                 Resolver("model"),
                 ToolsetResolver(),
@@ -67,7 +67,7 @@ class AgentFactoryTests(unittest.TestCase):
         team_config = team()
         agent_config = agent("entry", name="Entry", prompt="System", debug=True)
 
-        with patch("src.team_instanciator.langchain_agent_factory.create_agent", return_value="agent") as create_agent:
+        with patch("src.team_instanciator.factories.langchain_agent_factory.create_agent", return_value="agent") as create_agent:
             created = LangChainAgentFactory(Resolver("model"), ToolsetResolver()).create(team_config, agent_config)
 
         self.assertEqual(created, "agent")
