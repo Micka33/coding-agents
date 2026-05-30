@@ -357,12 +357,13 @@ the configured token threshold has passed since the last identity refresh.
 
 The identity text should include:
 
-- the agent's canonical id and display name;
+- the agent's canonical id;
 - the mention form that wakes it;
-- that public conversation updates include other participants as
-  `HumanMessage(name="<author-id>")`;
-- that human-added public conversation files are included when the agent is
-  mentioned.
+- other mentionable participants, their aliases, and their agent-file
+  descriptions;
+- that participants can be mentioned by canonical id or alias;
+- that replies and questions addressed to another participant should tag that
+  participant.
 
 ## Projection Rules
 

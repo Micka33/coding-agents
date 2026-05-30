@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
+
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from src.team_loader.models.agent_definition import AgentDefinition
@@ -12,9 +14,21 @@ from .conversation_file_ref import ConversationFileRef
 
 
 class AgentSyncBuilder:
-    def __init__(self, *, identity_refresh_after_tokens: int = 10_000, max_delta_tokens: int | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        identity_refresh_after_tokens: int = 10_000,
+        max_delta_tokens: int | None = None,
+        participants: Iterable[AgentDefinition] | None = None,
+        aliases_by_participant: Mapping[str, Iterable[str]] | None = None,
+    ) -> None:
         self._identity_refresh_after_tokens = identity_refresh_after_tokens
         self._max_delta_tokens = max_delta_tokens
+        self._participants = tuple(participants or ())
+        self._aliases_by_participant = {
+            participant_id: tuple(aliases)
+            for participant_id, aliases in (aliases_by_participant or {}).items()
+        }
 
     def build(
         self,
@@ -79,12 +93,27 @@ class AgentSyncBuilder:
         )
 
     def _identity_text(self, target: AgentDefinition) -> str:
+        roster = self._participant_roster(target)
         return (
-            f"You are {target.id} ({target.name}). Other participants refer to you as @{target.id}.\n"
-            "Public conversation updates from other participants are delivered as "
-            'HumanMessage(name="<author-id>").\n'
-            "Human-added public conversation files are included as attachments when you are mentioned."
+            f"You are {target.id}. Other participants refer to you as @{target.id}.\n"
+            "Other participants are:\n"
+            f"{roster}\n"
+            "You can mention other participants by writing @<participant_id> or @<participant_alias>\n"
+            "If you answer to another participant, mention them in your reply.\n"
+            "If you need ask a question to another participant, mention them in your reply."
         )
+
+    def _participant_roster(self, target: AgentDefinition) -> str:
+        participants = self._participants or (target,)
+        lines: list[str] = []
+        for participant in participants:
+            if participant.id == target.id:
+                continue
+            aliases = self._aliases_by_participant.get(participant.id, ())
+            alias_text = f" (aliases: {', '.join(aliases)})" if aliases else ""
+            description = participant.description or "No description provided."
+            lines.append(f"- {participant.id}{alias_text} : {description}")
+        return "\n".join(lines) if lines else "- None."
 
     def _attachment_payload(self, event: ConversationEvent, attachment: ConversationFileRef) -> dict[str, object]:
         payload = attachment.to_dict()

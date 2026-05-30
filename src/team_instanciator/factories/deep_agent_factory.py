@@ -43,7 +43,7 @@ class DeepAgentFactory:
         subagents: list[SubagentSpec] | None,
     ) -> RunnableGraph:
         return create_deep_agent(
-            name=agent.name,
+            name=agent.id,
             model=self._model_resolver.resolve(team, agent),
             tools=[*self._toolset_resolver.resolve_for_deepagents(team, agent), *tools],
             system_prompt=agent.prompt,

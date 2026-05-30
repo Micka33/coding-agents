@@ -50,6 +50,13 @@ class TeamValidatorTests(unittest.TestCase):
     def test_agent_errors(self) -> None:
         self.assert_invalid(valid_team(agent_references={}, agents={}), "at least one agent")
         self.assert_invalid(valid_team(agents={"entry": agent("entry", entrypoint=False)}), "exactly one entrypoint")
+        self.assert_invalid(
+            valid_team(
+                agent_references={"entry": reference(), "Entry": reference("deepagent", "other.mdc")},
+                agents={"entry": agent("entry", entrypoint=True), "Entry": agent("Entry")},
+            ),
+            "case-insensitive",
+        )
         self.assert_invalid(valid_team(agent_references={"entry": reference(kind="worker")}), "kind must be")
         self.assert_invalid(valid_team(agent_references={"entry": reference(config="")}), "config is required")
         self.assert_invalid(
@@ -64,6 +71,14 @@ class TeamValidatorTests(unittest.TestCase):
         self.assert_invalid(valid_team(agents={"entry": agent("entry", entrypoint=True, state_persistence="forever")}), "invalid state")
 
     def test_relation_errors(self) -> None:
+        TeamValidator().validate(
+            valid_team(
+                agent_references={"Entry": reference(conversation=AgentConversationSettings())},
+                agents={"Entry": agent("Entry", entrypoint=True)},
+                relations=(SimpleNamespace(source="entry", target="ENTRY", relation="tool", tool_name="ask"),),
+                conversation=TeamConversationSettings.from_mapping({"human_input": {"default_targets": ["ENTRY"]}}),
+            )
+        )
         self.assert_invalid(valid_team(relations=(SimpleNamespace(source="missing", target="entry", relation="tool", tool_name="ask"),)), "source")
         self.assert_invalid(valid_team(relations=(SimpleNamespace(source="entry", target="missing", relation="tool", tool_name="ask"),)), "target")
         self.assert_invalid(valid_team(relations=(SimpleNamespace(source="entry", target="entry", relation="peer", tool_name=None),)), "invalid type")

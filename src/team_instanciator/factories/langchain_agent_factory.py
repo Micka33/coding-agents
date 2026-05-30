@@ -20,6 +20,6 @@ class LangChainAgentFactory:
             model=self._model_resolver.resolve(team, agent),
             tools=self._toolset_resolver.resolve_for_langchain(team, agent),
             system_prompt=agent.prompt,
-            name=agent.name,
+            name=agent.id,
             debug=agent.debug is True,
         )

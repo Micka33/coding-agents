@@ -48,15 +48,15 @@ class SubagentFactory:
         if self._runtime_resolver.subagent_runtime(agent) == "langchain":
             metadata = self._checkpoint_metadata_factory.task_subagent_type(team, agent)
             return {
-                "name": agent.name,
-                "description": agent.description or agent.name,
+                "name": agent.id,
+                "description": agent.description or agent.id,
                 "runnable": self._langchain_agent_factory.create(team, agent).with_config(
                     {"configurable": self._metadata_injector.inject(None, metadata)["metadata"]}
                 ),
             }
         return {
-            "name": agent.name,
-            "description": agent.description or agent.name,
+            "name": agent.id,
+            "description": agent.description or agent.id,
             "system_prompt": agent.prompt,
             "tools": [
                 *self._toolset_resolver.resolve_for_deepagents(team, agent),

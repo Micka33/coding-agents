@@ -53,7 +53,7 @@ class CheckpointMetadataFactory:
         return {
             "team_id": team.id,
             "agent_id": agent.id,
-            "agent_name": agent.name,
+            "agent_name": agent.id,
             "thread_kind": thread_kind,
             "lane_id": lane_id,
         }

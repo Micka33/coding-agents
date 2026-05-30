@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from src.type_defs import JsonObject, JsonValue
-from src.team_loader.models._coercion import optional_string, string_tuple, string_value
+from src.team_loader.models._coercion import optional_string, string_tuple
 from src.team_loader.models.agent_reference import AgentReference
 from src.team_loader.models.agent_state import AgentState
 from src.team_loader.models.mdc_document import MdcDocument
@@ -13,7 +13,6 @@ from src.team_loader.models.mdc_document import MdcDocument
 @dataclass(frozen=True)
 class AgentDefinition:
     id: str
-    name: str
     kind: str
     config_path: Path
     entrypoint: bool
@@ -40,7 +39,6 @@ class AgentDefinition:
         data = document.frontmatter
         return cls(
             id=reference.id,
-            name=string_value(data.get("name"), reference.id),
             kind=reference.kind,
             config_path=document.path,
             entrypoint=reference.entrypoint,

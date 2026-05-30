@@ -53,7 +53,7 @@ class RelationToolTests(unittest.TestCase):
 
 class RelationToolFactoryTests(unittest.TestCase):
     def test_create_requires_tool_name_and_builds_structured_tool(self) -> None:
-        team_config = team(agents={"entry": agent("entry", entrypoint=True), "worker": agent("worker", name="Worker")})
+        team_config = team(agents={"entry": agent("entry", entrypoint=True), "worker": agent("worker")})
 
         with self.assertRaisesRegex(TeamInstanciatorError, "has no tool_name"):
             RelationToolFactory().create(team_config, relation(tool_name=None), Registry(FakeGraph()), "root", ThreadIdFactory())

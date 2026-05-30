@@ -94,6 +94,10 @@ class ModelsAndRenderingTests(unittest.TestCase):
                 "---\nname: Entry\nvariables:\n  greeting: Hello {name}\n  count: 2\n---\n{{ greeting }} {{ count }} {{ missing }}",
                 encoding="utf-8",
             )
+            (agents_dir / "worker.mdc").write_text(
+                "---\nschema_version: 1\n---\nWorker prompt",
+                encoding="utf-8",
+            )
             team_file = root / "team.yaml"
             team_file.write_text(
                 "\n".join(
@@ -105,11 +109,19 @@ class ModelsAndRenderingTests(unittest.TestCase):
                         "    default_targets:",
                         "      - entry",
                         "agents:",
-                        "  entry:",
+                        "  Entry:",
                         "    kind: deepagent",
                         "    config: agents/entry.mdc",
                         "    entrypoint: true",
                         "    conversation: {}",
+                        "  Worker:",
+                        "    kind: deepagent",
+                        "    config: agents/worker.mdc",
+                        "relations:",
+                        "  - from: entry",
+                        "    to: worker",
+                        "    relation: tool",
+                        "    tool_name: ask_worker",
                     ]
                 ),
                 encoding="utf-8",
@@ -118,9 +130,10 @@ class ModelsAndRenderingTests(unittest.TestCase):
             loaded = TeamLoader().load(team_file, {"name": "Ada"})
 
             self.assertEqual(loaded.entrypoint().prompt, "Hello Ada 2 {{ missing }}")
-            self.assertEqual(loaded.agents["entry"].variables["count"], 2)
-            self.assertEqual(loaded.conversation.human_input.default_targets, ("entry",))
-            self.assertEqual(loaded.agent_references["entry"].conversation.aliases, ())
+            self.assertEqual(loaded.agents["Entry"].variables["count"], 2)
+            self.assertEqual(loaded.conversation.human_input.default_targets, ("Entry",))
+            self.assertEqual((loaded.relations[0].source, loaded.relations[0].target), ("Entry", "Worker"))
+            self.assertEqual(loaded.agent_references["Entry"].conversation.aliases, ())
             self.assertIsNone(TeamDefinition.from_mapping(Path("team.yaml"), {"schema_version": 1, "id": "empty"}, {"worker": agent("worker")}).entrypoint())
             with self.assertRaisesRegex(TeamLoaderError, "does not exist"):
                 TeamLoader()._load_team_mapping(root / "missing.yaml")

@@ -24,18 +24,20 @@ class PhilosophersTeamTests(unittest.TestCase):
         team = TeamLoader().load("teams/philosophers/team.yaml")
 
         self.assertEqual(team.id, "philosophers")
-        self.assertEqual(team.entrypoint().id if team.entrypoint() else None, "english-philosopher")
+        self.assertEqual(team.entrypoint().id if team.entrypoint() else None, "Francis-Bacon")
         self.assertEqual(
             set(team.agents),
-            {"english-philosopher", "german-philosopher", "japanese-philosopher", "translator"},
+            {"Francis-Bacon", "Friedrich-Nietzsche", "Hayashi-Razan", "translator"},
         )
-        self.assertEqual(team.agents["english-philosopher"].toolsets, ("conversation_counter",))
+        self.assertEqual(team.agents["Francis-Bacon"].toolsets, ("conversation_counter",))
         self.assertEqual(team.custom_tools["english_message_counter"].exposes, ("count_english_messages",))
         self.assertEqual(
             team.custom_tools["english_message_counter"].factory,
             "teams.philosophers.conversation_counter_tools:create_conversation_counter_tools",
         )
         self.assertEqual(len(team.relations), 5)
+        self.assertIn(("Hayashi-Razan", "translator"), {(relation.source, relation.target) for relation in team.relations})
+        self.assertIn(("Francis-Bacon", "Hayashi-Razan"), {(relation.source, relation.target) for relation in team.relations})
 
     def test_counter_counts_direct_messages_and_philosopher_tool_messages(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

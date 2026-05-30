@@ -12,7 +12,6 @@ Example:
 ```md
 ---
 schema_version: 1
-name: developer
 description: Implements a bounded development task after readiness approval.
 toolsets:
   - scoped_read_tools
@@ -29,6 +28,10 @@ You are a developer in a development-agent team.
 The frontmatter configures the agent. The Markdown body is the agent system
 prompt.
 
+The canonical agent id is declared in `team.yaml` under `agents`. Runtime agent
+names, subagent names, metadata, relations, and mentions all use that id.
+Do not add a `name` key to agent frontmatter; it has no runtime effect.
+
 ## Frontmatter Keys
 
 ### `schema_version`
@@ -41,19 +44,6 @@ schema_version: 1
 
 An unsupported version produces a configuration error.
 
-### `name`
-
-Runtime or display name for the agent.
-
-```yaml
-name: developer
-```
-
-This usually matches the canonical agent id from `team.yaml`.
-
-The canonical agent id is declared in `team.yaml` under `agents`. Do not repeat
-it in the `.mdc` frontmatter.
-
 ### `description`
 
 Short description of the agent role.
@@ -64,15 +54,20 @@ description: Validates acceptance criteria, defines and runs or recommends tests
 
 For subagents, this is used as the subagent description exposed to parent agents
 that declare a `relation: subagent` to this agent in `team.yaml`. Parent agents
-see the subagent `name` and `description` in their available subagent list, and
+see the subagent id and `description` in their available subagent list, and
 use that text to decide when to delegate through the `task` tool. The full
 Markdown body remains the subagent's own system prompt; it is not copied into
 the parent agent prompt.
 
-Example: if `translator.mdc` declares:
+For conversation participants, this description is included in identity refresh
+messages shown to other participants. Use it to briefly explain who the agent
+is, what role it plays, and what kind of conversation another agent should bring
+to it.
+
+Example: if `team.yaml` declares an agent id `translator` and `translator.mdc`
+declares:
 
 ```yaml
-name: translator
 description: Translates messages among English, German, and Japanese.
 ```
 

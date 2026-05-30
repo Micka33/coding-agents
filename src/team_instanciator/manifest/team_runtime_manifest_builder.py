@@ -29,7 +29,7 @@ class TeamRuntimeManifestBuilder:
                 lane_id=f"entrypoint:{entrypoint.id}",
                 kind="entrypoint",
                 agent_id=entrypoint.id,
-                agent_name=entrypoint.name,
+                agent_name=entrypoint.id,
                 thread_id_pattern="{parent_thread_id}",
             )
         ]
@@ -47,7 +47,7 @@ class TeamRuntimeManifestBuilder:
                     lane_id=f"mention:{agent.id}",
                     kind="mention",
                     agent_id=agent.id,
-                    agent_name=agent.name,
+                    agent_name=agent.id,
                     target_agent_id=agent.id,
                     thread_id_pattern=self._thread_id_factory.mention_pattern(agent.id),
                 )
@@ -66,7 +66,7 @@ class TeamRuntimeManifestBuilder:
                     lane_id=f"relation:{relation.source}:{tool_name}:{relation.target}",
                     kind="tool-relation",
                     agent_id=relation.target,
-                    agent_name=target.name,
+                    agent_name=target.id,
                     source_agent_id=relation.source,
                     target_agent_id=relation.target,
                     tool_name=tool_name,
@@ -88,7 +88,7 @@ class TeamRuntimeManifestBuilder:
                     lane_id=f"task-subagent-type:{relation.target}",
                     kind="task-subagent-type",
                     agent_id=relation.target,
-                    agent_name=target.name,
+                    agent_name=target.id,
                     target_agent_id=relation.target,
                 )
             )

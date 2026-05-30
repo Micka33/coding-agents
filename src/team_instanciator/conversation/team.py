@@ -60,12 +60,26 @@ class MentionAwareTeam:
             default_max_cascade_turns=team.conversation.mentions.max_cascade_turns,
         )
         self.parser = MentionParser.from_team(team)
+        participants = tuple(
+            team.agents[agent_id]
+            for agent_id, reference in team.agent_references.items()
+            if reference.conversation is not None
+        )
+        aliases_by_participant = {
+            agent_id: reference.conversation.aliases
+            for agent_id, reference in team.agent_references.items()
+            if reference.conversation is not None
+        }
         self.router = MentionRouter(
             team=team,
             registry=registry,
             store=self.store,
             parser=self.parser,
-            sync_builder=AgentSyncBuilder(identity_refresh_after_tokens=team.conversation.identity_refresh_after_tokens),
+            sync_builder=AgentSyncBuilder(
+                identity_refresh_after_tokens=team.conversation.identity_refresh_after_tokens,
+                participants=participants,
+                aliases_by_participant=aliases_by_participant,
+            ),
             reply_extractor=PublicReplyExtractor(),
             thread_id_factory=thread_id_factory,
             checkpoint_metadata_factory=checkpoint_metadata_factory,

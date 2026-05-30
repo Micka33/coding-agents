@@ -36,7 +36,7 @@ class Factory:
 class AgentFactoryTests(unittest.TestCase):
     def test_deep_agent_factory_passes_resolved_dependencies_to_deepagents(self) -> None:
         team_config = team()
-        agent_config = agent("entry", name="Entry", prompt="System", debug=True)
+        agent_config = agent("entry", prompt="System", debug=True)
 
         with patch("src.team_instanciator.factories.deep_agent_factory.create_deep_agent", return_value="graph") as create_deep_agent:
             created = DeepAgentFactory(
@@ -50,7 +50,7 @@ class AgentFactoryTests(unittest.TestCase):
 
         self.assertEqual(created, "graph")
         create_deep_agent.assert_called_once_with(
-            name="Entry",
+            name="entry",
             model="model",
             tools=["builtin", "relation-tool"],
             system_prompt="System",
@@ -65,7 +65,7 @@ class AgentFactoryTests(unittest.TestCase):
 
     def test_langchain_agent_factory_passes_resolved_model_and_tools(self) -> None:
         team_config = team()
-        agent_config = agent("entry", name="Entry", prompt="System", debug=True)
+        agent_config = agent("entry", prompt="System", debug=True)
 
         with patch("src.team_instanciator.factories.langchain_agent_factory.create_agent", return_value="agent") as create_agent:
             created = LangChainAgentFactory(Resolver("model"), ToolsetResolver()).create(team_config, agent_config)
@@ -75,7 +75,7 @@ class AgentFactoryTests(unittest.TestCase):
             model="model",
             tools=["langchain-tool"],
             system_prompt="System",
-            name="Entry",
+            name="entry",
             debug=True,
         )
 

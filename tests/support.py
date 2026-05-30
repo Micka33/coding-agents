@@ -66,7 +66,6 @@ def defaults(
 def agent(
     agent_id: str = "agent",
     *,
-    name: str | None = None,
     kind: str = "deepagent",
     entrypoint: bool = False,
     toolsets: tuple[str, ...] = (),
@@ -82,7 +81,6 @@ def agent(
 ) -> SimpleNamespace:
     return SimpleNamespace(
         id=agent_id,
-        name=name or agent_id,
         kind=kind,
         entrypoint=entrypoint,
         toolsets=toolsets,

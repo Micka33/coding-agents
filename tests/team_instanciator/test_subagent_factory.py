@@ -56,19 +56,19 @@ class SubagentFactoryTests(unittest.TestCase):
             RelationToolFactory(),
             ThreadIdFactory(),
         )
-        team_config = team(agents={"reviewer": agent("reviewer", name="Reviewer", description=None)})
+        team_config = team(agents={"reviewer": agent("reviewer", description=None)})
 
         spec = factory.create(team_config, registry="registry", agent_id="reviewer")
 
-        self.assertEqual(spec["name"], "Reviewer")
-        self.assertEqual(spec["description"], "Reviewer")
+        self.assertEqual(spec["name"], "reviewer")
+        self.assertEqual(spec["description"], "reviewer")
         self.assertIs(spec["runnable"], langchain_factory.runnable)
         self.assertEqual(
             langchain_factory.runnable.config["configurable"],
             {
                 "team_id": "team",
                 "agent_id": "reviewer",
-                "agent_name": "Reviewer",
+                "agent_name": "reviewer",
                 "thread_kind": "task-subagent",
                 "lane_id": "task-subagent-type:reviewer",
             },
@@ -84,7 +84,7 @@ class SubagentFactoryTests(unittest.TestCase):
             ThreadIdFactory(),
         )
         team_config = team(
-            agents={"reviewer": agent("reviewer", name="Reviewer", description="Reviews", prompt="Review prompt")},
+            agents={"reviewer": agent("reviewer", description="Reviews", prompt="Review prompt")},
             relations=(relation(source="reviewer", target="reviewer", tool_name="ask_self"),),
         )
 

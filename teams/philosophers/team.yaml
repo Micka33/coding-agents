@@ -38,51 +38,81 @@ toolsets:
   conversation_counter:
     - custom: english_message_counter
 
+conversation:
+  mentions:
+    max_parallel_agents: 2
+    max_cascade_turns: null
+  identity_refresh_after_tokens: 10000
+  # human_input:
+  #   default_targets:
+  #     - Francis-Bacon
+
 agents:
-  english-philosopher:
+  Francis-Bacon:
     kind: deepagent
-    config: ./agents/english-philosopher.mdc
+    config: ./agents/francis-bacon.mdc
     entrypoint: true
+    conversation:
+      aliases:
+        - Francis
+        - Bacon
+        - FrancisBacon
+        - Francis_Bacon
+        - Francis-Bacon
 
-  german-philosopher:
+  Friedrich-Nietzsche:
     kind: deepagent
-    config: ./agents/german-philosopher.mdc
+    config: ./agents/friedrich-nietzsche.mdc
+    conversation:
+      aliases:
+        - Friedrich
+        - Nietzsche
+        - FriedrichNietzsche
+        - Friedrich_Nietzsche
+        - Friedrich-Nietzsche
 
-  japanese-philosopher:
+  Hayashi-Razan:
     kind: deepagent
-    config: ./agents/japanese-philosopher.mdc
+    config: ./agents/hayashi-razan.mdc
+    conversation:
+      aliases:
+        - Hayashi
+        - Razan
+        - HayashiRazan
+        - Hayashi_Razan
+        - Hayashi-Razan
 
   translator:
     kind: subagent
     config: ./agents/translator.mdc
 
 relations:
-  - from: english-philosopher
+  - from: Francis-Bacon
     to: translator
     relation: subagent
 
-  - from: german-philosopher
+  - from: Friedrich-Nietzsche
     to: translator
     relation: subagent
 
-  - from: japanese-philosopher
+  - from: hayashi-razan
     to: translator
     relation: subagent
 
-  - from: english-philosopher
-    to: german-philosopher
+  - from: Francis-Bacon
+    to: Friedrich-Nietzsche
     relation: tool
     tool_name: ask_german_philosopher
     input_schema:
       message: string
     description: >
-      Converse with the German philosopher.
+      Converse with the German philosopher (Friedrich Nietzsche).
 
-  - from: english-philosopher
-    to: japanese-philosopher
+  - from: Francis-Bacon
+    to: hayashi-razan
     relation: tool
     tool_name: ask_japanese_philosopher
     input_schema:
       message: string
     description: >
-      Converse with the Japanese philosopher.
+      Converse with the Japanese philosopher (Hayashi Razan).

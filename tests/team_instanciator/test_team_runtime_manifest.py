@@ -16,9 +16,9 @@ class TeamRuntimeManifestTests(unittest.TestCase):
         team_config = team(
             team_id="product",
             agents={
-                "entry": agent("entry", name="Entry", entrypoint=True),
-                "worker": agent("worker", name="Worker"),
-                "reviewer": agent("reviewer", name="Reviewer"),
+                "entry": agent("entry", entrypoint=True),
+                "worker": agent("worker"),
+                "reviewer": agent("reviewer"),
             },
             relations=(
                 relation(source="entry", target="worker", relation_type="tool", tool_name="ask_worker"),
@@ -48,8 +48,8 @@ class TeamRuntimeManifestTests(unittest.TestCase):
         team_config = team(
             team_id="product",
             agents={
-                "entry": agent("entry", name="Entry", entrypoint=True),
-                "architect": agent("architect", name="Architect"),
+                "entry": agent("entry", entrypoint=True),
+                "architect": agent("architect"),
             },
             agent_references={
                 "entry": agent("entry", entrypoint=True),

@@ -8,8 +8,8 @@ from tests.support import agent, relation, team
 
 class CheckpointMetadataFactoryTests(unittest.TestCase):
     def test_builds_entrypoint_direct_tool_relation_and_task_subagent_metadata(self) -> None:
-        entry = agent("entry", name="Entry")
-        worker = agent("worker", name="Worker")
+        entry = agent("entry")
+        worker = agent("worker")
         team_config = team(team_id="product", agents={"entry": entry, "worker": worker})
         factory = CheckpointMetadataFactory()
 
@@ -20,7 +20,7 @@ class CheckpointMetadataFactoryTests(unittest.TestCase):
             {
                 "team_id": "product",
                 "agent_id": "worker",
-                "agent_name": "Worker",
+                "agent_name": "worker",
                 "thread_kind": "mention",
                 "lane_id": "mention:worker",
                 "target_agent_id": "worker",
@@ -31,7 +31,7 @@ class CheckpointMetadataFactoryTests(unittest.TestCase):
             {
                 "team_id": "product",
                 "agent_id": "worker",
-                "agent_name": "Worker",
+                "agent_name": "worker",
                 "thread_kind": "tool-relation",
                 "lane_id": "relation:entry:tool:worker",
                 "source_agent_id": "entry",

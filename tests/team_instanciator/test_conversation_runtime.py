@@ -189,21 +189,84 @@ class ConversationRuntimeTests(unittest.TestCase):
             attachments=(ConversationFileRef(id="file-1", filename="notes.txt", uri="conversation://files/file-1"),),
         )
         state = store.ensure_agent_state("agent-b")
+        target = agent("agent-b", description="Reviews implementation details.")
 
         sync = AgentSyncBuilder(identity_refresh_after_tokens=10_000).build(
-            target=agent("agent-b", name="Agent B"),
+            target=target,
             state=state,
             events=[event],
         )
 
         self.assertEqual(sync.snapshot_seq, 1)
         self.assertEqual(sync.messages[0].type, "system")
+        self.assertEqual(
+            sync.messages[0].content,
+            "\n".join(
+                [
+                    "You are agent-b. Other participants refer to you as @agent-b.",
+                    "Other participants are:",
+                    "- None.",
+                    "You can mention other participants by writing @<participant_id> or @<participant_alias>",
+                    "If you answer to another participant, mention them in your reply.",
+                    "If you need ask a question to another participant, mention them in your reply.",
+                ]
+            ),
+        )
         self.assertEqual(sync.messages[1].type, "human")
         self.assertEqual(sync.messages[1].name, "human")
         self.assertEqual(sync.messages[1].additional_kwargs["attachments"][0]["filename"], "notes.txt")
         self.assertEqual(
             sync.messages[1].additional_kwargs["attachments"][0]["read_path"],
             "/.coding-agents/conversations/thread/files/file-1",
+        )
+
+    def test_sync_builder_identity_lists_other_participants_with_aliases_and_descriptions(self) -> None:
+        state = ConversationStore(team_id="team", conversation_id="thread").ensure_agent_state("agent-b")
+        target = agent("agent-b", description="Reviews implementation details.")
+
+        sync = AgentSyncBuilder(
+            participants=(
+                agent("agent-a", description="Coordinates the conversation."),
+                target,
+                agent("agent-c", description="Checks quality risks."),
+                agent("agent-d", description="Handles releases."),
+            ),
+            aliases_by_participant={
+                "agent-a": ("lead", "agent_a"),
+                "agent-c": ("qa",),
+            },
+        ).build(
+            target=target,
+            state=state,
+            events=[
+                ConversationEvent(
+                    id="event",
+                    team_id="team",
+                    conversation_id="thread",
+                    seq=1,
+                    created_at="now",
+                    author_id="human",
+                    author_kind="human",
+                    content="@agent-b hello",
+                    mentions=("agent-b",),
+                )
+            ],
+        )
+
+        self.assertEqual(
+            sync.messages[0].content,
+            "\n".join(
+                [
+                    "You are agent-b. Other participants refer to you as @agent-b.",
+                    "Other participants are:",
+                    "- agent-a (aliases: lead, agent_a) : Coordinates the conversation.",
+                    "- agent-c (aliases: qa) : Checks quality risks.",
+                    "- agent-d : Handles releases.",
+                    "You can mention other participants by writing @<participant_id> or @<participant_alias>",
+                    "If you answer to another participant, mention them in your reply.",
+                    "If you need ask a question to another participant, mention them in your reply.",
+                ]
+            ),
         )
 
     def test_sync_builder_handles_empty_delta_and_token_limit(self) -> None:
@@ -283,6 +346,37 @@ class ConversationRuntimeTests(unittest.TestCase):
         self.assertEqual([event.author_id for event in events], ["mickael", "agent-b", "agent-c"])
         self.assertEqual(graph.calls[0][0]["messages"][1].name, "mickael")
         self.assertIn(":mention:agent-b", graph.calls[0][1]["configurable"]["thread_id"])
+
+    def test_mention_aware_team_identity_uses_team_aliases_and_agent_descriptions(self) -> None:
+        graph = FakeGraph("answer")
+        team_config = team(
+            team_id="team",
+            agents={
+                "agent-a": agent("agent-a", entrypoint=True, description="Coordinates the conversation."),
+                "agent-b": agent("agent-b", description="Reviews implementation details."),
+            },
+            agent_references={
+                "agent-a": conversation_reference("lead"),
+                "agent-b": conversation_reference("reviewer"),
+            },
+            conversation=TeamConversationSettings.from_mapping({}),
+        )
+        runtime = MentionAwareTeam(
+            team=team_config,
+            registry=FakeRegistry({"agent-b": graph}),
+            checkpointer_handle=CheckpointerHandle("checkpointer"),
+            root_dir=Path.cwd(),
+            conversation_id="thread",
+            thread_id_factory=ThreadIdFactory(),
+            checkpoint_metadata_factory=CheckpointMetadataFactory(),
+        )
+
+        runtime.append_human_message("@reviewer please", author_id="mickael")
+
+        self.assertIn(
+            "- agent-a (aliases: lead) : Coordinates the conversation.",
+            graph.calls[0][0]["messages"][0].content,
+        )
 
     def test_disabled_hook_records_mentions_without_delivery_and_reenabled_does_not_backfill(self) -> None:
         graph = FakeGraph("answer")

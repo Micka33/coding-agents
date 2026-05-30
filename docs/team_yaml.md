@@ -387,7 +387,10 @@ agents:
     config: ./agents/developer.mdc
 ```
 
-Each key under `agents` is the canonical agent id used by relations.
+Each key under `agents` is the canonical agent id used by relations. Agent ids
+must be unique after case-insensitive normalization. References to agent ids in
+relations, conversation defaults, and mentions are resolved case-insensitively
+and then stored with the canonical casing declared under `agents`.
 
 #### `agents.<agent_id>.kind`
 
