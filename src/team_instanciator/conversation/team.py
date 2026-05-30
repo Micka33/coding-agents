@@ -160,7 +160,7 @@ class MentionAwareTeam:
         events = [event.to_dict() for event in self.store.list_events()]
         agent_states = [state.to_dict() for state in self.store.list_agent_states()]
         deliveries = [delivery.to_dict() for delivery in self.store.list_deliveries()]
-        active = next((state for state in agent_states if state["running"] or state["queued"]), None)
+        activities = [state for state in agent_states if state["running"] or state["queued"]]
         return {
             "team_id": self.team.id,
             "conversation_id": self.conversation_id,
@@ -169,7 +169,8 @@ class MentionAwareTeam:
             "events": events,
             "agent_states": agent_states,
             "deliveries": deliveries,
-            "activity": active,
+            "activities": activities,
+            "activity": activities[0] if activities else None,
         }
 
     def activity(self, agent_id: str | None = None) -> ConversationStateDict:

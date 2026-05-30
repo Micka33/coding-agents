@@ -25,6 +25,7 @@ class ConversationStateDict(TypedDict):
     events: list[ConversationEventDict]
     agent_states: list[AgentDeliveryStateDict]
     deliveries: list[ConversationDeliveryDict]
+    activities: list[AgentDeliveryStateDict]
     activity: AgentDeliveryStateDict | None
     private_thread_id: NotRequired[str]
     private_messages: NotRequired[list[MessageSummaryDict]]

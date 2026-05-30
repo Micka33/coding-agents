@@ -427,6 +427,20 @@ class ConversationRuntimeTests(unittest.TestCase):
         self.assertEqual([message.content for message in second_call_messages if message.type == "human"], ["@agent-b second", "@agent-b third"])
         self.assertEqual(runtime.store.ensure_agent_state("agent-b").last_delivered_seq, 4)
 
+    def test_state_reports_all_running_and_queued_activities(self) -> None:
+        runtime = self._conversation_runtime({"agent-b": FakeGraph("answer"), "agent-c": FakeGraph("answer")})
+        state_b = runtime.store.ensure_agent_state("agent-b")
+        state_c = runtime.store.ensure_agent_state("agent-c")
+        runtime.store.save_agent_state(
+            replace(state_b, running=True, current_run_id="run-b", current_snapshot_seq=1)
+        )
+        runtime.store.save_agent_state(replace(state_c, queued=True, queued_after_seq=1))
+
+        state = runtime.state()
+
+        self.assertEqual([item["agent_id"] for item in state["activities"]], ["agent-b", "agent-c"])
+        self.assertEqual(state["activity"]["agent_id"] if state["activity"] else None, "agent-b")
+
     def test_stopped_run_ignores_late_reply_and_queued_follow_up_runs(self) -> None:
         runtime_holder = {}
 
