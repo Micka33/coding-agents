@@ -124,6 +124,20 @@ class CustomToolContextTests(unittest.TestCase):
             self.assertEqual(env["PROCESS_ENV"], "process")
             self.assertEqual(env.as_dict(["RUNTIME_ENV", "PROCESS_ENV", "MISSING"]), {"RUNTIME_ENV": "runtime", "PROCESS_ENV": "process"})
 
+    def test_env_view_require_mapping_iteration_and_missing_key(self) -> None:
+        with patch.dict(os.environ, {"PROCESS_ENV": "process"}, clear=True):
+            env = EnvView(RuntimeConfiguration({"RUNTIME_ENV": "runtime"}))
+
+            self.assertEqual(env.get("MISSING", "fallback"), "fallback")
+            self.assertEqual(env.require("RUNTIME_ENV"), "runtime")
+            self.assertEqual(env.as_dict(), {"PROCESS_ENV": "process", "RUNTIME_ENV": "runtime"})
+            self.assertEqual(set(iter(env)), {"PROCESS_ENV", "RUNTIME_ENV"})
+            self.assertEqual(len(env), 2)
+            with self.assertRaisesRegex(KeyError, "Missing required"):
+                env.require("MISSING")
+            with self.assertRaises(KeyError):
+                _ = env["MISSING"]
+
     def test_conversation_history_counts_messages_and_usage(self) -> None:
         messages = [
             HumanMessage(content="hello"),
@@ -167,6 +181,32 @@ class CustomToolContextTests(unittest.TestCase):
         self.assertEqual(history.checkpoints(runtime, limit=3), ["checkpoint"])
         self.assertEqual(checkpointer.get_tuple_calls, [{"configurable": {"thread_id": "thread-1"}}])
         self.assertEqual(checkpointer.list_calls, [({"configurable": {"thread_id": "thread-1"}}, 3)])
+
+    def test_conversation_history_handles_missing_runtime_state_and_other_message_shapes(self) -> None:
+        history = ConversationHistory(None)
+        runtime = SimpleNamespace(config={}, state=SimpleNamespace(messages=("one", "two"), single="value"), tool_call_id=None)
+
+        self.assertIsNone(history.checkpointer)
+        self.assertEqual(history.current_state(runtime), runtime.state)
+        self.assertEqual(history.current_messages(SimpleNamespace(state={}, config={}, tool_call_id=None)), [])
+        self.assertEqual(history.current_messages(runtime), ["one", "two"])
+        self.assertEqual(history.current_messages(runtime, key="single"), ["value"])
+        self.assertIsNone(history.latest_checkpoint(runtime))
+        self.assertEqual(history.checkpoints(runtime, limit=0), [])
+        with self.assertRaisesRegex(ValueError, "thread_id"):
+            history.thread_id(runtime)
+        with self.assertRaisesRegex(ValueError, "tool_call_id"):
+            history.replace_messages_command(runtime, [])
+
+        counts = history.count_messages(
+            [
+                {"role": "alien", "tool_calls": [SimpleNamespace(id="call-1")], "usage_metadata": {"prompt_tokens": 1}},
+                {"role": "assistant", "additional_kwargs": {"tool_calls": [{"id": "call-2"}]}},
+            ]
+        )
+        self.assertEqual(counts["other"], 1)
+        self.assertEqual(counts["tool_call_requests"], 2)
+        self.assertEqual(counts["input_tokens"], 1)
 
     def test_compact_messages_command_keeps_triggering_tool_call_and_visible_result(self) -> None:
         triggering_message = AIMessage(
@@ -220,6 +260,19 @@ class CustomToolContextTests(unittest.TestCase):
         self.assertIn(tool_request, messages_update)
         self.assertIn(tool_result, messages_update)
         self.assertIn(triggering_message, messages_update)
+
+    def test_custom_tool_context_alias_properties(self) -> None:
+        context = CustomToolContext(
+            root_dir=Path.cwd(),
+            env=EnvView(RuntimeConfiguration()),
+            runtime_config=RuntimeConfiguration(),
+            agent_config=SimpleNamespace(id="agent"),
+            team_config=SimpleNamespace(id="team"),
+            history=ConversationHistory(None),
+        )
+
+        self.assertIs(context.agent, context.agent_config)
+        self.assertIs(context.team, context.team_config)
 
 
 if __name__ == "__main__":

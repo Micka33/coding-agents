@@ -4,8 +4,15 @@ import ast
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
-from src.team_instanciator.scoped_read_tools_factory import ScopedReadToolsFactory
+from deepagents.backends.protocol import ReadResult
+
+from src.team_instanciator.scoped_read_tools_factory import (
+    ScopedReadToolsFactory,
+    _ScopedReadToolAdapter,
+    create_scoped_read_tools,
+)
 
 
 class ScopedReadToolsFactoryTests(unittest.TestCase):
@@ -92,6 +99,47 @@ class ScopedReadToolsFactoryTests(unittest.TestCase):
 
         self.assertIn("Error:", result)
         self.assertIn("Invalid tool input", result)
+
+    def test_factory_function_accepts_relative_custom_root_from_context(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "sub").mkdir()
+
+            tools = create_scoped_read_tools(SimpleNamespace(root_dir=root), {"root_dir": "sub"})
+
+        self.assertEqual([tool.name for tool in tools], ["ls", "read_file", "glob", "grep"])
+
+    def test_error_handlers_and_backend_error_results_are_returned_as_text(self) -> None:
+        class ErrorBackend:
+            def ls(self, path):
+                return SimpleNamespace(error="ls failed", entries=None)
+
+            def glob(self, pattern, path="/"):
+                return SimpleNamespace(error="glob failed", matches=None)
+
+            def grep(self, pattern, path=None, glob=None):
+                return SimpleNamespace(error="grep failed", matches=None)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            adapter = _ScopedReadToolAdapter(tmp)
+            adapter._backend = ErrorBackend()
+            factory = ScopedReadToolsFactory()
+
+            self.assertEqual(adapter.ls("/"), "Error: ls failed")
+            self.assertEqual(adapter.glob("*.py"), "Error: glob failed")
+            self.assertEqual(adapter.grep("needle"), "grep failed")
+            self.assertEqual(factory._handle_tool_error(RuntimeError("boom")), "Error: boom")
+
+    def test_read_result_formatting_handles_missing_binary_empty_line_and_token_truncation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            adapter = _ScopedReadToolAdapter(tmp, tool_token_limit=None)
+
+            self.assertEqual(adapter._format_read_result(ReadResult(file_data=None), "/missing.txt", 0, 10), "Error: no data returned for '/missing.txt'")
+            self.assertEqual(adapter._format_read_result(ReadResult(file_data={"content": "binary"}), "/image.png", 0, 10), "binary")
+            self.assertIn("empty", adapter._format_read_result(ReadResult(file_data={"content": ""}), "/empty.txt", 0, 10).lower())
+            self.assertEqual(adapter._truncate_read_content("1\n2\n3\n", "/limited.txt", 2), "1\n2\n")
+            token_limited_adapter = _ScopedReadToolAdapter(tmp, tool_token_limit=1)
+            self.assertIn("truncated", token_limited_adapter._truncate_read_content("x" * 100, "/tokens.txt", 100).lower())
 
     def _tools(self, root: Path):
         return {tool.name: tool for tool in ScopedReadToolsFactory().create(root)}

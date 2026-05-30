@@ -1,4 +1,11 @@
 .env
+.coverage
+.coverage.*
+.pytest_cache/
 .coding-agents/
+htmlcov/
+dist/
+build/
+*.egg-info/
 __pycache__/
 *.py[cod]
