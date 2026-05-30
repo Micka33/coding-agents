@@ -7,21 +7,21 @@ from types import SimpleNamespace
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from coding_agents.teams.philosophers.conversation_counter_tools import (
+from teams.philosophers.conversation_counter_tools import (
     create_conversation_counter_tools,
 )
-from coding_agents.team_instanciator.custom_tool_context import (
+from src.team_instanciator.custom_tool_context import (
     ConversationHistory,
     CustomToolContext,
     EnvView,
 )
-from coding_agents.team_instanciator.runtime_configuration import RuntimeConfiguration
-from coding_agents.team_loader.team_loader import TeamLoader
+from src.team_instanciator.runtime_configuration import RuntimeConfiguration
+from src.team_loader.team_loader import TeamLoader
 
 
 class PhilosophersTeamTests(unittest.TestCase):
     def test_philosophers_team_loads_with_english_entrypoint_and_counter(self) -> None:
-        team = TeamLoader().load("coding_agents/teams/philosophers/team.yaml")
+        team = TeamLoader().load("teams/philosophers/team.yaml")
 
         self.assertEqual(team.id, "philosophers")
         self.assertEqual(team.entrypoint().id if team.entrypoint() else None, "english-philosopher")
@@ -33,7 +33,7 @@ class PhilosophersTeamTests(unittest.TestCase):
         self.assertEqual(team.custom_tools["english_message_counter"].exposes, ("count_english_messages",))
         self.assertEqual(
             team.custom_tools["english_message_counter"].factory,
-            "coding_agents.teams.philosophers.conversation_counter_tools:create_conversation_counter_tools",
+            "teams.philosophers.conversation_counter_tools:create_conversation_counter_tools",
         )
         self.assertEqual(len(team.relations), 5)
 

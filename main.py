@@ -1,4 +1,4 @@
-from coding_agents.cli import main
+from src.team_instanciator.cli import main
 
 
 if __name__ == "__main__":

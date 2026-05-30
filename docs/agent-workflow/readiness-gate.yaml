@@ -1,5 +1,0 @@
-approved: true
-approval_scope: full_implementation
-approved_by: "Mickael"
-approved_date: "2026-05-25"
-notes: "Broad implementation mode approved for bounded, task-scoped tasks. CI and DEC-0006 runtime review remain release-readiness blockers, not implementation-entry blockers."

@@ -12,13 +12,13 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from langchain_core.tools import StructuredTool
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 
-from coding_agents.team_instanciator.checkpointer_handle import CheckpointerHandle
-from coding_agents.team_instanciator.custom_tool_context import ConversationHistory, CustomToolContext, EnvView
-from coding_agents.team_instanciator.custom_tool_factory import CustomToolFactory
-from coding_agents.team_instanciator.runtime_configuration import RuntimeConfiguration
-from coding_agents.team_instanciator.toolset_resolver import ToolsetResolver
-from coding_agents.team_loader.custom_tool_definition import CustomToolDefinition
-from coding_agents.team_loader.tool_reference import ToolReference
+from src.team_instanciator.checkpointer_handle import CheckpointerHandle
+from src.team_instanciator.custom_tool_context import ConversationHistory, CustomToolContext, EnvView
+from src.team_instanciator.custom_tool_factory import CustomToolFactory
+from src.team_instanciator.runtime_configuration import RuntimeConfiguration
+from src.team_instanciator.toolset_resolver import ToolsetResolver
+from src.team_loader.custom_tool_definition import CustomToolDefinition
+from src.team_loader.tool_reference import ToolReference
 
 
 LAST_CONTEXT: CustomToolContext | None = None

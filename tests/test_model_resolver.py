@@ -4,8 +4,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from coding_agents.team_instanciator.model_resolver import ModelResolver
-from coding_agents.team_instanciator.runtime_configuration import RuntimeConfiguration
+from src.team_instanciator.model_resolver import ModelResolver
+from src.team_instanciator.runtime_configuration import RuntimeConfiguration
 
 
 class ModelResolverTests(unittest.TestCase):
@@ -14,8 +14,8 @@ class ModelResolverTests(unittest.TestCase):
         agent = SimpleNamespace(id="english-philosopher", model="openai:gpt-5.5", reasoning_effort="none")
 
         with (
-            self.assertLogs("coding_agents.team_instanciator.model_resolver", level="WARNING") as logs,
-            patch("coding_agents.team_instanciator.model_resolver.init_chat_model", return_value="model") as init_chat_model,
+            self.assertLogs("src.team_instanciator.model_resolver", level="WARNING") as logs,
+            patch("src.team_instanciator.model_resolver.init_chat_model", return_value="model") as init_chat_model,
         ):
             resolved = ModelResolver(RuntimeConfiguration({"OPENAI_API_KEY": "test-key"})).resolve(team, agent)
 
@@ -35,7 +35,7 @@ class ModelResolverTests(unittest.TestCase):
         team = self._team(model="openai:gpt-5.4-mini", reasoning_effort="none")
         agent = SimpleNamespace(id="german-philosopher", model="inherit", reasoning_effort="inherit")
 
-        with patch("coding_agents.team_instanciator.model_resolver.init_chat_model", return_value="model") as init_chat_model:
+        with patch("src.team_instanciator.model_resolver.init_chat_model", return_value="model") as init_chat_model:
             resolved = ModelResolver(RuntimeConfiguration({"OPENAI_API_KEY": "test-key"})).resolve(team, agent)
 
         self.assertEqual(resolved, "model")
@@ -51,7 +51,7 @@ class ModelResolverTests(unittest.TestCase):
         team = self._team(model="openai:gpt-5.4-mini", reasoning_effort="high")
         agent = SimpleNamespace(id="speaker", model="inherit", reasoning_effort="inherit")
 
-        with patch("coding_agents.team_instanciator.model_resolver.init_chat_model", return_value="model") as init_chat_model:
+        with patch("src.team_instanciator.model_resolver.init_chat_model", return_value="model") as init_chat_model:
             resolved = ModelResolver(RuntimeConfiguration({"OPENAI_API_KEY": "test-key"})).resolve(team, agent)
 
         self.assertEqual(resolved, "model")
@@ -67,7 +67,7 @@ class ModelResolverTests(unittest.TestCase):
         team = self._team(model="anthropic:claude-sonnet-4-5", reasoning_effort="high")
         agent = SimpleNamespace(id="speaker", model="inherit", reasoning_effort="inherit")
 
-        with patch("coding_agents.team_instanciator.model_resolver.init_chat_model", return_value="model") as init_chat_model:
+        with patch("src.team_instanciator.model_resolver.init_chat_model", return_value="model") as init_chat_model:
             resolved = ModelResolver(RuntimeConfiguration({"ANTHROPIC_API_KEY": "test-key"})).resolve(team, agent)
 
         self.assertEqual(resolved, "model")

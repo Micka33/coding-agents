@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from coding_agents.team_instanciator.scoped_read_tools_factory import ScopedReadToolsFactory
+from src.team_instanciator.scoped_read_tools_factory import ScopedReadToolsFactory
 
 
 class ScopedReadToolsFactoryTests(unittest.TestCase):
