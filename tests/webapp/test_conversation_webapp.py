@@ -38,6 +38,7 @@ class FakeConversation:
             "events": [],
             "agent_states": [{"agent_id": "agent", "running": True, "queued": False}],
             "deliveries": [],
+            "activities": [{"agent_id": "agent", "running": True, "queued": False}],
             "activity": {"agent_id": "agent"},
             "participants": ["agent"],
         }

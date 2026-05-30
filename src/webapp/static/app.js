@@ -17,6 +17,7 @@ let mentionMenu = {
   options: [],
   selectedIndex: 0,
 };
+let selectedActivityAgentId = null;
 
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, { cache: "no-store", ...options });
@@ -35,15 +36,16 @@ function render() {
   els.hookToggle.checked = Boolean(currentState.runtime.mention_hook_enabled);
   els.cascadeLimit.value = currentState.runtime.max_cascade_turns ?? "";
   els.messages.innerHTML = currentState.events.map(renderEvent).join("");
-  const active = currentState.activity;
-  if (active) {
-    els.activityHint.textContent = `${active.agent_id} is replying...`;
+  const activities = activityStates();
+  if (activities.length) {
+    els.activityHint.textContent = activitySummary(activities);
     els.activityHint.classList.remove("hidden");
   } else {
     els.activityHint.classList.add("hidden");
+    selectedActivityAgentId = null;
   }
   if (!els.activityPanel.classList.contains("hidden")) {
-    renderActivityPanel(active?.agent_id);
+    renderActivityPanel(selectedActivityAgentId);
   }
   updateMentionSuggestions();
 }
@@ -125,6 +127,7 @@ async function renderActivityPanel(agentId) {
     </header>
     <pre>${escapeHtml(JSON.stringify({
       private_thread_id: state.private_thread_id,
+      activities: state.activities || activityStates(),
       agent_states: state.agent_states,
       deliveries: state.deliveries,
       private_messages: state.private_messages || [],
@@ -160,6 +163,33 @@ function participantOptions() {
   return [...new Set(currentState?.participants || [])]
     .filter(Boolean)
     .sort((left, right) => left.localeCompare(right));
+}
+
+function activityStates() {
+  const activities = Array.isArray(currentState?.activities)
+    ? currentState.activities
+    : currentState?.activity
+      ? [currentState.activity]
+      : [];
+  return activities.filter((activity) => activity && (activity.running || activity.queued));
+}
+
+function activitySummary(activities) {
+  const replying = activities.filter((activity) => activity.running).map((activity) => activity.agent_id);
+  const queued = activities.filter((activity) => !activity.running && activity.queued).map((activity) => activity.agent_id);
+  return [activityClause(replying, "is replying...", "are replying..."), activityClause(queued, "is queued", "are queued")]
+    .filter(Boolean)
+    .join("; ");
+}
+
+function activityClause(agentIds, singularVerb, pluralVerb) {
+  if (!agentIds.length) return "";
+  return `${formatList(agentIds)} ${agentIds.length === 1 ? singularVerb : pluralVerb}`;
+}
+
+function formatList(items) {
+  if (items.length <= 2) return items.join(" and ");
+  return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
 }
 
 function activeMentionToken() {
@@ -256,7 +286,31 @@ function needsTrailingSpace(value, index) {
   return !next || !/\s/.test(next);
 }
 
+function isMacPlatform() {
+  const platform = navigator.userAgentData?.platform || navigator.platform || navigator.userAgent || "";
+  return /mac|iphone|ipad|ipod/i.test(platform);
+}
+
+function isSubmitShortcut(event) {
+  if (event.key !== "Enter" || event.isComposing || event.altKey || event.shiftKey) return false;
+  return isMacPlatform() ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+}
+
+function submitComposer() {
+  if (typeof els.composer.requestSubmit === "function") {
+    els.composer.requestSubmit();
+    return;
+  }
+  els.composer.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+}
+
 function handleMentionKeydown(event) {
+  if (isSubmitShortcut(event)) {
+    event.preventDefault();
+    submitComposer();
+    return;
+  }
+
   if (els.mentionSuggestions.classList.contains("hidden")) return;
 
   if (event.key === "ArrowDown") {
@@ -290,8 +344,10 @@ els.mentionSuggestions.addEventListener("click", (event) => {
   completeMention(Number(option.dataset.index));
 });
 els.activityHint.addEventListener("click", async () => {
+  const activities = activityStates();
+  selectedActivityAgentId = activities.length === 1 ? activities[0].agent_id : null;
   els.activityPanel.classList.remove("hidden");
-  await renderActivityPanel(currentState?.activity?.agent_id);
+  await renderActivityPanel(selectedActivityAgentId);
 });
 
 loadState();
