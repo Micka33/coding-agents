@@ -31,13 +31,6 @@ defaults:
 custom_tools:
   english_message_counter:
     factory: teams.philosophers.conversation_counter_tools:create_conversation_counter_tools
-    args:
-      label: english-philosopher
-      limit: 20
-      tool_name: count_english_messages
-      outbound_tool_names:
-        - ask_german_philosopher
-        - ask_japanese_philosopher
     exposes:
       - count_english_messages
 

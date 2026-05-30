@@ -49,12 +49,7 @@ class PhilosophersTeamTests(unittest.TestCase):
             )
             tool = create_conversation_counter_tools(
                 context,
-                {
-                    "label": "english-philosopher",
-                    "limit": 3,
-                    "tool_name": "count_english_messages",
-                    "outbound_tool_names": ["ask_german_philosopher", "ask_japanese_philosopher"],
-                },
+                {},
             )[0]
             runtime = SimpleNamespace(
                 config={"configurable": {"thread_id": "thread-1"}},
@@ -91,7 +86,7 @@ class PhilosophersTeamTests(unittest.TestCase):
             result = tool.func(runtime)
 
         self.assertEqual(result["count"], 2)
-        self.assertEqual(result["remaining"], 1)
+        self.assertEqual(result["remaining"], 18)
         self.assertIs(result["stop"], False)
         self.assertEqual(result["recommandation"], "continue your conversation")
         self.assertEqual(set(result), {"count", "remaining", "stop", "recommandation"})
