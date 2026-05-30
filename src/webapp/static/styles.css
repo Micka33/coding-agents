@@ -131,6 +131,10 @@ h1 {
   border-top: 1px solid #d9dee7;
 }
 
+.composerInput {
+  position: relative;
+}
+
 textarea,
 input,
 button {
@@ -148,6 +152,37 @@ input[type="number"] {
 textarea {
   width: 100%;
   resize: vertical;
+}
+
+.mentionSuggestions {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  width: min(360px, 100%);
+  max-height: 220px;
+  overflow: auto;
+  padding: 6px;
+  background: #ffffff;
+  border: 1px solid #cfd6e0;
+  border-radius: 6px;
+  box-shadow: 0 12px 28px rgba(16, 24, 40, 0.14);
+  z-index: 10;
+}
+
+.mentionSuggestions button {
+  width: 100%;
+  display: block;
+  border: 0;
+  background: transparent;
+  color: #19202a;
+  text-align: left;
+  padding: 8px 10px;
+}
+
+.mentionSuggestions button:hover,
+.mentionSuggestions button.active {
+  background: #eef4ff;
+  color: #175cd3;
 }
 
 button {

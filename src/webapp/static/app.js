@@ -5,12 +5,18 @@ const els = {
   cascadeLimit: document.querySelector("#cascadeLimit"),
   composer: document.querySelector("#composer"),
   messageInput: document.querySelector("#messageInput"),
+  mentionSuggestions: document.querySelector("#mentionSuggestions"),
   fileInput: document.querySelector("#fileInput"),
   activityHint: document.querySelector("#activityHint"),
   activityPanel: document.querySelector("#activityPanel"),
 };
 
 let currentState = null;
+let mentionMenu = {
+  token: null,
+  options: [],
+  selectedIndex: 0,
+};
 
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, { cache: "no-store", ...options });
@@ -39,6 +45,7 @@ function render() {
   if (!els.activityPanel.classList.contains("hidden")) {
     renderActivityPanel(active?.agent_id);
   }
+  updateMentionSuggestions();
 }
 
 function renderEvent(event) {
@@ -70,6 +77,7 @@ async function sendMessage(event) {
   });
   els.messageInput.value = "";
   els.fileInput.value = "";
+  hideMentionSuggestions();
   await loadState();
 }
 
@@ -148,9 +156,139 @@ function escapeHtml(value) {
   })[char]);
 }
 
+function participantOptions() {
+  return [...new Set(currentState?.participants || [])]
+    .filter(Boolean)
+    .sort((left, right) => left.localeCompare(right));
+}
+
+function activeMentionToken() {
+  const input = els.messageInput;
+  const caret = input.selectionStart;
+  if (caret !== input.selectionEnd) return null;
+
+  const beforeCaret = input.value.slice(0, caret);
+  const triggerIndex = beforeCaret.lastIndexOf("@");
+  if (triggerIndex < 0) return null;
+
+  const previous = triggerIndex > 0 ? beforeCaret[triggerIndex - 1] : "";
+  if (previous && /[\w.]/.test(previous)) return null;
+
+  const query = beforeCaret.slice(triggerIndex + 1);
+  if (/[^A-Za-z0-9_-]/.test(query)) return null;
+
+  return { start: triggerIndex, end: caret, query };
+}
+
+function updateMentionSuggestions() {
+  const token = activeMentionToken();
+  const participants = participantOptions();
+  if (!token || !participants.length) {
+    hideMentionSuggestions();
+    return;
+  }
+
+  const query = token.query.toLowerCase();
+  const options = participants.filter((participant) => participant.toLowerCase().startsWith(query));
+  if (!options.length) {
+    hideMentionSuggestions();
+    return;
+  }
+
+  const sameQuery = mentionMenu.token?.start === token.start && mentionMenu.token.query === token.query;
+  mentionMenu = {
+    token,
+    options,
+    selectedIndex: sameQuery ? Math.min(mentionMenu.selectedIndex, options.length - 1) : 0,
+  };
+  renderMentionSuggestions();
+}
+
+function renderMentionSuggestions() {
+  const options = mentionMenu.options;
+  els.mentionSuggestions.innerHTML = options.map((participant, index) => `
+    <button
+      id="mention-option-${index}"
+      class="${index === mentionMenu.selectedIndex ? "active" : ""}"
+      type="button"
+      role="option"
+      aria-selected="${index === mentionMenu.selectedIndex ? "true" : "false"}"
+      data-index="${index}"
+    >@${escapeHtml(participant)}</button>
+  `).join("");
+  els.mentionSuggestions.classList.remove("hidden");
+  els.messageInput.setAttribute("aria-expanded", "true");
+  els.messageInput.setAttribute("aria-activedescendant", `mention-option-${mentionMenu.selectedIndex}`);
+}
+
+function hideMentionSuggestions() {
+  mentionMenu = { token: null, options: [], selectedIndex: 0 };
+  els.mentionSuggestions.innerHTML = "";
+  els.mentionSuggestions.classList.add("hidden");
+  els.messageInput.setAttribute("aria-expanded", "false");
+  els.messageInput.removeAttribute("aria-activedescendant");
+}
+
+function moveMentionSelection(delta) {
+  if (!mentionMenu.options.length) return;
+  const nextIndex = mentionMenu.selectedIndex + delta + mentionMenu.options.length;
+  mentionMenu.selectedIndex = nextIndex % mentionMenu.options.length;
+  renderMentionSuggestions();
+}
+
+function completeMention(index = mentionMenu.selectedIndex) {
+  const token = mentionMenu.token || activeMentionToken();
+  const participant = mentionMenu.options[index];
+  if (!token || !participant) return;
+
+  const input = els.messageInput;
+  const suffix = needsTrailingSpace(input.value, token.end) ? " " : "";
+  const replacement = `@${participant}${suffix}`;
+  input.value = `${input.value.slice(0, token.start)}${replacement}${input.value.slice(token.end)}`;
+  const caret = token.start + replacement.length;
+  input.setSelectionRange(caret, caret);
+  input.focus();
+  hideMentionSuggestions();
+}
+
+function needsTrailingSpace(value, index) {
+  const next = value[index];
+  return !next || !/\s/.test(next);
+}
+
+function handleMentionKeydown(event) {
+  if (els.mentionSuggestions.classList.contains("hidden")) return;
+
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    moveMentionSelection(1);
+  } else if (event.key === "ArrowUp") {
+    event.preventDefault();
+    moveMentionSelection(-1);
+  } else if (event.key === "Enter" || event.key === "Tab") {
+    event.preventDefault();
+    completeMention();
+  } else if (event.key === "Escape") {
+    event.preventDefault();
+    hideMentionSuggestions();
+  }
+}
+
 els.composer.addEventListener("submit", sendMessage);
 els.hookToggle.addEventListener("change", updateRuntime);
 els.cascadeLimit.addEventListener("change", updateRuntime);
+els.messageInput.addEventListener("input", updateMentionSuggestions);
+els.messageInput.addEventListener("click", updateMentionSuggestions);
+els.messageInput.addEventListener("keydown", handleMentionKeydown);
+els.messageInput.addEventListener("blur", () => setTimeout(hideMentionSuggestions, 120));
+els.mentionSuggestions.addEventListener("mousedown", (event) => {
+  event.preventDefault();
+});
+els.mentionSuggestions.addEventListener("click", (event) => {
+  const option = event.target.closest("[data-index]");
+  if (!option) return;
+  completeMention(Number(option.dataset.index));
+});
 els.activityHint.addEventListener("click", async () => {
   els.activityPanel.classList.remove("hidden");
   await renderActivityPanel(currentState?.activity?.agent_id);

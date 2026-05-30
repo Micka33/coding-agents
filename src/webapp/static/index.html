@@ -27,7 +27,10 @@
       <section id="messages" class="messages" aria-live="polite"></section>
       <button id="activityHint" class="activity hidden" type="button"></button>
       <form id="composer" class="composer">
-        <textarea id="messageInput" rows="3" placeholder="@agent-id"></textarea>
+        <div class="composerInput">
+          <textarea id="messageInput" rows="3" placeholder="@agent-id" autocomplete="off" aria-autocomplete="list" aria-controls="mentionSuggestions"></textarea>
+          <div id="mentionSuggestions" class="mentionSuggestions hidden" role="listbox"></div>
+        </div>
         <div class="composerActions">
           <input id="fileInput" type="file" multiple />
           <button type="submit">Send</button>
