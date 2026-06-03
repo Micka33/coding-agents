@@ -21,7 +21,9 @@ from src.team_instanciator.conversation import (
     ConversationDelivery,
     ConversationEvent,
     ConversationFileRef,
+    ConversationInterrupt,
     ConversationRuntimeState,
+    ConversationRuntimeController,
     ConversationStore,
     MentionAwareTeam,
     MentionParser,
@@ -46,6 +48,7 @@ class FakeGraph:
         self.response = response
         self.callback = callback
         self.calls: list[tuple[Any, Any]] = []
+        self.updates: list[tuple[Any, Any]] = []
         self.interrupted = False
 
     def invoke(self, input: Any, config: Any = None):
@@ -53,6 +56,15 @@ class FakeGraph:
         if self.callback is not None:
             self.callback(self, input, config)
         return {"messages": [AIMessage(content=self.response, id=f"msg-{len(self.calls)}")]}
+
+    def update_state(self, config: Any, values: Any):
+        self.updates.append((config, values))
+        updated = dict(config)
+        updated["configurable"] = {
+            **dict(config.get("configurable", {})),
+            "checkpoint_id": f"fork-{len(self.updates)}",
+        }
+        return updated
 
     def interrupt(self):
         self.interrupted = True
@@ -124,11 +136,20 @@ class ConversationRuntimeTests(unittest.TestCase):
             created_at="now",
             error="boom",
         )
+        interrupt = ConversationInterrupt(
+            id="interrupt",
+            team_id="team",
+            conversation_id="thread",
+            created_at="now",
+            kind="approve",
+            payload={"action": "write_file"},
+        )
 
         self.assertEqual(event.to_dict()["attachments"][0]["filename"], "notes.txt")
         self.assertEqual(state.to_dict()["agent_id"], "agent")
         self.assertTrue(runtime_state.to_dict()["mention_hook_enabled"])
         self.assertEqual(delivery.to_dict()["error"], "boom")
+        self.assertEqual(interrupt.to_dict()["payload"]["action"], "write_file")
         result = SimpleNamespace(deliveries=(delivery,))
         self.assertEqual(
             tuple(item.status for item in __import__(
@@ -140,6 +161,22 @@ class ConversationRuntimeTests(unittest.TestCase):
 
     def test_store_persists_events_files_runtime_state_and_delivery_state_in_sqlite(self) -> None:
         with sqlite3.connect(":memory:", check_same_thread=False) as connection:
+            connection.execute(
+                """
+                create table team_conversation_branches (
+                    team_id text not null,
+                    conversation_id text not null,
+                    id text not null,
+                    label text not null,
+                    parent_branch_id text,
+                    origin_checkpoint_id text,
+                    created_at text not null,
+                    current integer not null,
+                    head_checkpoint_id text,
+                    primary key (team_id, conversation_id, id)
+                )
+                """
+            )
             store = ConversationStore(team_id="team", conversation_id="thread", connection=connection)
             file_ref = ConversationFileRef(id="file-1", filename="notes.txt", uri="conversation://files/file-1")
 
@@ -153,6 +190,20 @@ class ConversationRuntimeTests(unittest.TestCase):
             store.enqueue("agent", event.seq)
             store.update_runtime_state(mention_hook_enabled=False, max_cascade_turns=3)
             store.record_delivery(agent_id="agent", status="failed", error="boom")
+            branch = store.create_branch(
+                label="Alternative",
+                origin_checkpoint_id="checkpoint_01",
+                head_checkpoint_id="checkpoint_01",
+            )
+            interrupt = store.create_interrupt(
+                kind="approve",
+                payload={"action": "write_file"},
+                run_id="run_01",
+                agent_id="agent",
+                checkpoint_id="checkpoint_01",
+            )
+            resolved = store.resume_interrupt(interrupt.id, decision="approve", response="ok")
+            store.switch_branch(branch.id)
 
             reloaded = ConversationStore(team_id="team", conversation_id="thread", connection=connection)
 
@@ -162,6 +213,187 @@ class ConversationRuntimeTests(unittest.TestCase):
             self.assertEqual(reloaded.get_runtime_state().max_cascade_turns, 3)
             self.assertEqual(reloaded.ensure_agent_state("agent").queued_after_seq, event.seq)
             self.assertEqual(reloaded.list_deliveries()[0].error, "boom")
+            self.assertEqual(reloaded.list_branches()[0].label, "Alternative")
+            self.assertEqual(resolved.status if resolved else None, "resolved")
+            self.assertEqual(reloaded.list_interrupts(), [])
+            self.assertEqual(reloaded.list_interrupts(active_only=False)[0].decisions[0]["response"], "ok")
+            self.assertEqual(reloaded.current_branch_id(), branch.id)
+            self.assertIsNone(reloaded.switch_branch("missing"))
+            self.assertIsNone(reloaded.switch_branch("branch_main"))
+            self.assertEqual(reloaded.current_branch_id(), "branch_main")
+            self.assertIn(
+                "origin_event_id",
+                [row[1] for row in connection.execute("pragma table_info(team_conversation_branches)").fetchall()],
+            )
+
+    def test_store_cancels_and_clears_pending_queue_without_stopping_running_agents(self) -> None:
+        store = ConversationStore(team_id="team", conversation_id="thread")
+        event = store.append_event(author_id="human", author_kind="human", content="@agent")
+        pending = store.enqueue("agent", event.seq)
+        running = store.enqueue("running-agent", event.seq)
+
+        store.save_agent_state(replace(running, running=True))
+
+        cancelled = store.cancel_queued("agent")
+        still_running = store.cancel_queued("running-agent")
+        store.enqueue("agent", event.seq)
+        cleared = store.clear_pending_queue()
+
+        self.assertFalse(cancelled.queued)
+        self.assertTrue(still_running.running)
+        self.assertTrue(still_running.queued)
+        self.assertEqual([state.agent_id for state in cleared], ["agent"])
+        self.assertFalse(store.ensure_agent_state("agent").queued)
+        self.assertTrue(store.ensure_agent_state("running-agent").queued)
+        self.assertEqual(pending.queued_after_seq, event.seq)
+
+    def test_store_tracks_in_memory_branch_metadata(self) -> None:
+        store = ConversationStore(team_id="team", conversation_id="thread")
+
+        branch = store.create_branch(origin_checkpoint_id="checkpoint_01", head_checkpoint_id="checkpoint_01")
+        missing = store.switch_branch("missing")
+        selected = store.switch_branch(branch.id)
+
+        self.assertEqual(branch.label, "Branch 1")
+        self.assertEqual(branch.to_dict()["head_checkpoint_id"], "checkpoint_01")
+        self.assertIsNone(missing)
+        self.assertEqual(selected.id if selected else None, branch.id)
+        self.assertEqual(store.current_branch_id(), branch.id)
+        self.assertTrue(store.list_branches()[0].current)
+        self.assertIsNone(store.switch_branch("branch_main"))
+        self.assertEqual(store.current_branch_id(), "branch_main")
+        self.assertFalse(store.list_branches()[0].current)
+
+    def test_store_tracks_in_memory_interrupts_and_validation_edges(self) -> None:
+        store = ConversationStore(team_id="team", conversation_id="thread")
+
+        interrupt = store.create_interrupt(
+            kind="review",
+            payload={"draft": "hello"},
+            run_id="run_01",
+            agent_id="agent",
+            checkpoint_id="checkpoint_01",
+        )
+        resolved = store.resume_interrupt(
+            interrupt.id,
+            decision="edit",
+            response="updated",
+            edited_payload={"draft": "updated"},
+        )
+
+        self.assertEqual(store.list_interrupts(), [])
+        self.assertEqual(store.list_interrupts(active_only=False)[0].kind, "review")
+        self.assertEqual(resolved.decisions[0]["edited_payload"], {"draft": "updated"} if resolved else None)
+        self.assertIsNone(store.resume_interrupt("missing", decision="approve"))
+        with self.assertRaisesRegex(ValueError, "kind"):
+            store.create_interrupt(kind="bad", payload={})  # type: ignore[arg-type]
+        with self.assertRaisesRegex(ValueError, "decision"):
+            store.resume_interrupt(interrupt.id, decision="bad")  # type: ignore[arg-type]
+        with self.assertRaisesRegex(ValueError, "payload"):
+            store.create_interrupt(kind="approve", payload={"bad": object()})  # type: ignore[arg-type]
+        with self.assertRaisesRegex(ValueError, "edited_payload"):
+            store.resume_interrupt(interrupt.id, decision="approve", edited_payload={"bad": object()})  # type: ignore[arg-type]
+
+    def test_runtime_controller_cancels_and_clears_pending_queue(self) -> None:
+        store = ConversationStore(team_id="team", conversation_id="thread")
+        event = store.append_event(author_id="human", author_kind="human", content="@agent")
+        store.enqueue("agent", event.seq)
+        controller = ConversationRuntimeController(SimpleNamespace(store=store, router=SimpleNamespace(stop=lambda _agent_id: None)))
+
+        self.assertEqual(controller.cancel_queued_agent("agent")["team_id"], "team")
+        self.assertFalse(store.ensure_agent_state("agent").queued)
+
+        store.enqueue("agent", event.seq)
+        controller.clear_queue("failed")
+        self.assertTrue(store.ensure_agent_state("agent").queued)
+
+        controller.clear_queue("all")
+        self.assertFalse(store.ensure_agent_state("agent").queued)
+
+        branch = controller.create_branch(label="Alternative", origin_checkpoint_id="checkpoint_01")
+        controller.switch_branch(branch.id)
+        self.assertEqual(controller.list_branches()[0].id, branch.id)
+        self.assertEqual(controller.current_branch_id(), branch.id)
+        self.assertIsNone(controller.switch_branch("missing"))
+
+        interrupt = controller.create_interrupt(kind="approve", payload={"action": "send"}, agent_id="agent")
+        self.assertEqual(controller.list_interrupts()[0].id, interrupt.id)
+        self.assertEqual(controller.resume_interrupt(interrupt.id, decision="approve").status, "resolved")
+
+    def test_checkpoint_resume_replays_graph_into_branch_scoped_event(self) -> None:
+        graph = FakeGraph("resumed")
+        runtime = self._conversation_runtime({"agent-b": graph})
+        origin = runtime.store.append_event(
+            author_id="human",
+            author_kind="human",
+            content="@agent-b original",
+            mentions=("agent-b",),
+        )
+
+        result = runtime.resume_checkpoint(
+            checkpoint_id="checkpoint_01",
+            checkpoint_ns="",
+            thread_id="thread:mention:agent-b",
+            mode="resume",
+            origin_event_id=origin.id,
+            origin_event_seq=origin.seq,
+        )
+
+        self.assertEqual(graph.calls[0][0], None)
+        self.assertEqual(graph.calls[0][1]["configurable"]["checkpoint_id"], "checkpoint_01")
+        self.assertEqual(result.event.metadata["branch_id"], result.branch.id)
+        self.assertEqual(result.branch.origin_event_id, origin.id)
+        self.assertEqual(runtime.store.current_branch_id(), result.branch.id)
+
+    def test_checkpoint_edit_updates_graph_state_before_replay(self) -> None:
+        graph = FakeGraph("edited")
+        runtime = self._conversation_runtime({"agent-b": graph})
+
+        result = runtime.runtime.resume_checkpoint(
+            checkpoint_id="checkpoint_01",
+            checkpoint_ns="",
+            thread_id="thread:mention:agent-b",
+            mode="edit",
+            edited_content="replacement",
+        )
+
+        self.assertEqual(graph.updates[0][1]["messages"][0].content, "replacement")
+        self.assertEqual(graph.calls[0][1]["configurable"]["checkpoint_id"], "fork-1")
+        self.assertEqual(result.mode, "edit")
+
+        with self.assertRaisesRegex(ValueError, "edited_content"):
+            runtime.runtime.resume_checkpoint(
+                checkpoint_id="checkpoint_01",
+                checkpoint_ns="",
+                thread_id="thread:mention:agent-b",
+                mode="edit",
+            )
+        with self.assertRaisesRegex(ValueError, "mention thread"):
+            runtime.resume_checkpoint(checkpoint_id="checkpoint_01", checkpoint_ns="", thread_id="thread")
+
+        no_update = SimpleNamespace(invoke=lambda _input, config=None: {"messages": [AIMessage(content="ok")]})
+        runtime.registry.graphs["agent-b"] = no_update
+        with self.assertRaisesRegex(ValueError, "update_state"):
+            runtime.resume_checkpoint(
+                checkpoint_id="checkpoint_01",
+                checkpoint_ns="",
+                thread_id="thread:mention:agent-b",
+                mode="edit",
+                edited_content="replacement",
+            )
+
+        runtime.registry.graphs["agent-b"] = FakeGraph("")
+        with self.assertRaisesRegex(ValueError, "no final textual"):
+            runtime.resume_checkpoint(checkpoint_id="checkpoint_01", checkpoint_ns="", thread_id="thread:mention:agent-b")
+
+        runtime.registry.graphs["agent-b"] = FakeGraph("regenerated")
+        regenerated = runtime.resume_checkpoint(
+            checkpoint_id="checkpoint_01",
+            checkpoint_ns="",
+            thread_id="thread:mention:agent-b",
+            mode="regenerate",
+        )
+        self.assertEqual(regenerated.branch.label, "Checkpoint regenerate")
 
     def test_store_private_helpers_are_noops_without_sqlite_connection(self) -> None:
         store = ConversationStore(team_id="team", conversation_id="thread")
@@ -175,6 +407,7 @@ class ConversationRuntimeTests(unittest.TestCase):
 
         store._initialize_sqlite()
         store._upsert_runtime_state(store.get_runtime_state())
+        store._ensure_column("team_conversation_branches", "origin_event_id", "text")
 
         self.assertEqual(store._attachments_for(event.id), [file_ref])
         self.assertEqual(store._attachments_for("missing"), [])
@@ -373,6 +606,10 @@ class ConversationRuntimeTests(unittest.TestCase):
 
         runtime.append_human_message("@reviewer please", author_id="mickael")
 
+        self.assertEqual(
+            runtime.state()["participant_aliases"],
+            {"agent-a": ["lead"], "agent-b": ["reviewer"]},
+        )
         self.assertIn(
             "- agent-a (aliases: lead) : Coordinates the conversation.",
             graph.calls[0][0]["messages"][0].content,

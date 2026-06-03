@@ -1,0 +1,6 @@
+{
+  "type": "ai",
+  "name": "agent",
+  "content": "I can help.",
+  "tool_calls": []
+}

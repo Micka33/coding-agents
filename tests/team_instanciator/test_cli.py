@@ -246,20 +246,20 @@ class CliTests(unittest.TestCase):
         self.assertIn("human: Hi", output.getvalue())
         self.assertIn("warning: delivery to agent", errors.getvalue())
 
-    def test_conversation_team_without_message_auto_launches_webapp(self) -> None:
+    def test_conversation_team_without_message_auto_launches_studio(self) -> None:
         conversation_team = FakeConversationTeam()
         FakeTeamInstanciator.instance = conversation_team
 
         with (
             patch("src.team_instanciator.interfaces.cli.TeamInstanciator", FakeTeamInstanciator),
-            patch("src.webapp.server.ConversationWebAppLauncher", return_value=FakeLauncher()),
+            patch("src.webapp_studio.application.studio_development_launcher.StudioDevelopmentLauncher", return_value=FakeLauncher()),
         ):
             cli_module.TeamInstanciatorCli().main(
                 ["team.yaml", "--no-env-file", "--thread-id", "thread-1", "--webapp-port", "9999"]
             )
 
         self.assertEqual(FakeLauncher.calls[0]["conversation_id"], "thread-1")
-        self.assertEqual(FakeLauncher.calls[0]["port"], 9999)
+        self.assertEqual(FakeLauncher.calls[0]["backend_port"], 9999)
 
     def test_webapp_subcommand_delegates_to_webapp_main(self) -> None:
         with patch("src.webapp.server.main", return_value=7) as webapp_main:

@@ -1,0 +1,12 @@
+{
+  "id": "queue_thread_agent",
+  "conversation_id": "thread",
+  "agent_id": "agent",
+  "status": "pending",
+  "position": 1,
+  "enqueued_at": "2026-06-01T10:00:01Z",
+  "updated_at": "2026-06-01T10:00:02Z",
+  "message_event_id": "event_01",
+  "can_cancel": false,
+  "error": null
+}

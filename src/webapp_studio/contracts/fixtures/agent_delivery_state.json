@@ -1,0 +1,14 @@
+{
+  "team_id": "team",
+  "conversation_id": "thread",
+  "agent_id": "agent",
+  "last_delivered_seq": 1,
+  "running": true,
+  "queued": false,
+  "queued_after_seq": null,
+  "current_run_id": "run_01",
+  "current_snapshot_seq": 1,
+  "stop_requested": false,
+  "last_identity_refresh_seq": 0,
+  "token_estimate_since_identity_refresh": 128
+}

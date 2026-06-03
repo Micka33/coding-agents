@@ -1,0 +1,8 @@
+{
+  "id": "file_01",
+  "filename": "notes.txt",
+  "uri": "conversation://files/file_01",
+  "media_type": "text/plain",
+  "size_bytes": 42,
+  "added_by": "human"
+}

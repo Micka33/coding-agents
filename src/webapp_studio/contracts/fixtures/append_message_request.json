@@ -1,0 +1,6 @@
+{
+  "content": "@agent hello",
+  "author_id": "human",
+  "attachments": [],
+  "wait": false
+}

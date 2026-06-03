@@ -1,0 +1,6 @@
+{
+  "team_id": "team",
+  "conversation_id": "thread",
+  "mention_hook_enabled": true,
+  "max_cascade_turns": 3
+}

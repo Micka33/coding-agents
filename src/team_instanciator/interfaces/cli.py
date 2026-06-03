@@ -56,15 +56,15 @@ class TeamInstanciatorCli:
                     self._print_result(team, args.message, args.thread_id, args.json)
             elif getattr(team, "conversation", None) is not None and not args.no_webapp:
                 team.close()
-                from src.webapp.server import ConversationWebAppLauncher
+                from src.webapp_studio.application.studio_development_launcher import StudioDevelopmentLauncher
 
-                ConversationWebAppLauncher().launch(
+                StudioDevelopmentLauncher().launch(
                     team_file=args.team_file,
                     variables=variables,
                     config_variables=config_variables,
                     conversation_id=args.thread_id,
                     host=args.webapp_host,
-                    port=args.webapp_port,
+                    backend_port=args.webapp_port,
                 )
             else:
                 self._print_summary(team, args.json)

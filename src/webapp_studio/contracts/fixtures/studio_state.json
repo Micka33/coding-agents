@@ -1,0 +1,112 @@
+{
+  "team_id": "team",
+  "conversation_id": "thread",
+  "participants": ["agent"],
+  "participant_aliases": {"agent": ["lead"]},
+  "runtime": {
+    "team_id": "team",
+    "conversation_id": "thread",
+    "mention_hook_enabled": true,
+    "max_cascade_turns": 3
+  },
+  "conversation": {
+    "events": [
+      {
+        "id": "event_01",
+        "team_id": "team",
+        "conversation_id": "thread",
+        "seq": 1,
+        "created_at": "2026-06-01T10:00:00Z",
+        "author_id": "human",
+        "author_kind": "human",
+        "content": "@agent hello",
+        "mentions": ["agent"],
+        "attachments": [],
+        "source_thread_id": null,
+        "source_message_id": null,
+        "metadata": {
+          "generated_ui_ids": ["generated_ui_01"]
+        }
+      }
+    ],
+    "deliveries": [],
+    "agent_states": [
+      {
+        "team_id": "team",
+        "conversation_id": "thread",
+        "agent_id": "agent",
+        "last_delivered_seq": 1,
+        "running": true,
+        "queued": false,
+        "queued_after_seq": null,
+        "current_run_id": "run_01",
+        "current_snapshot_seq": 1,
+        "stop_requested": false,
+        "last_identity_refresh_seq": 0,
+        "token_estimate_since_identity_refresh": 128
+      }
+    ]
+  },
+  "activity": {
+    "active_agent_ids": ["agent"],
+    "private_threads": []
+  },
+  "runs": [
+    {
+      "id": "run_01",
+      "conversation_id": "thread",
+      "agent_id": "agent",
+      "status": "running",
+      "created_at": null,
+      "updated_at": null,
+      "completed_at": null,
+      "checkpoint_id": null,
+      "cursor": "event_seq:1",
+      "metadata": {"current_snapshot_seq": 1}
+    }
+  ],
+  "queue": [],
+  "interrupts": [],
+  "history": {
+    "current_branch_id": "branch_main",
+    "checkpoints": [
+      {
+        "id": "checkpoint_01",
+        "thread_id": "thread:mention:agent",
+        "checkpoint_ns": "",
+        "parent_checkpoint_id": null,
+        "seq": 1,
+        "created_at": "2026-06-01T10:00:02Z",
+        "source": "langgraph_sqlite",
+        "metadata": {
+          "target_agent_id": "agent"
+        },
+        "summary": {
+          "message_count": 1,
+          "tool_call_count": 0,
+          "agent_id": "agent"
+        },
+        "capabilities": {
+          "inspect": "available",
+          "resume": "unsupported",
+          "branch_from_here": "unsupported"
+        }
+      }
+    ],
+    "branches": [
+      {
+        "id": "branch_main",
+        "label": "Main",
+        "parent_branch_id": null,
+        "origin_checkpoint_id": null,
+        "origin_event_id": null,
+        "origin_event_seq": null,
+        "created_at": "2026-06-01T10:00:00Z",
+        "current": true,
+        "status": "derived",
+        "head_checkpoint_id": "checkpoint_01"
+      }
+    ]
+  },
+  "generated_ui": []
+}

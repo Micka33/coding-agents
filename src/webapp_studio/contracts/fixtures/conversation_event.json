@@ -1,0 +1,24 @@
+{
+  "id": "event_01",
+  "team_id": "team",
+  "conversation_id": "thread",
+  "seq": 1,
+  "created_at": "2026-06-01T10:00:00Z",
+  "author_id": "human",
+  "author_kind": "human",
+  "content": "@agent hello",
+  "mentions": ["agent"],
+  "attachments": [
+    {
+      "id": "file_01",
+      "filename": "notes.txt",
+      "uri": "conversation://files/file_01",
+      "media_type": "text/plain",
+      "size_bytes": 42,
+      "added_by": "human"
+    }
+  ],
+  "source_thread_id": null,
+  "source_message_id": null,
+  "metadata": {"intent": "fixture"}
+}

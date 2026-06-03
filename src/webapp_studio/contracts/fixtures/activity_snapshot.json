@@ -1,0 +1,17 @@
+{
+  "active_agent_ids": ["agent"],
+  "private_threads": [
+    {
+      "agent_id": "agent",
+      "thread_id": "thread:mention:agent",
+      "messages": [
+        {
+          "type": "ai",
+          "name": "agent",
+          "content": "I can help.",
+          "tool_calls": []
+        }
+      ]
+    }
+  ]
+}

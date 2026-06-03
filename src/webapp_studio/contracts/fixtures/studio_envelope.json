@@ -1,0 +1,17 @@
+{
+  "schema_version": "studio.v1",
+  "request_id": "req_fixture",
+  "capabilities": {
+    "streaming": "available",
+    "queue_control": "degraded",
+    "interrupts": "degraded",
+    "checkpoints": "degraded",
+    "branching": "degraded",
+    "time_travel": "degraded",
+    "generated_ui": "degraded"
+  },
+  "data": {
+    "ok": true
+  },
+  "errors": []
+}

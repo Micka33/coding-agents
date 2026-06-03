@@ -1,10 +1,13 @@
 from .agent_delivery_state import AgentDeliveryState
 from .agent_sync import AgentSync
 from .conversation_append_result import ConversationAppendResult
+from .conversation_branch import ConversationBranch
+from .conversation_checkpoint_resume_result import ConversationCheckpointResumeResult
 from .conversation_delivery import ConversationDelivery
 from .conversation_delivery_error import ConversationDeliveryError
 from .conversation_event import ConversationEvent
 from .conversation_file_ref import ConversationFileRef
+from .conversation_interrupt import ConversationInterrupt
 from .conversation_runtime_state import ConversationRuntimeState
 from .conversation_runtime_controller import ConversationRuntimeController
 from .mention_parser import MentionParser
@@ -20,10 +23,13 @@ __all__ = [
     "AgentSync",
     "AgentSyncBuilder",
     "ConversationAppendResult",
+    "ConversationBranch",
+    "ConversationCheckpointResumeResult",
     "ConversationDelivery",
     "ConversationDeliveryError",
     "ConversationEvent",
     "ConversationFileRef",
+    "ConversationInterrupt",
     "ConversationRuntimeState",
     "ConversationRuntimeController",
     "ConversationStore",

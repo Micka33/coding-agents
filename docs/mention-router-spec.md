@@ -14,7 +14,8 @@ Build this as a public conversation bus beside the existing Deep Agents
 checkpointer, not as another generated tool.
 
 The user-facing UI that lets a human add new messages to the main public
-conversation must be built as a separate web application under `src/webapp`.
+conversation must be built as a separate web application under
+`src/webapp_studio/frontend`.
 It should be launched automatically when the selected team config defines a
 top-level `conversation` section, and it must also support an explicit
 command-line launch path for standalone use.
@@ -527,9 +528,9 @@ New runtime components:
 - `PublicReplyExtractor`: extract one final public reply from agent results.
 - `MentionAwareTeam`: wrapper around `InstantiatedTeam` that accepts human
   public messages and public file refs, then starts router dispatch.
-- `ConversationWebAppLauncher`: starts the `src/webapp` conversation UI when a
-  selected team has a top-level `conversation` section, and exposes the same
-  launch path for the standalone CLI command.
+- `ConversationWebAppLauncher`: starts the `src/webapp_studio/frontend`
+  conversation UI when a selected team has a top-level `conversation` section,
+  and exposes the same launch path for the standalone CLI command.
 
 The existing `AgentGraphRegistry` can continue to create per-agent graphs. The
 router should call `registry.graph(target_agent_id)` with the target's stable
@@ -564,16 +565,41 @@ the Web UI without understanding every agent's private tool state.
 ## Web UI Implications
 
 The Web UI that lets the user add new messages to the main public conversation
-must live in `src/webapp` as its own web application. It is the conversation
-composer and room UI, not an extension of the existing checkpoint/history
-browser. It should talk to the mention-router runtime through explicit local
-APIs instead of importing router internals directly.
+must live in `src/webapp_studio/frontend` as its own web application. It is the
+conversation composer and room UI, not an extension of the existing
+checkpoint/history browser. It should talk to the mention-router runtime
+through explicit local APIs instead of importing router internals directly.
+
+The first viewport must be the working conversation, not a landing page or
+dashboard. The app should not have a global header or footer, because those
+areas reduce the amount of visible transcript. Navigation, settings,
+conversation stats, runtime controls, branch/checkpoint actions, queue controls,
+reviews, links, and informational status should move into a left sidebar.
+
+The workspace should use three horizontally resizable panels on desktop:
+
+1. Left sidebar: open by default, collapsible to an icon rail, and resizable.
+2. Center chat: the primary panel and the default recipient of extra width.
+3. Right inspector: a contextual panel for generated UI previews or selected
+   participant activity.
+
+Users must be able to resize panel boundaries with draggable splitters. Panel
+widths should respect sensible minimum sizes and should persist for the current
+browser profile. On narrow screens, the same information should collapse into a
+drawer or stacked inspector flow that keeps the chat usable first.
+
+The right inspector should be contextual rather than another top-level tab. A
+generated UI link in the transcript should open the generated UI view in the
+right inspector while keeping the conversation visible. Clicking participant
+activity should open that participant's live activity in the same inspector.
+The inspector should clearly indicate whether it is showing generated UI,
+participant activity, or an empty state.
 
 Launch behavior:
 
 - when the selected team config contains a top-level `conversation` section, the
-  runtime should automatically launch `src/webapp` and pass it the active team
-  id, conversation id, and API base URL;
+  runtime should automatically launch `src/webapp_studio/frontend` and pass it
+  the active team id, conversation id, and API base URL;
 - when the selected team config has no top-level `conversation` section, the web
   app must not be launched automatically;
 - the same app must be launchable separately from the command line, for example
@@ -584,18 +610,27 @@ The Web UI should show the public conversation as a first-class room, accept new
 human-authored messages and public file attachments, then let the user open an
 agent's private thread when debugging.
 
+The message composer must support mention autocomplete. When the user types `@`
+at a mention boundary, the UI should show mentionable participants, filter them
+as the user continues typing, support keyboard and pointer selection, and insert
+the canonical mention text. Aliases may be shown as search/display metadata, but
+the inserted text should resolve to the canonical participant id unless the
+runtime explicitly requires alias preservation. Unknown mentions remain visible
+plain text and must not enqueue work.
+
 When any participating agent is currently thinking or replying to the public
 conversation, the Web UI must display a concise activity hint directly above the
 chat input. The hint should name the active participant when possible, for
 example `software-architect is replying...`, and remain visible while that
-participant has an active run or queued follow-up.
+participant has an active run or queued follow-up. The absence of this hint
+while a participant is running should be treated as a UI bug.
 
-Clicking the activity hint must open a real-time activity panel for the active
-participant. The panel should display live run activity such as streamed
-thinking, tool calls, tool results, todo progress, private message history, and
-delivery status. This panel is a debugging and observability surface only: none
-of the private activity it displays is promoted into the public conversation
-unless it becomes the agent's final extracted public reply.
+Clicking the activity hint must open the right inspector to a real-time activity
+view for the active participant. The panel should display live run activity such
+as streamed thinking, tool calls, tool results, todo progress, private message
+history, and delivery status. This panel is a debugging and observability
+surface only: none of the private activity it displays is promoted into the
+public conversation unless it becomes the agent's final extracted public reply.
 
 Useful display fields:
 
@@ -615,6 +650,21 @@ Required controls:
   active run has been cancelled or its late result has been ignored;
 - open the real-time activity panel by clicking the active-participant hint
   above the chat input.
+
+Layout and interaction acceptance criteria:
+
+- the global header and footer are removed from the workspace;
+- sidebar content remains available when collapsed through icons and tooltips;
+- the center chat remains visible while generated UI or activity is open;
+- dragging either splitter resizes adjacent panels without overlapping text or
+  breaking the composer;
+- generated UI can be viewed side-by-side with the chat;
+- the right inspector can switch between generated UI and a selected
+  participant's live activity without losing the chat draft;
+- mention autocomplete works for all conversation participants and does not
+  submit or mutate the draft unexpectedly;
+- a running or queued participant always creates a visible clickable activity
+  hint above the chat input.
 
 Implementation references from the LangChain docs:
 
@@ -642,10 +692,10 @@ Implementation references from the LangChain docs:
 3. Add router state machine with fake graphs.
 4. Add Deep Agents sync, human-added file delivery, and reply extraction.
 5. Add CLI or API path for public human messages.
-6. Scaffold the separate `src/webapp` conversation UI and standalone CLI launch
-   path.
-7. Automatically launch `src/webapp` when the selected team config has a
-   top-level `conversation` section.
+6. Scaffold the separate `src/webapp_studio/frontend` conversation UI and
+   standalone CLI launch path.
+7. Automatically launch `src/webapp_studio/frontend` when the selected team
+   config has a top-level `conversation` section.
 8. Convert resident `ask_product_analyst` and `ask_software_architect` prompts
    to mention guidance.
 9. Keep existing relation tools available behind config until mention routing is
@@ -694,9 +744,9 @@ Integration tests:
 - stopping a running agent lets a newer mention drive the next response without
   waiting for the stopped run's public answer;
 - selecting a team config with a top-level `conversation` section starts the
-  `src/webapp` launcher;
+  `src/webapp_studio/frontend` launcher;
 - selecting a team config without a top-level `conversation` section does not
-  start the `src/webapp` launcher;
+  start the `src/webapp_studio/frontend` launcher;
 - launching the web app from the command line connects it to the selected team
   and lets a human append a public message;
 - while a participant is thinking or replying, the web app shows a hint above

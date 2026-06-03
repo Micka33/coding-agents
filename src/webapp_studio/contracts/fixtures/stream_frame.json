@@ -1,0 +1,9 @@
+{
+  "id": "stream_00000001",
+  "event": "studio.hello",
+  "schema_version": "studio.v1",
+  "cursor": "event_seq:1",
+  "payload": {
+    "cursor": "event_seq:1"
+  }
+}

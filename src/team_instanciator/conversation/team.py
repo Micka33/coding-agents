@@ -7,6 +7,7 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import TypeAlias
 
+from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.graph.message import add_messages
 from langgraph.types import Overwrite
@@ -18,6 +19,7 @@ from src.team_instanciator.runtime.checkpointer_handle import CheckpointerHandle
 from src.team_instanciator.runtime.thread_id_factory import ThreadIdFactory
 
 from .conversation_append_result import ConversationAppendResult
+from .conversation_checkpoint_resume_result import ConversationCheckpointResumeResult
 from .conversation_event import ConversationEvent
 from .conversation_file_ref import ConversationFileRef
 from .payloads import ConversationStateDict, MessageSummaryDict
@@ -65,7 +67,7 @@ class MentionAwareTeam:
             for agent_id, reference in team.agent_references.items()
             if reference.conversation is not None
         )
-        aliases_by_participant = {
+        self.aliases_by_participant = {
             agent_id: reference.conversation.aliases
             for agent_id, reference in team.agent_references.items()
             if reference.conversation is not None
@@ -78,7 +80,7 @@ class MentionAwareTeam:
             sync_builder=AgentSyncBuilder(
                 identity_refresh_after_tokens=team.conversation.identity_refresh_after_tokens,
                 participants=participants,
-                aliases_by_participant=aliases_by_participant,
+                aliases_by_participant=self.aliases_by_participant,
             ),
             reply_extractor=PublicReplyExtractor(),
             thread_id_factory=thread_id_factory,
@@ -109,6 +111,7 @@ class MentionAwareTeam:
         *,
         author_id: str = "human",
         files: Iterable[ConversationFileInput] | None = None,
+        metadata: Mapping[str, object] | None = None,
         wait: bool = True,
     ) -> ConversationAppendResult:
         attachments = tuple(self._file_ref(file, added_by=author_id) for file in files or ())
@@ -119,6 +122,7 @@ class MentionAwareTeam:
             content=content,
             mentions=mentions,
             attachments=attachments,
+            metadata=metadata,
         )
         deliveries_before = len(self.store.list_deliveries())
         runtime_state = self.store.get_runtime_state()
@@ -156,6 +160,77 @@ class MentionAwareTeam:
     def wait_for_idle(self) -> None:
         self.router.wait_for_idle()
 
+    def resume_checkpoint(
+        self,
+        *,
+        checkpoint_id: str,
+        checkpoint_ns: str,
+        thread_id: str,
+        mode: str = "resume",
+        edited_content: str | None = None,
+        origin_event_id: str | None = None,
+        origin_event_seq: int | None = None,
+    ) -> ConversationCheckpointResumeResult:
+        agent_id = self._agent_id_from_thread(thread_id)
+        if agent_id is None:
+            raise ValueError("checkpoint thread is not a mention thread.")
+        graph = self.registry.graph(agent_id)
+        config: dict[str, object] = {
+            "configurable": {
+                "thread_id": thread_id,
+                "checkpoint_ns": checkpoint_ns,
+                "checkpoint_id": checkpoint_id,
+            }
+        }
+        if mode == "edit":
+            if not edited_content:
+                raise ValueError("edited_content is required for checkpoint edit.")
+            update_state = getattr(graph, "update_state", None)
+            if not callable(update_state):
+                raise ValueError("checkpoint edit requires graph.update_state support.")
+            config = update_state(
+                config,
+                {
+                    "messages": [
+                        HumanMessage(
+                            name="human",
+                            content=edited_content,
+                            response_metadata={
+                                "conversation_event_id": origin_event_id,
+                                "conversation_seq": origin_event_seq,
+                            },
+                        )
+                    ]
+                },
+            )
+        result = graph.invoke(None, config=config)
+        reply = PublicReplyExtractor().extract(result)
+        if reply is None:
+            raise ValueError("Checkpoint replay returned no final textual AI reply.")
+        branch = self.store.create_branch(
+            label=self._checkpoint_branch_label(mode),
+            origin_checkpoint_id=checkpoint_id,
+            origin_event_id=origin_event_id,
+            origin_event_seq=origin_event_seq,
+            head_checkpoint_id=checkpoint_id,
+            parent_branch_id=self.store.current_branch_id(),
+        )
+        self.store.switch_branch(branch.id)
+        event = self.store.append_event(
+            author_id=agent_id,
+            author_kind="agent",
+            content=reply.content,
+            mentions=self.parser.parse(reply.content, author_id=agent_id),
+            source_thread_id=thread_id,
+            source_message_id=reply.source_message_id,
+            metadata={
+                "branch_id": branch.id,
+                "checkpoint_id": checkpoint_id,
+                "time_travel_mode": mode,
+            },
+        )
+        return ConversationCheckpointResumeResult(branch=branch, event=event, mode=mode)
+
     def state(self) -> ConversationStateDict:
         events = [event.to_dict() for event in self.store.list_events()]
         agent_states = [state.to_dict() for state in self.store.list_agent_states()]
@@ -165,6 +240,10 @@ class MentionAwareTeam:
             "team_id": self.team.id,
             "conversation_id": self.conversation_id,
             "participants": sorted(self.parser.participants),
+            "participant_aliases": {
+                participant: list(self.aliases_by_participant.get(participant, ()))
+                for participant in sorted(self.parser.participants)
+            },
             "runtime": self.store.get_runtime_state().to_dict(),
             "events": events,
             "agent_states": agent_states,
@@ -234,6 +313,20 @@ class MentionAwareTeam:
             else:
                 messages = add_messages(messages, loaded)
         return [self._message_summary(message) for message in messages]
+
+    def _checkpoint_branch_label(self, mode: str) -> str:
+        if mode == "edit":
+            return "Checkpoint edit"
+        if mode == "regenerate":
+            return "Checkpoint regenerate"
+        return "Checkpoint resume"
+
+    def _agent_id_from_thread(self, thread_id: str) -> str | None:
+        marker = ":mention:"
+        if marker not in thread_id:
+            return None
+        agent_id = thread_id.rsplit(marker, maxsplit=1)[-1]
+        return agent_id if agent_id in self.parser.participants else None
 
     def _message_summary(self, message: object) -> MessageSummaryDict:
         content = getattr(message, "content", "")

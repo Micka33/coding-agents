@@ -1,0 +1,11 @@
+{
+  "id": "interrupt_01",
+  "run_id": "run_01",
+  "agent_id": "agent",
+  "checkpoint_id": "checkpoint_01",
+  "created_at": "2026-06-01T10:00:04Z",
+  "kind": "approve",
+  "payload": {"action": "write_file"},
+  "status": "pending",
+  "decisions": []
+}

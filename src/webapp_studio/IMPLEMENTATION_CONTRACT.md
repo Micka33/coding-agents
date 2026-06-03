@@ -94,11 +94,11 @@ features are not implemented yet:
   "capabilities": {
     "streaming": "available",
     "queue_control": "degraded",
-    "interrupts": "planned",
+    "interrupts": "degraded",
     "checkpoints": "degraded",
-    "branching": "planned",
-    "time_travel": "planned",
-    "generated_ui": "planned"
+    "branching": "degraded",
+    "time_travel": "degraded",
+    "generated_ui": "degraded"
   },
   "data": {},
   "errors": []

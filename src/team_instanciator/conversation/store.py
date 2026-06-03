@@ -11,9 +11,16 @@ from typing import cast
 from src.type_defs import JsonMapping, is_json_object
 
 from .agent_delivery_state import AgentDeliveryState
+from .conversation_branch import ConversationBranch
 from .conversation_delivery import ConversationDelivery, DeliveryStatus
 from .conversation_event import AuthorKind, ConversationEvent
 from .conversation_file_ref import ConversationFileRef
+from .conversation_interrupt import (
+    ConversationInterrupt,
+    ConversationInterruptDecision,
+    ConversationInterruptKind,
+    ConversationInterruptStatus,
+)
 from .conversation_runtime_state import ConversationRuntimeState
 
 
@@ -31,6 +38,9 @@ _DELIVERY_STATUSES: tuple[DeliveryStatus, ...] = (
     "stopped",
     "success",
 )
+_INTERRUPT_DECISIONS: tuple[ConversationInterruptDecision, ...] = ("approve", "reject", "edit", "respond")
+_INTERRUPT_KINDS: tuple[ConversationInterruptKind, ...] = ("approve", "edit", "respond", "review")
+_INTERRUPT_STATUSES: tuple[ConversationInterruptStatus, ...] = ("pending", "resolved")
 
 
 class ConversationStore:
@@ -50,6 +60,9 @@ class ConversationStore:
         self._events: list[ConversationEvent] = []
         self._agent_states: dict[str, AgentDeliveryState] = {}
         self._deliveries: list[ConversationDelivery] = []
+        self._branches: dict[str, ConversationBranch] = {}
+        self._interrupts: dict[str, ConversationInterrupt] = {}
+        self._current_branch_id = "branch_main"
         self._runtime_state = ConversationRuntimeState(
             team_id=team_id,
             conversation_id=conversation_id,
@@ -285,7 +298,7 @@ class ConversationStore:
     def list_agent_states(self) -> list[AgentDeliveryState]:
         with self._lock:
             if self._connection is None:
-                return [replace(state) for state in self._agent_states.values()]
+                return [replace(self._agent_states[agent_id]) for agent_id in sorted(self._agent_states)]
             rows = self._connection.execute(
                 """
                 select agent_id from team_conversation_agent_state
@@ -353,6 +366,23 @@ class ConversationStore:
             updated = replace(state, queued=True, queued_after_seq=queued_after_seq)
             self.save_agent_state(updated)
             return updated
+
+    def cancel_queued(self, agent_id: str) -> AgentDeliveryState:
+        with self._lock:
+            state = self.ensure_agent_state(agent_id)
+            if state.running:
+                return state
+            updated = replace(state, queued=False, queued_after_seq=None, stop_requested=False)
+            self.save_agent_state(updated)
+            return updated
+
+    def clear_pending_queue(self) -> list[AgentDeliveryState]:
+        with self._lock:
+            cleared = []
+            for state in self.list_agent_states():
+                if state.queued and not state.running:
+                    cleared.append(self.cancel_queued(state.agent_id))
+            return cleared
 
     def pending_idle_agent_ids(self, *, limit: int | None = None) -> list[str]:
         states = [
@@ -486,6 +516,271 @@ class ConversationStore:
             self._connection.commit()
             return delivery
 
+    def create_branch(
+        self,
+        *,
+        label: str | None = None,
+        origin_checkpoint_id: str | None = None,
+        origin_event_id: str | None = None,
+        origin_event_seq: int | None = None,
+        head_checkpoint_id: str | None = None,
+        parent_branch_id: str | None = None,
+    ) -> ConversationBranch:
+        branch = ConversationBranch(
+            id=f"branch_{uuid.uuid4().hex}",
+            team_id=self.team_id,
+            conversation_id=self.conversation_id,
+            label=label or f"Branch {len(self.list_branches()) + 1}",
+            parent_branch_id=parent_branch_id or self.current_branch_id(),
+            origin_checkpoint_id=origin_checkpoint_id,
+            origin_event_id=origin_event_id,
+            origin_event_seq=origin_event_seq,
+            created_at=self._now(),
+            current=False,
+            status="persisted",
+            head_checkpoint_id=head_checkpoint_id,
+        )
+        with self._lock:
+            if self._connection is None:
+                self._branches[branch.id] = replace(branch)
+                return replace(branch)
+            self._connection.execute(
+                """
+                insert into team_conversation_branches (
+                    team_id,
+                    conversation_id,
+                    id,
+                    label,
+                    parent_branch_id,
+                    origin_checkpoint_id,
+                    origin_event_id,
+                    origin_event_seq,
+                    created_at,
+                    current,
+                    head_checkpoint_id
+                )
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    branch.team_id,
+                    branch.conversation_id,
+                    branch.id,
+                    branch.label,
+                    branch.parent_branch_id,
+                    branch.origin_checkpoint_id,
+                    branch.origin_event_id,
+                    branch.origin_event_seq,
+                    branch.created_at,
+                    int(branch.current),
+                    branch.head_checkpoint_id,
+                ),
+            )
+            self._connection.commit()
+            return replace(branch)
+
+    def list_branches(self) -> list[ConversationBranch]:
+        with self._lock:
+            if self._connection is None:
+                return [replace(self._branches[branch_id]) for branch_id in sorted(self._branches)]
+            rows = self._connection.execute(
+                """
+                select
+                    id,
+                    label,
+                    parent_branch_id,
+                    origin_checkpoint_id,
+                    origin_event_id,
+                    origin_event_seq,
+                    created_at,
+                    current,
+                    head_checkpoint_id
+                from team_conversation_branches
+                where team_id = ? and conversation_id = ?
+                order by created_at asc, id asc
+                """,
+                (self.team_id, self.conversation_id),
+            ).fetchall()
+            return [self._branch_from_row(row) for row in rows]
+
+    def current_branch_id(self) -> str:
+        with self._lock:
+            if self._connection is None:
+                return self._current_branch_id
+            row = self._connection.execute(
+                """
+                select id
+                from team_conversation_branches
+                where team_id = ? and conversation_id = ? and current = 1
+                order by created_at desc, id desc
+                limit 1
+                """,
+                (self.team_id, self.conversation_id),
+            ).fetchone()
+            return str(row[0]) if row is not None else "branch_main"
+
+    def switch_branch(self, branch_id: str) -> ConversationBranch | None:
+        with self._lock:
+            if branch_id == "branch_main":
+                self._set_current_branch(None)
+                return None
+            if self._connection is None:
+                branch = self._branch_by_id(branch_id)
+                if branch is None:
+                    return None
+                self._set_current_branch(branch_id)
+                return replace(self._branches[branch_id])
+            branch = self._branch_by_id(branch_id)
+            if branch is None:
+                return None
+            self._set_current_branch(branch_id)
+            return self._branch_by_id(branch_id)
+
+    def create_interrupt(
+        self,
+        *,
+        kind: ConversationInterruptKind,
+        payload: JsonMapping | None = None,
+        run_id: str | None = None,
+        agent_id: str | None = None,
+        checkpoint_id: str | None = None,
+        interrupt_id: str | None = None,
+    ) -> ConversationInterrupt:
+        if kind not in _INTERRUPT_KINDS:
+            raise ValueError("interrupt kind is not supported.")
+        payload_dict = dict(payload or {})
+        if not is_json_object(payload_dict):
+            raise ValueError("interrupt payload must be JSON-serializable.")
+        interrupt = ConversationInterrupt(
+            id=interrupt_id or f"interrupt_{uuid.uuid4().hex}",
+            team_id=self.team_id,
+            conversation_id=self.conversation_id,
+            run_id=run_id,
+            agent_id=agent_id,
+            checkpoint_id=checkpoint_id,
+            created_at=self._now(),
+            kind=kind,
+            payload=payload_dict,
+        )
+        with self._lock:
+            if self._connection is None:
+                self._interrupts[interrupt.id] = replace(interrupt)
+                return replace(interrupt)
+            self._connection.execute(
+                """
+                insert into team_conversation_interrupts (
+                    team_id,
+                    conversation_id,
+                    id,
+                    run_id,
+                    agent_id,
+                    checkpoint_id,
+                    created_at,
+                    kind,
+                    payload_json,
+                    status,
+                    decisions_json
+                )
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    interrupt.team_id,
+                    interrupt.conversation_id,
+                    interrupt.id,
+                    interrupt.run_id,
+                    interrupt.agent_id,
+                    interrupt.checkpoint_id,
+                    interrupt.created_at,
+                    interrupt.kind,
+                    json.dumps(interrupt.payload, ensure_ascii=False),
+                    interrupt.status,
+                    json.dumps([], ensure_ascii=False),
+                ),
+            )
+            self._connection.commit()
+            return replace(interrupt)
+
+    def list_interrupts(self, *, active_only: bool = True) -> list[ConversationInterrupt]:
+        with self._lock:
+            if self._connection is None:
+                interrupts = list(self._interrupts.values())
+                if active_only:
+                    interrupts = [interrupt for interrupt in interrupts if interrupt.status == "pending"]
+                return [replace(interrupt) for interrupt in sorted(interrupts, key=lambda item: (item.created_at, item.id))]
+            clauses = ["team_id = ?", "conversation_id = ?"]
+            params: list[object] = [self.team_id, self.conversation_id]
+            if active_only:
+                clauses.append("status = ?")
+                params.append("pending")
+            rows = self._connection.execute(
+                f"""
+                select
+                    id,
+                    run_id,
+                    agent_id,
+                    checkpoint_id,
+                    created_at,
+                    kind,
+                    payload_json,
+                    status,
+                    decisions_json
+                from team_conversation_interrupts
+                where {" and ".join(clauses)}
+                order by created_at asc, id asc
+                """,
+                tuple(params),
+            ).fetchall()
+            return [self._interrupt_from_row(row) for row in rows]
+
+    def resume_interrupt(
+        self,
+        interrupt_id: str,
+        *,
+        decision: ConversationInterruptDecision,
+        response: str | None = None,
+        edited_payload: JsonMapping | None = None,
+    ) -> ConversationInterrupt | None:
+        if decision not in _INTERRUPT_DECISIONS:
+            raise ValueError("interrupt decision is not supported.")
+        edited_payload_dict = dict(edited_payload or {})
+        if not is_json_object(edited_payload_dict):
+            raise ValueError("interrupt edited_payload must be JSON-serializable.")
+        with self._lock:
+            interrupt = self._interrupt_by_id(interrupt_id)
+            if interrupt is None:
+                return None
+            decision_record: JsonObject = {
+                "decision": decision,
+                "created_at": self._now(),
+            }
+            if response is not None:
+                decision_record["response"] = response
+            if edited_payload_dict:
+                decision_record["edited_payload"] = edited_payload_dict
+            resolved = replace(
+                interrupt,
+                status="resolved",
+                decisions=(*interrupt.decisions, decision_record),
+            )
+            if self._connection is None:
+                self._interrupts[interrupt_id] = replace(resolved)
+                return replace(resolved)
+            self._connection.execute(
+                """
+                update team_conversation_interrupts
+                set status = ?, decisions_json = ?
+                where team_id = ? and conversation_id = ? and id = ?
+                """,
+                (
+                    resolved.status,
+                    json.dumps(list(resolved.decisions), ensure_ascii=False),
+                    self.team_id,
+                    self.conversation_id,
+                    interrupt_id,
+                ),
+            )
+            self._connection.commit()
+            return replace(resolved)
+
     def list_deliveries(self) -> list[ConversationDelivery]:
         with self._lock:
             if self._connection is None:
@@ -610,6 +905,44 @@ class ConversationStore:
             )
             """
         )
+        connection.execute(
+            """
+            create table if not exists team_conversation_branches (
+                team_id text not null,
+                conversation_id text not null,
+                id text not null,
+                label text not null,
+                parent_branch_id text,
+                origin_checkpoint_id text,
+                origin_event_id text,
+                origin_event_seq integer,
+                created_at text not null,
+                current integer not null,
+                head_checkpoint_id text,
+                primary key (team_id, conversation_id, id)
+            )
+            """
+        )
+        connection.execute(
+            """
+            create table if not exists team_conversation_interrupts (
+                team_id text not null,
+                conversation_id text not null,
+                id text not null,
+                run_id text,
+                agent_id text,
+                checkpoint_id text,
+                created_at text not null,
+                kind text not null,
+                payload_json text not null,
+                status text not null,
+                decisions_json text not null,
+                primary key (team_id, conversation_id, id)
+            )
+            """
+        )
+        self._ensure_column("team_conversation_branches", "origin_event_id", "text")
+        self._ensure_column("team_conversation_branches", "origin_event_seq", "integer")
         connection.commit()
         self.get_runtime_state()
 
@@ -699,9 +1032,129 @@ class ConversationStore:
             for row in rows
         ]
 
+    def _branch_from_row(self, row: tuple[object, ...]) -> ConversationBranch:
+        return ConversationBranch(
+            id=str(row[0]),
+            team_id=self.team_id,
+            conversation_id=self.conversation_id,
+            label=str(row[1]),
+            parent_branch_id=str(row[2]) if row[2] is not None else None,
+            origin_checkpoint_id=str(row[3]) if row[3] is not None else None,
+            origin_event_id=str(row[4]) if row[4] is not None else None,
+            origin_event_seq=int(row[5]) if row[5] is not None else None,
+            created_at=str(row[6]),
+            current=bool(row[7]),
+            status="persisted",
+            head_checkpoint_id=str(row[8]) if row[8] is not None else None,
+        )
+
+    def _branch_by_id(self, branch_id: str) -> ConversationBranch | None:
+        if self._connection is None:
+            branch = self._branches.get(branch_id)
+            return replace(branch) if branch is not None else None
+        row = self._connection.execute(
+            """
+            select
+                id,
+                label,
+                parent_branch_id,
+                origin_checkpoint_id,
+                origin_event_id,
+                origin_event_seq,
+                created_at,
+                current,
+                head_checkpoint_id
+            from team_conversation_branches
+            where team_id = ? and conversation_id = ? and id = ?
+            """,
+            (self.team_id, self.conversation_id, branch_id),
+        ).fetchone()
+        return self._branch_from_row(row) if row is not None else None
+
+    def _interrupt_from_row(self, row: tuple[object, ...]) -> ConversationInterrupt:
+        raw_payload: object = json.loads(str(row[6] or "{}"))
+        raw_decisions: object = json.loads(str(row[8] or "[]"))
+        decisions = tuple(item for item in raw_decisions if is_json_object(item)) if isinstance(raw_decisions, list) else ()
+        return ConversationInterrupt(
+            id=str(row[0]),
+            team_id=self.team_id,
+            conversation_id=self.conversation_id,
+            run_id=str(row[1]) if row[1] is not None else None,
+            agent_id=str(row[2]) if row[2] is not None else None,
+            checkpoint_id=str(row[3]) if row[3] is not None else None,
+            created_at=str(row[4]),
+            kind=self._interrupt_kind(row[5]),
+            payload=raw_payload if is_json_object(raw_payload) else {},
+            status=self._interrupt_status(row[7]),
+            decisions=decisions,
+        )
+
+    def _interrupt_by_id(self, interrupt_id: str) -> ConversationInterrupt | None:
+        if self._connection is None:
+            interrupt = self._interrupts.get(interrupt_id)
+            return replace(interrupt) if interrupt is not None else None
+        row = self._connection.execute(
+            """
+            select
+                id,
+                run_id,
+                agent_id,
+                checkpoint_id,
+                created_at,
+                kind,
+                payload_json,
+                status,
+                decisions_json
+            from team_conversation_interrupts
+            where team_id = ? and conversation_id = ? and id = ?
+            """,
+            (self.team_id, self.conversation_id, interrupt_id),
+        ).fetchone()
+        return self._interrupt_from_row(row) if row is not None else None
+
+    def _ensure_column(self, table: str, column: str, definition: str) -> None:
+        if self._connection is None:
+            return
+        columns = {str(row[1]) for row in self._connection.execute(f"pragma table_info({table})").fetchall()}
+        if column not in columns:
+            self._connection.execute(f"alter table {table} add column {column} {definition}")
+
+    def _set_current_branch(self, branch_id: str | None) -> None:
+        if self._connection is None:
+            self._current_branch_id = branch_id or "branch_main"
+            for existing_id, branch in list(self._branches.items()):
+                self._branches[existing_id] = replace(branch, current=existing_id == branch_id)
+            return
+        self._connection.execute(
+            """
+            update team_conversation_branches
+            set current = 0
+            where team_id = ? and conversation_id = ?
+            """,
+            (self.team_id, self.conversation_id),
+        )
+        if branch_id is not None:
+            self._connection.execute(
+                """
+                update team_conversation_branches
+                set current = 1
+                where team_id = ? and conversation_id = ? and id = ?
+                """,
+                (self.team_id, self.conversation_id, branch_id),
+            )
+        self._connection.commit()
+
     def _delivery_status(self, value: object) -> DeliveryStatus:
         status = str(value)
         return cast(DeliveryStatus, status) if status in _DELIVERY_STATUSES else "failed"
+
+    def _interrupt_kind(self, value: object) -> ConversationInterruptKind:
+        kind = str(value)
+        return cast(ConversationInterruptKind, kind) if kind in _INTERRUPT_KINDS else "review"
+
+    def _interrupt_status(self, value: object) -> ConversationInterruptStatus:
+        status = str(value)
+        return cast(ConversationInterruptStatus, status) if status in _INTERRUPT_STATUSES else "pending"
 
     def _now(self) -> str:
         return datetime.now(timezone.utc).isoformat()

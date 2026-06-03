@@ -1,0 +1,7 @@
+{
+  "mode": "edit",
+  "edited_content": "Replace the checkpoint response with this edited instruction.",
+  "metadata": {
+    "reason": "human_edit"
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "id": "generated_ui_01",
+  "version": "studio.generated-ui.v1",
+  "root": "stack_01",
+  "elements": {
+    "stack_01": {
+      "component": "stack",
+      "children": ["metric_01", "action_01"]
+    },
+    "metric_01": {
+      "component": "metric",
+      "props": {
+        "label": "Tasks",
+        "value": 3
+      }
+    },
+    "action_01": {
+      "component": "action",
+      "props": {
+        "label": "Open task details",
+        "variant": "outline"
+      },
+      "on": {
+        "press": {
+          "action": "open_task_details",
+          "params": {
+            "task_id": "task_01"
+          }
+        }
+      }
+    }
+  },
+  "state": {},
+  "actions": {
+    "open_task_details": {
+      "description": "Open the task detail panel for a generated UI task.",
+      "input_schema": {
+        "type": "object",
+        "required": ["task_id"],
+        "properties": {
+          "task_id": {"type": "string"}
+        }
+      },
+      "confirmation_required": true,
+      "confirmation": {
+        "title": "Open task details?",
+        "message": "Studio will record this generated action attempt.",
+        "confirmLabel": "Open",
+        "cancelLabel": "Cancel"
+      },
+      "audit": "record"
+    }
+  },
+  "status": "valid",
+  "errors": [],
+  "created_at": "2026-06-01T10:00:05Z",
+  "updated_at": "2026-06-01T10:00:06Z"
+}

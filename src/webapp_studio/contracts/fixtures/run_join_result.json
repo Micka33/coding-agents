@@ -1,0 +1,6 @@
+{
+  "run_id": "run_01",
+  "cursor": "event_seq:1",
+  "replay_available": true,
+  "stream_url": "/api/studio/v1/stream?run_id=run_01"
+}

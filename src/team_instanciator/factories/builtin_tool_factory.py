@@ -48,8 +48,11 @@ class BuiltinToolFactory:
     def fetch_url(self, url: str, timeout: int = 20) -> str:
         """Fetch a URL using the Python standard library."""
 
-        with urllib.request.urlopen(url, timeout=timeout) as response:
-            data = response.read(500_000)
+        try:
+            with urllib.request.urlopen(url, timeout=timeout) as response:
+                data = response.read(500_000)
+        except Exception as error:
+            return json.dumps({"url": url, "content": "", "error": str(error)}, ensure_ascii=False)
         return data.decode("utf-8", errors="replace")
 
     def write_file(self, path: str, content: str) -> str:

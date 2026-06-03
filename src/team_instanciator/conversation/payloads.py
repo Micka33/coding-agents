@@ -21,6 +21,7 @@ class ConversationStateDict(TypedDict):
     team_id: str
     conversation_id: str
     participants: list[str]
+    participant_aliases: NotRequired[dict[str, list[str]]]
     runtime: ConversationRuntimeStateDict
     events: list[ConversationEventDict]
     agent_states: list[AgentDeliveryStateDict]

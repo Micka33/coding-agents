@@ -1,0 +1,9 @@
+{
+  "code": "unsupported_feature",
+  "message": "Branch creation is not supported yet.",
+  "field": null,
+  "retryable": false,
+  "details": {
+    "capability": "branching"
+  }
+}

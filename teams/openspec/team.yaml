@@ -1,0 +1,158 @@
+schema_version: 1
+id: openspec
+description: A specification-shaping team for OpenSpec-driven project planning.
+
+defaults:
+  root_dir: "."
+  model:
+    env: CODING_AGENTS_MODEL
+    default: openai:gpt-5.5
+  reasoning_effort:
+    env: CODING_AGENTS_REASONING_EFFORT
+    default: xhigh
+  checkpointer:
+    env: CODING_AGENTS_CHECKPOINTER
+    default: sqlite
+    sqlite_path:
+      env: CODING_AGENTS_SQLITE_CHECKPOINT_PATH
+      default: .coding-agents/openspec-checkpoints.sqlite
+    postgres_url:
+      env:
+        - CODING_AGENTS_POSTGRES_URL
+        - DATABASE_URL
+      default: null
+  execution_backend:
+    env: CODING_AGENTS_EXECUTION
+    default: local
+  memory:
+    error_when_missing: false
+    candidates:
+      - /AGENTS.md
+      - /openspec/config.yaml
+
+conversation:
+  mentions:
+    max_parallel_agents: 2
+    max_cascade_turns: null
+  identity_refresh_after_tokens: 10000
+  human_input:
+    default_targets:
+      - openspec-guide
+
+custom_tools:
+  scoped_read_tools:
+    factory: src.team_instanciator.tools.scoped_read_tools_factory:create_scoped_read_tools
+    exposes:
+      - ls
+      - read_file
+      - glob
+      - grep
+
+toolsets:
+  web:
+    - web_search
+    - fetch_url
+  scoped_read_tools:
+    - custom: scoped_read_tools
+  write:
+    - write_file
+    - edit_file
+  shell:
+    - execute
+
+agents:
+  openspec-guide:
+    kind: deepagent
+    config: ./agents/openspec-guide.mdc
+    entrypoint: true
+    conversation:
+      aliases:
+        - openspec
+        - spec-guide
+        - guide
+
+  product-strategist:
+    kind: deepagent
+    config: ./agents/product-strategist.mdc
+    conversation:
+      aliases:
+        - product
+        - product-strategist
+
+  architecture-advisor:
+    kind: deepagent
+    config: ./agents/architecture-advisor.mdc
+    conversation:
+      aliases:
+        - architect
+        - architecture
+        - architecture-advisor
+
+  change-reviewer:
+    kind: deepagent
+    config: ./agents/change-reviewer.mdc
+    conversation:
+      aliases:
+        - reviewer
+        - change-reviewer
+
+  change-writer:
+    kind: subagent
+    config: ./agents/change-writer.mdc
+
+relations:
+  - from: openspec-guide
+    to: product-strategist
+    relation: tool
+    tool_name: ask_product_strategist
+    input_schema:
+      message: string
+    description: >
+      Ask the resident product strategist about user goals, product scope,
+      requirements, non-goals, acceptance criteria, and product risks.
+
+  - from: openspec-guide
+    to: architecture-advisor
+    relation: tool
+    tool_name: ask_architecture_advisor
+    input_schema:
+      message: string
+    description: >
+      Ask the resident architecture advisor about architecture, technical
+      trade-offs, scalability, reliability, security, dependencies, migration,
+      and task decomposition.
+
+  - from: openspec-guide
+    to: change-reviewer
+    relation: tool
+    tool_name: ask_change_reviewer
+    input_schema:
+      message: string
+    description: >
+      Ask the resident change reviewer to compare OpenSpec artifacts against
+      the user's agreed intent, find mismatches, and decide whether user
+      confirmation is required before proceeding.
+
+  - from: openspec-guide
+    to: change-writer
+    relation: subagent
+
+  - from: product-strategist
+    to: architecture-advisor
+    relation: tool
+    tool_name: ask_architecture_advisor
+    input_schema:
+      message: string
+    description: >
+      Ask the architecture advisor when product choices imply technical
+      constraints, risk, or scalability trade-offs.
+
+  - from: change-writer
+    to: change-reviewer
+    relation: tool
+    tool_name: ask_change_reviewer
+    input_schema:
+      message: string
+    description: >
+      Ask the reviewer to check generated OpenSpec artifacts before returning
+      them to the guide.

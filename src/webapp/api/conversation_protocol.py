@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import Protocol, TypeAlias
 
 from src.type_defs import JsonObject
@@ -38,6 +38,7 @@ class WebConversation(Protocol):
         *,
         author_id: str = "human",
         files: Iterable[AttachmentInput] | None = None,
+        metadata: Mapping[str, object] | None = None,
         wait: bool = True,
     ) -> ConversationAppendResult:
         ...

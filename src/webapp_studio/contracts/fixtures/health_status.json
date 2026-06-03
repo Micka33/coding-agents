@@ -1,0 +1,10 @@
+{
+  "status": "ok",
+  "backend": "webapp_studio",
+  "api_version": "studio.v1",
+  "started_at": "2026-06-01T10:00:00Z",
+  "versions": {
+    "fastapi": "0.136.3",
+    "pydantic": "2.13.4"
+  }
+}

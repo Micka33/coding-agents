@@ -86,6 +86,11 @@ class BuiltinToolFactoryTests(unittest.TestCase):
 
             with patch("src.team_instanciator.factories.builtin_tool_factory.urllib.request.urlopen", return_value=UrlOpenResponse()):
                 self.assertEqual(factory.fetch_url("https://example.test"), "hello")
+            with patch("src.team_instanciator.factories.builtin_tool_factory.urllib.request.urlopen", side_effect=RuntimeError("HTTP Error 403: Forbidden")):
+                fetch_error = json.loads(factory.fetch_url("https://blocked.example.test"))
+            self.assertEqual(fetch_error["url"], "https://blocked.example.test")
+            self.assertEqual(fetch_error["content"], "")
+            self.assertEqual(fetch_error["error"], "HTTP Error 403: Forbidden")
 
             self.assertEqual(factory.write_file("/nested/file.txt", "alpha beta"), "Wrote nested/file.txt.")
             self.assertEqual((root / "nested" / "file.txt").read_text(encoding="utf-8"), "alpha beta")
