@@ -9,8 +9,10 @@ from datetime import datetime, timezone
 from typing import cast
 
 from src.type_defs import JsonMapping, is_json_object
+from src.team_instanciator.runtime.thread_forker import ThreadForker
 
 from .agent_delivery_state import AgentDeliveryState
+from .conversation_branch_thread import BranchThreadStatus, ConversationBranchThread
 from .conversation_branch import ConversationBranch
 from .conversation_delivery import ConversationDelivery, DeliveryStatus
 from .conversation_event import AuthorKind, ConversationEvent
@@ -22,6 +24,7 @@ from .conversation_interrupt import (
     ConversationInterruptStatus,
 )
 from .conversation_runtime_state import ConversationRuntimeState
+from .thread_frontier import ThreadFrontier, ThreadFrontierBoundary
 
 
 class _UnsetType:
@@ -41,6 +44,8 @@ _DELIVERY_STATUSES: tuple[DeliveryStatus, ...] = (
 _INTERRUPT_DECISIONS: tuple[ConversationInterruptDecision, ...] = ("approve", "reject", "edit", "respond")
 _INTERRUPT_KINDS: tuple[ConversationInterruptKind, ...] = ("approve", "edit", "respond", "review")
 _INTERRUPT_STATUSES: tuple[ConversationInterruptStatus, ...] = ("pending", "resolved")
+_BRANCH_THREAD_STATUSES: tuple[BranchThreadStatus, ...] = ("active", "orphaned")
+_THREAD_FRONTIER_BOUNDARIES: tuple[ThreadFrontierBoundary, ...] = ("before", "after")
 _HISTORY_SCHEMA_VERSION = "branching.v1"
 
 
@@ -62,6 +67,8 @@ class ConversationStore:
         self._agent_states: dict[tuple[str, str], AgentDeliveryState] = {}
         self._deliveries: list[ConversationDelivery] = []
         self._branches: dict[str, ConversationBranch] = {}
+        self._branch_threads: dict[tuple[str, str], ConversationBranchThread] = {}
+        self._thread_frontiers: list[ThreadFrontier] = []
         self._interrupts: dict[str, ConversationInterrupt] = {}
         self._current_branch_id = "branch_main"
         self._runtime_state = ConversationRuntimeState(
@@ -637,6 +644,272 @@ class ConversationStore:
             self._connection.commit()
             return delivery
 
+    def ensure_branch_thread(
+        self,
+        *,
+        branch_id: str | None,
+        logical_thread_key: str,
+        physical_thread_id: str,
+        created_by_commit_id: str | None = None,
+    ) -> ConversationBranchThread:
+        with self._lock:
+            resolved_branch_id = self._resolved_branch_id(branch_id)
+            existing = self.get_branch_thread(branch_id=resolved_branch_id, logical_thread_key=logical_thread_key)
+            if existing is not None:
+                return existing
+            forked_from_branch_id, forked_from_thread_id, forked_from_checkpoint_id = self._fork_branch_thread_if_possible(
+                branch_id=resolved_branch_id,
+                logical_thread_key=logical_thread_key,
+                target_physical_thread_id=physical_thread_id,
+            )
+            branch_thread = ConversationBranchThread(
+                team_id=self.team_id,
+                conversation_id=self.conversation_id,
+                branch_id=resolved_branch_id,
+                logical_thread_key=logical_thread_key,
+                physical_thread_id=physical_thread_id,
+                forked_from_branch_id=forked_from_branch_id,
+                forked_from_thread_id=forked_from_thread_id,
+                forked_from_checkpoint_id=forked_from_checkpoint_id,
+                created_by_commit_id=created_by_commit_id,
+            )
+            self._save_branch_thread(branch_thread)
+            return branch_thread
+
+    def get_branch_thread(self, *, branch_id: str, logical_thread_key: str) -> ConversationBranchThread | None:
+        with self._lock:
+            if self._connection is None:
+                thread = self._branch_threads.get((branch_id, logical_thread_key))
+                return replace(thread) if thread is not None else None
+            row = self._connection.execute(
+                """
+                select
+                    branch_id,
+                    logical_thread_key,
+                    physical_thread_id,
+                    forked_from_branch_id,
+                    forked_from_thread_id,
+                    forked_from_checkpoint_id,
+                    created_by_commit_id,
+                    status
+                from team_conversation_branch_threads
+                where team_id = ? and conversation_id = ? and branch_id = ? and logical_thread_key = ?
+                """,
+                (self.team_id, self.conversation_id, branch_id, logical_thread_key),
+            ).fetchone()
+            return self._branch_thread_from_row(row) if row is not None else None
+
+    def list_branch_threads(self, *, branch_id: str | None | _UnsetType = _UNSET) -> list[ConversationBranchThread]:
+        with self._lock:
+            resolved_branch_id = self.current_branch_id() if branch_id is _UNSET else branch_id
+            if self._connection is None:
+                threads = [
+                    thread
+                    for (thread_branch_id, _logical_key), thread in self._branch_threads.items()
+                    if resolved_branch_id is None or thread_branch_id == resolved_branch_id
+                ]
+                return [replace(thread) for thread in sorted(threads, key=lambda item: (item.branch_id, item.logical_thread_key))]
+            clauses = ["team_id = ?", "conversation_id = ?"]
+            params: list[object] = [self.team_id, self.conversation_id]
+            if resolved_branch_id is not None:
+                clauses.append("branch_id = ?")
+                params.append(resolved_branch_id)
+            rows = self._connection.execute(
+                f"""
+                select
+                    branch_id,
+                    logical_thread_key,
+                    physical_thread_id,
+                    forked_from_branch_id,
+                    forked_from_thread_id,
+                    forked_from_checkpoint_id,
+                    created_by_commit_id,
+                    status
+                from team_conversation_branch_threads
+                where {" and ".join(clauses)}
+                order by branch_id asc, logical_thread_key asc
+                """,
+                tuple(params),
+            ).fetchall()
+            return [self._branch_thread_from_row(row) for row in rows]
+
+    def record_thread_frontier(
+        self,
+        *,
+        frontier_id: str,
+        branch_id: str,
+        event_id: str,
+        event_boundary: ThreadFrontierBoundary,
+        logical_thread_key: str,
+        physical_thread_id: str,
+        checkpoint_id: str | None,
+        parent_logical_thread_key: str | None = None,
+        usable_for_fork: bool = False,
+        usable_for_continue: bool = False,
+    ) -> ThreadFrontier:
+        frontier = ThreadFrontier(
+            frontier_id=frontier_id,
+            team_id=self.team_id,
+            conversation_id=self.conversation_id,
+            branch_id=branch_id,
+            event_id=event_id,
+            event_boundary=event_boundary,
+            logical_thread_key=logical_thread_key,
+            physical_thread_id=physical_thread_id,
+            checkpoint_id=checkpoint_id,
+            parent_logical_thread_key=parent_logical_thread_key,
+            usable_for_fork=usable_for_fork,
+            usable_for_continue=usable_for_continue,
+            created_at=self._now(),
+        )
+        with self._lock:
+            if self._connection is None:
+                self._thread_frontiers.append(frontier)
+                return frontier
+            self._connection.execute(
+                """
+                insert into team_conversation_thread_frontiers (
+                    team_id,
+                    conversation_id,
+                    frontier_id,
+                    branch_id,
+                    event_id,
+                    event_boundary,
+                    logical_thread_key,
+                    physical_thread_id,
+                    checkpoint_id,
+                    parent_logical_thread_key,
+                    usable_for_fork,
+                    usable_for_continue,
+                    created_at
+                )
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                on conflict(team_id, conversation_id, frontier_id, event_boundary, logical_thread_key) do update set
+                    branch_id = excluded.branch_id,
+                    event_id = excluded.event_id,
+                    physical_thread_id = excluded.physical_thread_id,
+                    checkpoint_id = excluded.checkpoint_id,
+                    parent_logical_thread_key = excluded.parent_logical_thread_key,
+                    usable_for_fork = excluded.usable_for_fork,
+                    usable_for_continue = excluded.usable_for_continue,
+                    created_at = excluded.created_at
+                """,
+                (
+                    frontier.team_id,
+                    frontier.conversation_id,
+                    frontier.frontier_id,
+                    frontier.branch_id,
+                    frontier.event_id,
+                    frontier.event_boundary,
+                    frontier.logical_thread_key,
+                    frontier.physical_thread_id,
+                    frontier.checkpoint_id,
+                    frontier.parent_logical_thread_key,
+                    int(frontier.usable_for_fork),
+                    int(frontier.usable_for_continue),
+                    frontier.created_at,
+                ),
+            )
+            self._connection.commit()
+            return frontier
+
+    def get_thread_frontier(
+        self,
+        *,
+        frontier_id: str,
+        branch_id: str,
+        logical_thread_key: str,
+        event_boundary: ThreadFrontierBoundary = "after",
+    ) -> ThreadFrontier | None:
+        with self._lock:
+            if self._connection is None:
+                for frontier in reversed(self._thread_frontiers):
+                    if (
+                        frontier.frontier_id == frontier_id
+                        and frontier.branch_id == branch_id
+                        and frontier.logical_thread_key == logical_thread_key
+                        and frontier.event_boundary == event_boundary
+                    ):
+                        return replace(frontier)
+                return None
+            row = self._connection.execute(
+                """
+                select
+                    frontier_id,
+                    branch_id,
+                    event_id,
+                    event_boundary,
+                    logical_thread_key,
+                    physical_thread_id,
+                    checkpoint_id,
+                    parent_logical_thread_key,
+                    usable_for_fork,
+                    usable_for_continue,
+                    created_at
+                from team_conversation_thread_frontiers
+                where team_id = ?
+                  and conversation_id = ?
+                  and frontier_id = ?
+                  and branch_id = ?
+                  and logical_thread_key = ?
+                  and event_boundary = ?
+                """,
+                (self.team_id, self.conversation_id, frontier_id, branch_id, logical_thread_key, event_boundary),
+            ).fetchone()
+            return self._thread_frontier_from_row(row) if row is not None else None
+
+    def list_thread_frontiers(self, *, branch_id: str | None | _UnsetType = _UNSET) -> list[ThreadFrontier]:
+        with self._lock:
+            resolved_branch_id = self.current_branch_id() if branch_id is _UNSET else branch_id
+            if self._connection is None:
+                frontiers = [
+                    frontier
+                    for frontier in self._thread_frontiers
+                    if resolved_branch_id is None or frontier.branch_id == resolved_branch_id
+                ]
+                return [replace(frontier) for frontier in sorted(frontiers, key=lambda item: (item.created_at, item.frontier_id))]
+            clauses = ["team_id = ?", "conversation_id = ?"]
+            params: list[object] = [self.team_id, self.conversation_id]
+            if resolved_branch_id is not None:
+                clauses.append("branch_id = ?")
+                params.append(resolved_branch_id)
+            rows = self._connection.execute(
+                f"""
+                select
+                    frontier_id,
+                    branch_id,
+                    event_id,
+                    event_boundary,
+                    logical_thread_key,
+                    physical_thread_id,
+                    checkpoint_id,
+                    parent_logical_thread_key,
+                    usable_for_fork,
+                    usable_for_continue,
+                    created_at
+                from team_conversation_thread_frontiers
+                where {" and ".join(clauses)}
+                order by created_at asc, frontier_id asc, logical_thread_key asc
+                """,
+                tuple(params),
+            ).fetchall()
+            return [self._thread_frontier_from_row(row) for row in rows]
+
+    def latest_checkpoint_id(self, physical_thread_id: str, *, checkpoint_ns: str = "") -> str | None:
+        if self._connection is None or not self._table_exists("checkpoints"):
+            return None
+        row = self._connection.execute(
+            """
+            select checkpoint_id
+            from checkpoints
+            where thread_id = ? and checkpoint_ns = ?
+            order by checkpoint_id desc
+            limit 1
+            """,
+            (physical_thread_id, checkpoint_ns),
+        ).fetchone()
+        return str(row[0]) if row is not None else None
+
     def create_branch(
         self,
         *,
@@ -1079,6 +1352,43 @@ class ConversationStore:
         )
         connection.execute(
             """
+            create table if not exists team_conversation_branch_threads (
+                team_id text not null,
+                conversation_id text not null,
+                branch_id text not null,
+                logical_thread_key text not null,
+                physical_thread_id text not null,
+                forked_from_branch_id text,
+                forked_from_thread_id text,
+                forked_from_checkpoint_id text,
+                created_by_commit_id text,
+                status text not null,
+                primary key (team_id, conversation_id, branch_id, logical_thread_key)
+            )
+            """
+        )
+        connection.execute(
+            """
+            create table if not exists team_conversation_thread_frontiers (
+                team_id text not null,
+                conversation_id text not null,
+                frontier_id text not null,
+                branch_id text not null,
+                event_id text not null,
+                event_boundary text not null,
+                logical_thread_key text not null,
+                physical_thread_id text not null,
+                checkpoint_id text,
+                parent_logical_thread_key text,
+                usable_for_fork integer not null,
+                usable_for_continue integer not null,
+                created_at text not null,
+                primary key (team_id, conversation_id, frontier_id, event_boundary, logical_thread_key)
+            )
+            """
+        )
+        connection.execute(
+            """
             create table if not exists team_conversation_interrupts (
                 team_id text not null,
                 conversation_id text not null,
@@ -1217,6 +1527,106 @@ class ConversationStore:
             head_checkpoint_id=str(row[8]) if row[8] is not None else None,
         )
 
+    def _branch_thread_from_row(self, row: tuple[object, ...]) -> ConversationBranchThread:
+        return ConversationBranchThread(
+            team_id=self.team_id,
+            conversation_id=self.conversation_id,
+            branch_id=str(row[0]),
+            logical_thread_key=str(row[1]),
+            physical_thread_id=str(row[2]),
+            forked_from_branch_id=str(row[3]) if row[3] is not None else None,
+            forked_from_thread_id=str(row[4]) if row[4] is not None else None,
+            forked_from_checkpoint_id=str(row[5]) if row[5] is not None else None,
+            created_by_commit_id=str(row[6]) if row[6] is not None else None,
+            status=self._branch_thread_status(row[7]),
+        )
+
+    def _thread_frontier_from_row(self, row: tuple[object, ...]) -> ThreadFrontier:
+        return ThreadFrontier(
+            frontier_id=str(row[0]),
+            team_id=self.team_id,
+            conversation_id=self.conversation_id,
+            branch_id=str(row[1]),
+            event_id=str(row[2]),
+            event_boundary=self._thread_frontier_boundary(row[3]),
+            logical_thread_key=str(row[4]),
+            physical_thread_id=str(row[5]),
+            checkpoint_id=str(row[6]) if row[6] is not None else None,
+            parent_logical_thread_key=str(row[7]) if row[7] is not None else None,
+            usable_for_fork=bool(row[8]),
+            usable_for_continue=bool(row[9]),
+            created_at=str(row[10]),
+        )
+
+    def _save_branch_thread(self, branch_thread: ConversationBranchThread) -> None:
+        if self._connection is None:
+            self._branch_threads[(branch_thread.branch_id, branch_thread.logical_thread_key)] = replace(branch_thread)
+            return
+        self._connection.execute(
+            """
+            insert into team_conversation_branch_threads (
+                team_id,
+                conversation_id,
+                branch_id,
+                logical_thread_key,
+                physical_thread_id,
+                forked_from_branch_id,
+                forked_from_thread_id,
+                forked_from_checkpoint_id,
+                created_by_commit_id,
+                status
+            )
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            on conflict(team_id, conversation_id, branch_id, logical_thread_key) do update set
+                physical_thread_id = excluded.physical_thread_id,
+                forked_from_branch_id = excluded.forked_from_branch_id,
+                forked_from_thread_id = excluded.forked_from_thread_id,
+                forked_from_checkpoint_id = excluded.forked_from_checkpoint_id,
+                created_by_commit_id = excluded.created_by_commit_id,
+                status = excluded.status
+            """,
+            (
+                branch_thread.team_id,
+                branch_thread.conversation_id,
+                branch_thread.branch_id,
+                branch_thread.logical_thread_key,
+                branch_thread.physical_thread_id,
+                branch_thread.forked_from_branch_id,
+                branch_thread.forked_from_thread_id,
+                branch_thread.forked_from_checkpoint_id,
+                branch_thread.created_by_commit_id,
+                branch_thread.status,
+            ),
+        )
+        self._connection.commit()
+
+    def _fork_branch_thread_if_possible(
+        self,
+        *,
+        branch_id: str,
+        logical_thread_key: str,
+        target_physical_thread_id: str,
+    ) -> tuple[str | None, str | None, str | None]:
+        if branch_id == "branch_main" or self._connection is None:
+            return None, None, None
+        branch = self._branch_by_id(branch_id)
+        if branch is None or not branch.origin_checkpoint_id:
+            return None, None, None
+        parent_branch_id = branch.parent_branch_id or "branch_main"
+        source_frontier = self.get_thread_frontier(
+            frontier_id=branch.origin_checkpoint_id,
+            branch_id=parent_branch_id,
+            logical_thread_key=logical_thread_key,
+        )
+        if source_frontier is None or not source_frontier.usable_for_fork or not source_frontier.checkpoint_id:
+            return None, None, None
+        ThreadForker(self._connection).fork_checkpoint(
+            source_physical_thread_id=source_frontier.physical_thread_id,
+            source_checkpoint_id=source_frontier.checkpoint_id,
+            target_physical_thread_id=target_physical_thread_id,
+        )
+        return source_frontier.branch_id, source_frontier.physical_thread_id, source_frontier.checkpoint_id
+
     def _branch_by_id(self, branch_id: str) -> ConversationBranch | None:
         if self._connection is None:
             branch = self._branches.get(branch_id)
@@ -1332,6 +1742,8 @@ class ConversationStore:
             "team_conversation_deliveries",
             "team_conversation_runtime_state",
             "team_conversation_branches",
+            "team_conversation_branch_threads",
+            "team_conversation_thread_frontiers",
             "team_conversation_interrupts",
         )
         for table in tables:
@@ -1510,6 +1922,23 @@ class ConversationStore:
     def _delivery_status(self, value: object) -> DeliveryStatus:
         status = str(value)
         return cast(DeliveryStatus, status) if status in _DELIVERY_STATUSES else "failed"
+
+    def _branch_thread_status(self, value: object) -> BranchThreadStatus:
+        status = str(value)
+        return cast(BranchThreadStatus, status) if status in _BRANCH_THREAD_STATUSES else "orphaned"
+
+    def _thread_frontier_boundary(self, value: object) -> ThreadFrontierBoundary:
+        boundary = str(value)
+        return cast(ThreadFrontierBoundary, boundary) if boundary in _THREAD_FRONTIER_BOUNDARIES else "after"
+
+    def _table_exists(self, table_name: str) -> bool:
+        if self._connection is None:
+            return False
+        row = self._connection.execute(
+            "select 1 from sqlite_master where type = 'table' and name = ?",
+            (table_name,),
+        ).fetchone()
+        return row is not None
 
     def _interrupt_kind(self, value: object) -> ConversationInterruptKind:
         kind = str(value)

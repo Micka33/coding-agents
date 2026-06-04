@@ -687,6 +687,78 @@ class ConversationRuntimeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "only human"):
             runtime.edit_human_message(current_events[-1].id, "@agent-b invalid")
 
+    def test_mention_aware_team_forks_mention_thread_from_prefork_frontier_checkpoint(self) -> None:
+        connection = sqlite3.connect(":memory:", check_same_thread=False)
+        self._create_checkpoint_tables(connection)
+        checkpoint_lock = threading.Lock()
+
+        def write_checkpoint(_graph: FakeGraph, _input: Any, config: Any) -> None:
+            thread_id = config["configurable"]["thread_id"]
+            with checkpoint_lock:
+                next_index = connection.execute("select count(*) from checkpoints").fetchone()[0] + 1
+                checkpoint_id = f"checkpoint-{next_index}"
+                parent_checkpoint_id = connection.execute(
+                    """
+                    select checkpoint_id
+                    from checkpoints
+                    where thread_id = ? and checkpoint_ns = ''
+                    order by checkpoint_id desc
+                    limit 1
+                    """,
+                    (thread_id,),
+                ).fetchone()
+                self._insert_checkpoint(
+                    connection,
+                    thread_id=thread_id,
+                    checkpoint_id=checkpoint_id,
+                    parent_checkpoint_id=parent_checkpoint_id[0] if parent_checkpoint_id is not None else None,
+                )
+                self._insert_write(connection, thread_id=thread_id, checkpoint_id=checkpoint_id, value=f"write-{checkpoint_id}")
+                connection.commit()
+
+        graph = FakeGraph("checkpointed reply", callback=write_checkpoint)
+        runtime = self._conversation_runtime({"agent-b": graph}, connection=connection)
+
+        runtime.append_human_message("@agent-b first", author_id="mickael")
+        original_second = runtime.append_human_message("@agent-b second", author_id="mickael").event
+        runtime.edit_human_message(original_second.id, "@agent-b edited", author_id="mickael")
+
+        main_thread_id = "thread:branch:branch_main:mention:agent-b"
+        branch_thread_id = graph.calls[2][1]["configurable"]["thread_id"]
+        branch_id = runtime.store.current_branch_id()
+        branch_thread = runtime.store.list_branch_threads(branch_id=branch_id)[0]
+        main_frontiers = runtime.store.list_thread_frontiers(branch_id="branch_main")
+        branch_checkpoints = connection.execute(
+            """
+            select checkpoint_id, parent_checkpoint_id
+            from checkpoints
+            where thread_id = ?
+            order by checkpoint_id asc
+            """,
+            (branch_thread_id,),
+        ).fetchall()
+        branch_writes = connection.execute(
+            """
+            select checkpoint_id, value
+            from writes
+            where thread_id = ?
+            order by checkpoint_id asc
+            """,
+            (branch_thread_id,),
+        ).fetchall()
+
+        self.assertEqual([frontier.checkpoint_id for frontier in main_frontiers], ["checkpoint-1", "checkpoint-2"])
+        self.assertEqual(branch_thread.physical_thread_id, branch_thread_id)
+        self.assertEqual(branch_thread.logical_thread_key, "thread:mention:agent-b")
+        self.assertEqual(branch_thread.forked_from_branch_id, "branch_main")
+        self.assertEqual(branch_thread.forked_from_thread_id, main_thread_id)
+        self.assertEqual(branch_thread.forked_from_checkpoint_id, "checkpoint-1")
+        self.assertEqual(branch_checkpoints[0], ("checkpoint-1", None))
+        self.assertEqual(branch_checkpoints[1][1], "checkpoint-1")
+        self.assertNotEqual(branch_checkpoints[1][0], "checkpoint-2")
+        self.assertEqual(branch_writes[0], ("checkpoint-1", b"write-checkpoint-1"))
+        self.assertEqual(branch_writes[1][0], branch_checkpoints[1][0])
+
     def test_mention_aware_team_identity_uses_team_aliases_and_agent_descriptions(self) -> None:
         graph = FakeGraph("answer")
         team_config = team(
@@ -1029,6 +1101,86 @@ class ConversationRuntimeTests(unittest.TestCase):
                 thread_id_factory=ThreadIdFactory(),
                 checkpoint_metadata_factory=CheckpointMetadataFactory(),
             )
+
+    def _create_checkpoint_tables(self, connection: sqlite3.Connection) -> None:
+        connection.execute(
+            """
+            create table checkpoints (
+                thread_id text not null,
+                checkpoint_ns text not null default '',
+                checkpoint_id text not null,
+                parent_checkpoint_id text,
+                type text,
+                checkpoint blob,
+                metadata blob,
+                primary key (thread_id, checkpoint_ns, checkpoint_id)
+            )
+            """
+        )
+        connection.execute(
+            """
+            create table writes (
+                thread_id text not null,
+                checkpoint_ns text not null default '',
+                checkpoint_id text not null,
+                task_id text not null,
+                idx integer not null,
+                channel text not null,
+                type text,
+                value blob,
+                primary key (thread_id, checkpoint_ns, checkpoint_id, task_id, idx)
+            )
+            """
+        )
+
+    def _insert_checkpoint(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        thread_id: str,
+        checkpoint_id: str,
+        parent_checkpoint_id: str | None,
+    ) -> None:
+        connection.execute(
+            """
+            insert into checkpoints (
+                thread_id,
+                checkpoint_ns,
+                checkpoint_id,
+                parent_checkpoint_id,
+                type,
+                checkpoint,
+                metadata
+            )
+            values (?, '', ?, ?, 'bytes', ?, ?)
+            """,
+            (thread_id, checkpoint_id, parent_checkpoint_id, b"checkpoint", b"metadata"),
+        )
+
+    def _insert_write(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        thread_id: str,
+        checkpoint_id: str,
+        value: str,
+    ) -> None:
+        connection.execute(
+            """
+            insert into writes (
+                thread_id,
+                checkpoint_ns,
+                checkpoint_id,
+                task_id,
+                idx,
+                channel,
+                type,
+                value
+            )
+            values (?, '', ?, 'task', 0, 'messages', 'bytes', ?)
+            """,
+            (thread_id, checkpoint_id, value.encode("utf-8")),
+        )
 
     def _conversation_runtime(
         self,

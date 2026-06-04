@@ -12,6 +12,7 @@ from src.webapp_studio.backend.contracts.activity_snapshot import ActivitySnapsh
 from src.webapp_studio.backend.contracts.agent_delivery_state_dto import AgentDeliveryStateDto
 from src.webapp_studio.backend.contracts.branch_summary import BranchSummary
 from src.webapp_studio.backend.contracts.checkpoint_summary import CheckpointSummary
+from src.webapp_studio.backend.contracts.conversation_branch_thread_dto import ConversationBranchThreadDto
 from src.webapp_studio.backend.contracts.conversation_delivery_dto import ConversationDeliveryDto
 from src.webapp_studio.backend.contracts.conversation_event_dto import ConversationEventDto
 from src.webapp_studio.backend.contracts.conversation_snapshot import ConversationSnapshot
@@ -24,6 +25,7 @@ from src.webapp_studio.backend.contracts.queue_item import QueueItem
 from src.webapp_studio.backend.contracts.run_summary import RunSummary
 from src.webapp_studio.backend.contracts.runtime_settings import RuntimeSettings
 from src.webapp_studio.backend.contracts.studio_state import StudioState
+from src.webapp_studio.backend.contracts.thread_frontier_dto import ThreadFrontierDto
 
 
 class StudioStateFactory:
@@ -46,6 +48,8 @@ class StudioStateFactory:
             events=[ConversationEventDto.model_validate(item) for item in visible_state.get("events", [])],
             deliveries=deliveries,
             agent_states=agent_states,
+            branch_threads=[ConversationBranchThreadDto.model_validate(item) for item in visible_state.get("branch_threads", [])],
+            thread_frontiers=[ThreadFrontierDto.model_validate(item) for item in visible_state.get("thread_frontiers", [])],
         )
         checkpoint_list = checkpoints or []
         history = HistorySnapshot(

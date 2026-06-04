@@ -5,9 +5,11 @@ from typing import NotRequired, TypedDict
 from src.type_defs import JsonValue
 
 from .agent_delivery_state import AgentDeliveryStateDict
+from .conversation_branch_thread import ConversationBranchThreadDict
 from .conversation_delivery import ConversationDeliveryDict
 from .conversation_event import ConversationEventDict
 from .conversation_runtime_state import ConversationRuntimeStateDict
+from .thread_frontier import ThreadFrontierDict
 
 
 class MessageSummaryDict(TypedDict):
@@ -27,6 +29,8 @@ class ConversationStateDict(TypedDict):
     events: list[ConversationEventDict]
     agent_states: list[AgentDeliveryStateDict]
     deliveries: list[ConversationDeliveryDict]
+    branch_threads: list[ConversationBranchThreadDict]
+    thread_frontiers: list[ThreadFrontierDict]
     activities: list[AgentDeliveryStateDict]
     activity: AgentDeliveryStateDict | None
     private_thread_id: NotRequired[str]

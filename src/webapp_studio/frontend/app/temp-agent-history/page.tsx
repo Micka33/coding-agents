@@ -122,6 +122,8 @@ const studioState: StudioState = {
         token_estimate_since_identity_refresh: 620,
       },
     ],
+    branch_threads: [],
+    thread_frontiers: [],
   },
   activity: {
     active_agent_ids: [],

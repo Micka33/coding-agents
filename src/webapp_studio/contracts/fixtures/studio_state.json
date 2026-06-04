@@ -35,6 +35,8 @@
         }
       }
     ],
+    "branch_threads": [],
+    "thread_frontiers": [],
     "deliveries": [],
     "agent_states": [
       {

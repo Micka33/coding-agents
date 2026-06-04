@@ -286,11 +286,46 @@ export const ActivitySnapshotSchema = z
   })
   .passthrough()
 
+export const ConversationBranchThreadSchema = z
+  .object({
+    team_id: z.string(),
+    conversation_id: z.string(),
+    branch_id: z.string(),
+    logical_thread_key: z.string(),
+    physical_thread_id: z.string(),
+    forked_from_branch_id: z.string().nullable().default(null),
+    forked_from_thread_id: z.string().nullable().default(null),
+    forked_from_checkpoint_id: z.string().nullable().default(null),
+    created_by_commit_id: z.string().nullable().default(null),
+    status: z.enum(["active", "orphaned"]).default("active"),
+  })
+  .passthrough()
+
+export const ThreadFrontierSchema = z
+  .object({
+    frontier_id: z.string(),
+    team_id: z.string(),
+    conversation_id: z.string(),
+    branch_id: z.string(),
+    event_id: z.string(),
+    event_boundary: z.enum(["before", "after"]),
+    logical_thread_key: z.string(),
+    physical_thread_id: z.string(),
+    checkpoint_id: z.string().nullable().default(null),
+    parent_logical_thread_key: z.string().nullable().default(null),
+    usable_for_fork: z.boolean().default(false),
+    usable_for_continue: z.boolean().default(false),
+    created_at: z.string(),
+  })
+  .passthrough()
+
 export const ConversationSnapshotSchema = z
   .object({
     events: z.array(ConversationEventSchema),
     deliveries: z.array(ConversationDeliverySchema),
     agent_states: z.array(AgentDeliveryStateSchema),
+    branch_threads: z.array(ConversationBranchThreadSchema).default([]),
+    thread_frontiers: z.array(ThreadFrontierSchema).default([]),
   })
   .passthrough()
 

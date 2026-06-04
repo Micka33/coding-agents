@@ -123,10 +123,18 @@ class MentionRouter:
         run_id = f"run_{uuid.uuid4().hex}"
         self._store.mark_run_started(agent_id, run_id=run_id, snapshot_seq=snapshot_seq, branch_id=branch_id)
         target = self._team.agents[agent_id]
-        thread_id = self._thread_id_factory.mention(
+        proposed_thread_id = self._thread_id_factory.mention(
             self._thread_id_factory.branch(self._root_thread_id, branch_id),
             agent_id,
         )
+        logical_thread_key = self._thread_id_factory.logical_thread_key(proposed_thread_id)
+        branch_thread = self._store.ensure_branch_thread(
+            branch_id=branch_id,
+            logical_thread_key=logical_thread_key,
+            physical_thread_id=proposed_thread_id,
+            created_by_commit_id=run_id,
+        )
+        thread_id = branch_thread.physical_thread_id
 
         try:
             sync = self._sync_builder.build(target=target, state=state, events=events)
@@ -154,7 +162,13 @@ class MentionRouter:
                 {"messages": sync.messages},
                 config=self._metadata_injector.inject(
                     {"configurable": {"thread_id": thread_id}},
-                    self._checkpoint_metadata_factory.mention(self._team, target),
+                    {
+                        **self._checkpoint_metadata_factory.mention(self._team, target),
+                        "branch_id": branch_id,
+                        "logical_thread_key": logical_thread_key,
+                        "physical_thread_id": thread_id,
+                        "run_id": run_id,
+                    },
                 ),
             )
             if self._store.is_stop_requested(agent_id, run_id, branch_id=branch_id):
@@ -255,6 +269,20 @@ class MentionRouter:
             source_thread_id=source_thread_id,
             source_message_id=source_message_id,
         )
+        logical_thread_key = self._thread_id_factory.logical_thread_key(source_thread_id)
+        checkpoint_id = self._store.latest_checkpoint_id(source_thread_id)
+        if checkpoint_id is not None and event.frontier_after_event_id is not None:
+            self._store.record_thread_frontier(
+                frontier_id=event.frontier_after_event_id,
+                branch_id=branch_id,
+                event_id=event.id,
+                event_boundary="after",
+                logical_thread_key=logical_thread_key,
+                physical_thread_id=source_thread_id,
+                checkpoint_id=checkpoint_id,
+                usable_for_fork=True,
+                usable_for_continue=True,
+            )
         if not mentions or not self._store.get_runtime_state().mention_hook_enabled:
             return
 
@@ -265,6 +293,7 @@ class MentionRouter:
                 status="cascade-limited",
                 snapshot_seq=event.seq,
                 error=f"max_cascade_turns={max_cascade_turns} reached.",
+                branch_id=branch_id,
             )
             return
 
