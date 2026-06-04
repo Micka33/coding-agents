@@ -8,6 +8,7 @@ from .conversation_delivery_error import ConversationDeliveryError
 from .conversation_event import ConversationEvent
 from .conversation_file_ref import ConversationFileRef
 from .conversation_interrupt import ConversationInterrupt
+from .conversation_run import ConversationRun
 from .conversation_runtime_state import ConversationRuntimeState
 from .conversation_runtime_controller import ConversationRuntimeController
 from .mention_parser import MentionParser
@@ -30,6 +31,7 @@ __all__ = [
     "ConversationEvent",
     "ConversationFileRef",
     "ConversationInterrupt",
+    "ConversationRun",
     "ConversationRuntimeState",
     "ConversationRuntimeController",
     "ConversationStore",

@@ -121,7 +121,6 @@ class MentionRouter:
 
         snapshot_seq = max(event.seq for event in events)
         run_id = f"run_{uuid.uuid4().hex}"
-        self._store.mark_run_started(agent_id, run_id=run_id, snapshot_seq=snapshot_seq, branch_id=branch_id)
         target = self._team.agents[agent_id]
         proposed_thread_id = self._thread_id_factory.mention(
             self._thread_id_factory.branch(self._root_thread_id, branch_id),
@@ -135,6 +134,14 @@ class MentionRouter:
             created_by_commit_id=run_id,
         )
         thread_id = branch_thread.physical_thread_id
+        self._store.mark_run_started(
+            agent_id,
+            run_id=run_id,
+            snapshot_seq=snapshot_seq,
+            branch_id=branch_id,
+            logical_thread_key=logical_thread_key,
+            physical_thread_id=thread_id,
+        )
 
         try:
             sync = self._sync_builder.build(target=target, state=state, events=events)

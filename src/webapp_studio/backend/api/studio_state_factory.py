@@ -16,6 +16,7 @@ from src.webapp_studio.backend.contracts.conversation_branch_thread_dto import C
 from src.webapp_studio.backend.contracts.conversation_control_event_dto import ConversationControlEventDto
 from src.webapp_studio.backend.contracts.conversation_delivery_dto import ConversationDeliveryDto
 from src.webapp_studio.backend.contracts.conversation_event_dto import ConversationEventDto
+from src.webapp_studio.backend.contracts.conversation_run_dto import ConversationRunDto
 from src.webapp_studio.backend.contracts.conversation_snapshot import ConversationSnapshot
 from src.webapp_studio.backend.contracts.external_side_effect_dto import ExternalSideEffectDto
 from src.webapp_studio.backend.contracts.generated_ui_spec import GeneratedUiSpec
@@ -49,6 +50,7 @@ class StudioStateFactory:
         conversation = ConversationSnapshot(
             events=[ConversationEventDto.model_validate(item) for item in visible_state.get("events", [])],
             deliveries=deliveries,
+            runs=[ConversationRunDto.model_validate(item) for item in visible_state.get("runs", [])],
             agent_states=agent_states,
             branch_threads=[ConversationBranchThreadDto.model_validate(item) for item in visible_state.get("branch_threads", [])],
             thread_frontiers=[ThreadFrontierDto.model_validate(item) for item in visible_state.get("thread_frontiers", [])],
@@ -114,8 +116,37 @@ class StudioStateFactory:
         runs = []
         cursor = self._latest_event_cursor(state)
         active_run_ids = set()
+        persisted_runs = [ConversationRunDto.model_validate(item) for item in state.get("runs", [])]
+        for run in reversed(persisted_runs):
+            active_run_ids.add(run.id)
+            runs.append(
+                RunSummary(
+                    id=run.id,
+                    conversation_id=run.conversation_id,
+                    agent_id=run.agent_id,
+                    status=self._run_status_from_persisted(run.status, run.commit_state),
+                    created_at=run.started_at,
+                    updated_at=run.completed_at or run.started_at,
+                    completed_at=run.completed_at,
+                    checkpoint_id=run.stable_checkpoint_id,
+                    cursor=cursor,
+                    metadata={
+                        "branch_id": run.branch_id,
+                        "logical_thread_key": run.logical_thread_key,
+                        "physical_thread_id": run.physical_thread_id,
+                        "latest_checkpoint_id": run.latest_checkpoint_id,
+                        "checkpoint_stability": run.checkpoint_stability,
+                        "usable_for_fork": run.usable_for_fork,
+                        "usable_for_continue": run.usable_for_continue,
+                        "commit_state": run.commit_state,
+                        "snapshot_seq": run.snapshot_seq,
+                    },
+                )
+            )
         for item in agent_states:
             if item.current_run_id:
+                if item.current_run_id in active_run_ids:
+                    continue
                 active_run_ids.add(item.current_run_id)
                 runs.append(
                     RunSummary(
@@ -151,6 +182,19 @@ class StudioStateFactory:
                 )
             )
         return runs
+
+    def _run_status_from_persisted(self, status: str, commit_state: str) -> str:
+        if commit_state == "orphaned":
+            return "unknown"
+        if status == "running":
+            return "running"
+        if status in {"failed", "empty", "cascade-limited", "interrupted"}:
+            return "failed"
+        if status == "stopped":
+            return "stopped"
+        if status == "ignored":
+            return "superseded"
+        return "completed"
 
     def _run_status_from_delivery(self, status: str) -> str:
         if status in {"failed", "empty", "cascade-limited"}:

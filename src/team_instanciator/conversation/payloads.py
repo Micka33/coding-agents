@@ -9,6 +9,7 @@ from .conversation_branch_thread import ConversationBranchThreadDict
 from .conversation_control_event import ConversationControlEventDict
 from .conversation_delivery import ConversationDeliveryDict
 from .conversation_event import ConversationEventDict
+from .conversation_run import ConversationRunDict
 from .conversation_runtime_state import ConversationRuntimeStateDict
 from .external_side_effect import ExternalSideEffectDict
 from .thread_frontier import ThreadFrontierDict
@@ -31,6 +32,7 @@ class ConversationStateDict(TypedDict):
     events: list[ConversationEventDict]
     agent_states: list[AgentDeliveryStateDict]
     deliveries: list[ConversationDeliveryDict]
+    runs: list[ConversationRunDict]
     branch_threads: list[ConversationBranchThreadDict]
     thread_frontiers: list[ThreadFrontierDict]
     control_events: list[ConversationControlEventDict]

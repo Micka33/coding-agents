@@ -110,6 +110,39 @@ export const ConversationDeliverySchema = z
   })
   .passthrough()
 
+export const ConversationRunSchema = z
+  .object({
+    id: z.string(),
+    team_id: z.string(),
+    conversation_id: z.string(),
+    branch_id: z.string().default("branch_main"),
+    agent_id: z.string(),
+    logical_thread_key: z.string().nullable().default(null),
+    physical_thread_id: z.string().nullable().default(null),
+    status: z.enum([
+      "running",
+      "success",
+      "stopped",
+      "failed",
+      "empty",
+      "interrupted",
+      "cascade-limited",
+      "skipped",
+      "ignored",
+    ]),
+    stop_kind: z.string().nullable().default(null),
+    snapshot_seq: z.number().int().nullable().default(null),
+    started_at: z.string(),
+    completed_at: z.string().nullable().default(null),
+    stable_checkpoint_id: z.string().nullable().default(null),
+    latest_checkpoint_id: z.string().nullable().default(null),
+    checkpoint_stability: z.enum(["stable", "unstable", "unknown"]).default("unknown"),
+    usable_for_fork: z.boolean().default(false),
+    usable_for_continue: z.boolean().default(false),
+    commit_state: z.enum(["pending", "committed", "orphaned"]).default("pending"),
+  })
+  .passthrough()
+
 export const AppendMessageResultSchema = z
   .object({
     event: ConversationEventSchema,
@@ -355,6 +388,7 @@ export const ConversationSnapshotSchema = z
   .object({
     events: z.array(ConversationEventSchema),
     deliveries: z.array(ConversationDeliverySchema),
+    runs: z.array(ConversationRunSchema).default([]),
     agent_states: z.array(AgentDeliveryStateSchema),
     branch_threads: z.array(ConversationBranchThreadSchema).default([]),
     thread_frontiers: z.array(ThreadFrontierSchema).default([]),
@@ -602,6 +636,7 @@ export type RuntimeSettings = z.infer<typeof RuntimeSettingsSchema>
 export type ConversationFileRef = z.infer<typeof ConversationFileRefSchema>
 export type ConversationEvent = z.infer<typeof ConversationEventSchema>
 export type ConversationDelivery = z.infer<typeof ConversationDeliverySchema>
+export type ConversationRun = z.infer<typeof ConversationRunSchema>
 export type AppendMessageResult = z.infer<typeof AppendMessageResultSchema>
 export type StudioSession = z.infer<typeof StudioSessionSchema>
 export type ConversationSummary = z.infer<typeof ConversationSummarySchema>

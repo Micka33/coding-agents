@@ -126,6 +126,7 @@ const studioState: StudioState = {
     thread_frontiers: [],
     control_events: [],
     external_side_effects: [],
+    runs: [],
   },
   activity: {
     active_agent_ids: [],

@@ -22,6 +22,7 @@ from src.team_instanciator.conversation import (
     ConversationEvent,
     ConversationFileRef,
     ConversationInterrupt,
+    ConversationRun,
     ConversationRuntimeState,
     ConversationRuntimeController,
     ConversationStore,
@@ -144,12 +145,24 @@ class ConversationRuntimeTests(unittest.TestCase):
             kind="approve",
             payload={"action": "write_file"},
         )
+        run = ConversationRun(
+            id="run",
+            team_id="team",
+            conversation_id="thread",
+            branch_id="branch_main",
+            agent_id="agent",
+            logical_thread_key="thread:branch:branch_main:mention:agent",
+            physical_thread_id="thread:branch:branch_main:mention:agent",
+            status="running",
+            started_at="now",
+        )
 
         self.assertEqual(event.to_dict()["attachments"][0]["filename"], "notes.txt")
         self.assertEqual(state.to_dict()["agent_id"], "agent")
         self.assertTrue(runtime_state.to_dict()["mention_hook_enabled"])
         self.assertEqual(delivery.to_dict()["error"], "boom")
         self.assertEqual(interrupt.to_dict()["payload"]["action"], "write_file")
+        self.assertEqual(run.to_dict()["commit_state"], "pending")
         result = SimpleNamespace(deliveries=(delivery,))
         self.assertEqual(
             tuple(item.status for item in __import__(
@@ -177,6 +190,7 @@ class ConversationRuntimeTests(unittest.TestCase):
                 )
                 """
             )
+            self._create_checkpoint_tables(connection)
             store = ConversationStore(team_id="team", conversation_id="thread", connection=connection)
             file_ref = ConversationFileRef(id="file-1", filename="notes.txt", uri="conversation://files/file-1")
 
@@ -190,6 +204,29 @@ class ConversationRuntimeTests(unittest.TestCase):
             store.enqueue("agent", event.seq)
             store.update_runtime_state(mention_hook_enabled=False, max_cascade_turns=3)
             store.record_delivery(agent_id="agent", status="failed", error="boom")
+            runner_thread_id = "thread:branch:branch_main:mention:runner"
+            store.mark_run_started(
+                "runner",
+                run_id="run_runner",
+                snapshot_seq=event.seq,
+                branch_id="branch_main",
+                logical_thread_key=runner_thread_id,
+                physical_thread_id=runner_thread_id,
+            )
+            self.assertEqual(store.get_run("run_runner").commit_state, "pending")
+            self._insert_checkpoint(
+                connection,
+                thread_id=runner_thread_id,
+                checkpoint_id="checkpoint_runner",
+                parent_checkpoint_id=None,
+            )
+            store.record_delivery(
+                agent_id="runner",
+                run_id="run_runner",
+                snapshot_seq=event.seq,
+                status="success",
+                branch_id="branch_main",
+            )
             branch = store.create_branch(
                 label="Alternative",
                 origin_checkpoint_id="checkpoint_01",
@@ -228,7 +265,19 @@ class ConversationRuntimeTests(unittest.TestCase):
             self.assertEqual(reloaded.get_runtime_state().max_cascade_turns, 3)
             self.assertIsNone(reloaded.ensure_agent_state("agent").queued_after_seq)
             self.assertEqual(reloaded.ensure_agent_state("agent", branch_id="branch_main").queued_after_seq, event.seq)
-            self.assertEqual(reloaded.list_deliveries(branch_id="branch_main")[0].error, "boom")
+            self.assertIn("boom", [delivery.error for delivery in reloaded.list_deliveries(branch_id="branch_main")])
+            run = reloaded.get_run("run_runner")
+            self.assertEqual(run.commit_state if run else None, "committed")
+            self.assertEqual(run.stable_checkpoint_id if run else None, "checkpoint_runner")
+            self.assertTrue(run.usable_for_fork if run else False)
+            self.assertEqual(
+                reloaded.latest_usable_run_checkpoint_id(
+                    branch_id="branch_main",
+                    logical_thread_key=runner_thread_id,
+                    for_continue=True,
+                ),
+                "checkpoint_runner",
+            )
             self.assertEqual(reloaded.list_deliveries(), [])
             self.assertEqual(reloaded.list_branches()[0].label, "Alternative")
             self.assertEqual(reloaded.list_control_events(branch_id=branch.id)[0].id, control_event.id)
@@ -674,6 +723,9 @@ class ConversationRuntimeTests(unittest.TestCase):
 
         self.assertEqual(graph.calls[0][1]["configurable"]["thread_id"], "thread:branch:branch_main:mention:agent-b")
         self.assertEqual(graph.calls[1][1]["configurable"]["thread_id"], f"thread:branch:{branch.id}:mention:agent-b")
+        self.assertEqual(runtime.store.list_runs(branch_id="branch_main")[0].physical_thread_id, graph.calls[0][1]["configurable"]["thread_id"])
+        self.assertEqual(runtime.store.list_runs(branch_id=branch.id)[0].physical_thread_id, graph.calls[1][1]["configurable"]["thread_id"])
+        self.assertEqual(runtime.store.list_runs(branch_id=branch.id)[0].commit_state, "committed")
         self.assertEqual(runtime.store.ensure_agent_state("agent-b", branch_id="branch_main").last_delivered_seq, first.seq)
         self.assertEqual(runtime.store.ensure_agent_state("agent-b", branch_id=branch.id).last_delivered_seq, second.seq)
         self.assertEqual(

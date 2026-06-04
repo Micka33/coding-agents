@@ -24,6 +24,12 @@ from .conversation_interrupt import (
     ConversationInterruptKind,
     ConversationInterruptStatus,
 )
+from .conversation_run import (
+    CheckpointStability,
+    ConversationRun,
+    ConversationRunCommitState,
+    ConversationRunStatus,
+)
 from .conversation_runtime_state import ConversationRuntimeState
 from .external_side_effect import ExternalSideEffect
 from .thread_frontier import ThreadFrontier, ThreadFrontierBoundary
@@ -48,6 +54,19 @@ _INTERRUPT_KINDS: tuple[ConversationInterruptKind, ...] = ("approve", "edit", "r
 _INTERRUPT_STATUSES: tuple[ConversationInterruptStatus, ...] = ("pending", "resolved")
 _BRANCH_THREAD_STATUSES: tuple[BranchThreadStatus, ...] = ("active", "orphaned")
 _THREAD_FRONTIER_BOUNDARIES: tuple[ThreadFrontierBoundary, ...] = ("before", "after")
+_RUN_STATUSES: tuple[ConversationRunStatus, ...] = (
+    "running",
+    "success",
+    "stopped",
+    "failed",
+    "empty",
+    "interrupted",
+    "cascade-limited",
+    "skipped",
+    "ignored",
+)
+_CHECKPOINT_STABILITIES: tuple[CheckpointStability, ...] = ("stable", "unstable", "unknown")
+_RUN_COMMIT_STATES: tuple[ConversationRunCommitState, ...] = ("pending", "committed", "orphaned")
 _HISTORY_SCHEMA_VERSION = "branching.v1"
 
 
@@ -73,6 +92,7 @@ class ConversationStore:
         self._thread_frontiers: list[ThreadFrontier] = []
         self._control_events: list[ConversationControlEvent] = []
         self._external_side_effects: list[ExternalSideEffect] = []
+        self._runs: dict[str, ConversationRun] = {}
         self._interrupts: dict[str, ConversationInterrupt] = {}
         self._current_branch_id = "branch_main"
         self._runtime_state = ConversationRuntimeState(
@@ -524,9 +544,12 @@ class ConversationStore:
         run_id: str,
         snapshot_seq: int,
         branch_id: str | None = None,
+        logical_thread_key: str | None = None,
+        physical_thread_id: str | None = None,
     ) -> AgentDeliveryState:
         with self._lock:
-            state = self.ensure_agent_state(agent_id, branch_id=branch_id)
+            resolved_branch_id = self._resolved_branch_id(branch_id)
+            state = self.ensure_agent_state(agent_id, branch_id=resolved_branch_id)
             keep_queued = bool(state.queued and state.queued_after_seq is not None and state.queued_after_seq > snapshot_seq)
             updated = replace(
                 state,
@@ -538,6 +561,21 @@ class ConversationStore:
                 stop_requested=False,
             )
             self.save_agent_state(updated)
+            self._save_run(
+                ConversationRun(
+                    id=run_id,
+                    team_id=self.team_id,
+                    conversation_id=self.conversation_id,
+                    branch_id=resolved_branch_id,
+                    agent_id=agent_id,
+                    logical_thread_key=logical_thread_key,
+                    physical_thread_id=physical_thread_id,
+                    status="running",
+                    snapshot_seq=snapshot_seq,
+                    started_at=self._now(),
+                    commit_state="pending",
+                )
+            )
             return updated
 
     def complete_run(
@@ -613,6 +651,7 @@ class ConversationStore:
         with self._lock:
             if self._connection is None:
                 self._deliveries.append(delivery)
+                self._complete_run_record_from_delivery(delivery)
                 return delivery
             self._connection.execute(
                 """
@@ -645,8 +684,82 @@ class ConversationStore:
                     delivery.error,
                 ),
             )
+            self._complete_run_record_from_delivery(delivery)
             self._connection.commit()
             return delivery
+
+    def get_run(self, run_id: str) -> ConversationRun | None:
+        with self._lock:
+            if self._connection is None:
+                run = self._runs.get(run_id)
+                return replace(run) if run is not None else None
+            row = self._connection.execute(
+                """
+                select
+                    id,
+                    branch_id,
+                    agent_id,
+                    logical_thread_key,
+                    physical_thread_id,
+                    status,
+                    stop_kind,
+                    snapshot_seq,
+                    started_at,
+                    completed_at,
+                    stable_checkpoint_id,
+                    latest_checkpoint_id,
+                    checkpoint_stability,
+                    usable_for_fork,
+                    usable_for_continue,
+                    commit_state
+                from team_conversation_runs
+                where team_id = ? and conversation_id = ? and id = ?
+                """,
+                (self.team_id, self.conversation_id, run_id),
+            ).fetchone()
+            return self._run_from_row(row) if row is not None else None
+
+    def list_runs(self, *, branch_id: str | None | _UnsetType = _UNSET) -> list[ConversationRun]:
+        with self._lock:
+            resolved_branch_id = self.current_branch_id() if branch_id is _UNSET else branch_id
+            if self._connection is None:
+                runs = [
+                    run
+                    for run in self._runs.values()
+                    if resolved_branch_id is None or run.branch_id == resolved_branch_id
+                ]
+                return [replace(run) for run in sorted(runs, key=lambda item: (item.started_at, item.id))]
+            clauses = ["team_id = ?", "conversation_id = ?"]
+            params: list[object] = [self.team_id, self.conversation_id]
+            if resolved_branch_id is not None:
+                clauses.append("branch_id = ?")
+                params.append(resolved_branch_id)
+            rows = self._connection.execute(
+                f"""
+                select
+                    id,
+                    branch_id,
+                    agent_id,
+                    logical_thread_key,
+                    physical_thread_id,
+                    status,
+                    stop_kind,
+                    snapshot_seq,
+                    started_at,
+                    completed_at,
+                    stable_checkpoint_id,
+                    latest_checkpoint_id,
+                    checkpoint_stability,
+                    usable_for_fork,
+                    usable_for_continue,
+                    commit_state
+                from team_conversation_runs
+                where {" and ".join(clauses)}
+                order by started_at asc, id asc
+                """,
+                tuple(params),
+            ).fetchall()
+            return [self._run_from_row(row) for row in rows]
 
     def ensure_branch_thread(
         self,
@@ -1111,6 +1224,26 @@ class ConversationStore:
         ).fetchone()
         return str(row[0]) if row is not None else None
 
+    def latest_usable_run_checkpoint_id(
+        self,
+        *,
+        branch_id: str,
+        logical_thread_key: str,
+        for_continue: bool,
+    ) -> str | None:
+        runs = [
+            run
+            for run in self.list_runs(branch_id=branch_id)
+            if run.logical_thread_key == logical_thread_key
+            and run.commit_state == "committed"
+            and (run.usable_for_continue if for_continue else run.usable_for_fork)
+            and run.stable_checkpoint_id is not None
+        ]
+        if not runs:
+            return None
+        runs.sort(key=lambda item: (item.completed_at or item.started_at, item.id))
+        return runs[-1].stable_checkpoint_id
+
     def create_branch(
         self,
         *,
@@ -1513,6 +1646,31 @@ class ConversationStore:
         )
         connection.execute(
             """
+            create table if not exists team_conversation_runs (
+                team_id text not null,
+                conversation_id text not null,
+                id text not null,
+                branch_id text not null default 'branch_main',
+                agent_id text not null,
+                logical_thread_key text,
+                physical_thread_id text,
+                status text not null,
+                stop_kind text,
+                snapshot_seq integer,
+                started_at text not null,
+                completed_at text,
+                stable_checkpoint_id text,
+                latest_checkpoint_id text,
+                checkpoint_stability text not null,
+                usable_for_fork integer not null,
+                usable_for_continue integer not null,
+                commit_state text not null,
+                primary key (team_id, conversation_id, id)
+            )
+            """
+        )
+        connection.execute(
+            """
             create table if not exists team_conversation_runtime_state (
                 team_id text not null,
                 conversation_id text not null,
@@ -1826,6 +1984,139 @@ class ConversationStore:
             created_at=str(row[9]),
         )
 
+    def _run_from_row(self, row: tuple[object, ...]) -> ConversationRun:
+        return ConversationRun(
+            id=str(row[0]),
+            team_id=self.team_id,
+            conversation_id=self.conversation_id,
+            branch_id=str(row[1] or "branch_main"),
+            agent_id=str(row[2]),
+            logical_thread_key=str(row[3]) if row[3] is not None else None,
+            physical_thread_id=str(row[4]) if row[4] is not None else None,
+            status=self._run_status(row[5]),
+            stop_kind=str(row[6]) if row[6] is not None else None,
+            snapshot_seq=int(row[7]) if row[7] is not None else None,
+            started_at=str(row[8]),
+            completed_at=str(row[9]) if row[9] is not None else None,
+            stable_checkpoint_id=str(row[10]) if row[10] is not None else None,
+            latest_checkpoint_id=str(row[11]) if row[11] is not None else None,
+            checkpoint_stability=self._checkpoint_stability(row[12]),
+            usable_for_fork=bool(row[13]),
+            usable_for_continue=bool(row[14]),
+            commit_state=self._run_commit_state(row[15]),
+        )
+
+    def _complete_run_record_from_delivery(self, delivery: ConversationDelivery) -> None:
+        if delivery.run_id is None:
+            return
+
+        run = self.get_run(delivery.run_id)
+        if run is None:
+            run = ConversationRun(
+                id=delivery.run_id,
+                team_id=self.team_id,
+                conversation_id=self.conversation_id,
+                branch_id=delivery.branch_id,
+                agent_id=delivery.agent_id,
+                status="running",
+                snapshot_seq=delivery.snapshot_seq,
+                started_at=delivery.created_at,
+            )
+
+        stable_terminal = delivery.status in {"empty", "skipped", "stopped", "success"}
+        latest_checkpoint_id = self.latest_checkpoint_id(run.physical_thread_id) if run.physical_thread_id else None
+        stable_checkpoint_id = latest_checkpoint_id if stable_terminal and latest_checkpoint_id is not None else run.stable_checkpoint_id
+        checkpoint_stability: CheckpointStability
+        if stable_checkpoint_id is not None and stable_terminal:
+            checkpoint_stability = "stable"
+        elif latest_checkpoint_id is not None:
+            checkpoint_stability = "unstable"
+        else:
+            checkpoint_stability = "unknown"
+        usable = stable_terminal and stable_checkpoint_id is not None
+        self._save_run(
+            replace(
+                run,
+                status=self._run_status_from_delivery(delivery.status),
+                stop_kind="cooperative" if delivery.status == "stopped" else run.stop_kind,
+                snapshot_seq=delivery.snapshot_seq if delivery.snapshot_seq is not None else run.snapshot_seq,
+                completed_at=delivery.completed_at or self._now(),
+                stable_checkpoint_id=stable_checkpoint_id,
+                latest_checkpoint_id=latest_checkpoint_id,
+                checkpoint_stability=checkpoint_stability,
+                usable_for_fork=usable,
+                usable_for_continue=usable,
+                commit_state="committed",
+            )
+        )
+
+    def _save_run(self, run: ConversationRun) -> None:
+        if self._connection is None:
+            self._runs[run.id] = replace(run)
+            return
+        self._connection.execute(
+            """
+            insert into team_conversation_runs (
+                team_id,
+                conversation_id,
+                id,
+                branch_id,
+                agent_id,
+                logical_thread_key,
+                physical_thread_id,
+                status,
+                stop_kind,
+                snapshot_seq,
+                started_at,
+                completed_at,
+                stable_checkpoint_id,
+                latest_checkpoint_id,
+                checkpoint_stability,
+                usable_for_fork,
+                usable_for_continue,
+                commit_state
+            )
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            on conflict(team_id, conversation_id, id) do update set
+                branch_id = excluded.branch_id,
+                agent_id = excluded.agent_id,
+                logical_thread_key = excluded.logical_thread_key,
+                physical_thread_id = excluded.physical_thread_id,
+                status = excluded.status,
+                stop_kind = excluded.stop_kind,
+                snapshot_seq = excluded.snapshot_seq,
+                started_at = excluded.started_at,
+                completed_at = excluded.completed_at,
+                stable_checkpoint_id = excluded.stable_checkpoint_id,
+                latest_checkpoint_id = excluded.latest_checkpoint_id,
+                checkpoint_stability = excluded.checkpoint_stability,
+                usable_for_fork = excluded.usable_for_fork,
+                usable_for_continue = excluded.usable_for_continue,
+                commit_state = excluded.commit_state
+            """,
+            (
+                run.team_id,
+                run.conversation_id,
+                run.id,
+                run.branch_id,
+                run.agent_id,
+                run.logical_thread_key,
+                run.physical_thread_id,
+                run.status,
+                run.stop_kind,
+                run.snapshot_seq,
+                run.started_at,
+                run.completed_at,
+                run.stable_checkpoint_id,
+                run.latest_checkpoint_id,
+                run.checkpoint_stability,
+                int(run.usable_for_fork),
+                int(run.usable_for_continue),
+                run.commit_state,
+            ),
+        )
+        self._connection.commit()
+
     def _save_branch_thread(self, branch_thread: ConversationBranchThread) -> None:
         if self._connection is None:
             self._branch_threads[(branch_thread.branch_id, branch_thread.logical_thread_key)] = replace(branch_thread)
@@ -2008,6 +2299,7 @@ class ConversationStore:
             "team_conversation_files",
             "team_conversation_agent_state",
             "team_conversation_deliveries",
+            "team_conversation_runs",
             "team_conversation_runtime_state",
             "team_conversation_branches",
             "team_conversation_branch_threads",
@@ -2200,6 +2492,21 @@ class ConversationStore:
     def _thread_frontier_boundary(self, value: object) -> ThreadFrontierBoundary:
         boundary = str(value)
         return cast(ThreadFrontierBoundary, boundary) if boundary in _THREAD_FRONTIER_BOUNDARIES else "after"
+
+    def _run_status(self, value: object) -> ConversationRunStatus:
+        status = str(value)
+        return cast(ConversationRunStatus, status) if status in _RUN_STATUSES else "failed"
+
+    def _run_status_from_delivery(self, status: DeliveryStatus) -> ConversationRunStatus:
+        return cast(ConversationRunStatus, status) if status in _RUN_STATUSES else "failed"
+
+    def _checkpoint_stability(self, value: object) -> CheckpointStability:
+        stability = str(value)
+        return cast(CheckpointStability, stability) if stability in _CHECKPOINT_STABILITIES else "unknown"
+
+    def _run_commit_state(self, value: object) -> ConversationRunCommitState:
+        commit_state = str(value)
+        return cast(ConversationRunCommitState, commit_state) if commit_state in _RUN_COMMIT_STATES else "orphaned"
 
     def _table_exists(self, table_name: str) -> bool:
         if self._connection is None:

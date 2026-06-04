@@ -298,6 +298,7 @@ class MentionAwareTeam:
         events = [event.to_dict() for event in self.store.list_events()]
         agent_states = [state.to_dict() for state in self.store.list_agent_states()]
         deliveries = [delivery.to_dict() for delivery in self.store.list_deliveries()]
+        runs = [run.to_dict() for run in self.store.list_runs()]
         branch_threads = [thread.to_dict() for thread in self.store.list_branch_threads()]
         thread_frontiers = [frontier.to_dict() for frontier in self.store.list_thread_frontiers()]
         control_events = [event.to_dict() for event in self.store.list_control_events()]
@@ -315,6 +316,7 @@ class MentionAwareTeam:
             "events": events,
             "agent_states": agent_states,
             "deliveries": deliveries,
+            "runs": runs,
             "branch_threads": branch_threads,
             "thread_frontiers": thread_frontiers,
             "control_events": control_events,
@@ -328,6 +330,7 @@ class MentionAwareTeam:
         if agent_id:
             state["agent_states"] = [item for item in state["agent_states"] if item["agent_id"] == agent_id]
             state["deliveries"] = [item for item in state["deliveries"] if item["agent_id"] == agent_id]
+            state["runs"] = [item for item in state["runs"] if item["agent_id"] == agent_id]
         if agent_id:
             private_thread_id = self.thread_id_factory.mention(
                 self.thread_id_factory.branch(self.conversation_id, self.store.current_branch_id()),
