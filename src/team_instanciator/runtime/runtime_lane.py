@@ -9,6 +9,7 @@ class RuntimeLaneDict(TypedDict):
     kind: str
     agent_id: str | None
     agent_name: str | None
+    relation_id: str | None
     source_agent_id: str | None
     target_agent_id: str | None
     tool_name: str | None
@@ -22,6 +23,7 @@ class RuntimeLane:
     kind: str
     agent_id: str | None
     agent_name: str | None
+    relation_id: str | None = None
     source_agent_id: str | None = None
     target_agent_id: str | None = None
     tool_name: str | None = None
@@ -33,6 +35,7 @@ class RuntimeLane:
             "kind": self.kind,
             "agent_id": self.agent_id,
             "agent_name": self.agent_name,
+            "relation_id": self.relation_id,
             "source_agent_id": self.source_agent_id,
             "target_agent_id": self.target_agent_id,
             "tool_name": self.tool_name,

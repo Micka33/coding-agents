@@ -34,7 +34,7 @@ class TeamRuntimeManifestTests(unittest.TestCase):
             [lane.lane_id for lane in manifest.lanes],
             [
                 "entrypoint:entry",
-                "relation:entry:ask_worker:worker",
+                "relation:rel_worker",
                 "task-subagent-type:reviewer",
             ],
         )
@@ -103,15 +103,17 @@ class TeamRuntimeManifestTests(unittest.TestCase):
 
         manifest_row = connection.execute("select manifest_json from team_runtime_manifests where team_id = 'product'").fetchone()
         lane_rows = connection.execute("select lane_id, kind from team_runtime_lanes order by lane_id").fetchall()
+        relation_row = connection.execute("select relation_id, thread_id_pattern from team_runtime_lanes where lane_id = 'relation:rel_worker'").fetchone()
 
         self.assertEqual(json.loads(manifest_row[0])["team_id"], "product")
         self.assertEqual(
             lane_rows,
             [
                 ("entrypoint:entry", "entrypoint"),
-                ("relation:entry:ask_worker:worker", "tool-relation"),
+                ("relation:rel_worker", "tool-relation"),
             ],
         )
+        self.assertEqual(relation_row, ("rel_worker", "{parent_thread_id}:relation:rel_worker:agent:worker"))
         handle.close()
 
 

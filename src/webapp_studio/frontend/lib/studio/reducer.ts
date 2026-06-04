@@ -208,6 +208,8 @@ export function studioReducer(state: StudioState, action: StudioAction): StudioS
     logical_message_id: `optimistic_${nextSeq}`,
     version_parent_event_id: null,
     parent_event_id: state.conversation.events.at(-1)?.id ?? null,
+    frontier_before_event_id: state.conversation.events.at(-1)?.frontier_after_event_id ?? null,
+    frontier_after_event_id: `frontier_optimistic_${nextSeq}_after`,
     seq: nextSeq,
     created_at: new Date().toISOString(),
     author_id: action.authorId,

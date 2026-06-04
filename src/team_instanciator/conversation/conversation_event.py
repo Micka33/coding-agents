@@ -18,6 +18,8 @@ class ConversationEventDict(TypedDict):
     logical_message_id: str
     version_parent_event_id: str | None
     parent_event_id: str | None
+    frontier_before_event_id: str | None
+    frontier_after_event_id: str | None
     seq: int
     created_at: str
     author_id: str
@@ -49,6 +51,8 @@ class ConversationEvent:
     logical_message_id: str | None = None
     version_parent_event_id: str | None = None
     parent_event_id: str | None = None
+    frontier_before_event_id: str | None = None
+    frontier_after_event_id: str | None = None
 
     def to_dict(self) -> ConversationEventDict:
         return {
@@ -59,6 +63,8 @@ class ConversationEvent:
             "logical_message_id": self.logical_message_id or self.id,
             "version_parent_event_id": self.version_parent_event_id,
             "parent_event_id": self.parent_event_id,
+            "frontier_before_event_id": self.frontier_before_event_id,
+            "frontier_after_event_id": self.frontier_after_event_id,
             "seq": self.seq,
             "created_at": self.created_at,
             "author_id": self.author_id,

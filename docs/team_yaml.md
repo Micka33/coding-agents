@@ -482,6 +482,7 @@ Declares directed links between agents.
 relations:
   - from: developer
     to: qa-engineer
+    id: qa-review
     relation: tool
     tool_name: ask_qa_engineer
     input_schema:
@@ -497,6 +498,19 @@ Source agent id. It must reference an agent declared under `agents`.
 #### `relations[].to`
 
 Target agent id. It must reference an agent declared under `agents`.
+
+#### `relations[].id`
+
+Stable relation identity used to preserve persisted agent history when a tool
+name or label changes.
+
+```yaml
+id: qa-review
+```
+
+This key is optional for existing teams. If omitted, the loader assigns a
+position-based id such as `relation_001`, which is less resilient to relation
+reordering.
 
 #### `relations[].relation`
 

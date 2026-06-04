@@ -61,12 +61,14 @@ class TeamRuntimeManifestBuilder:
                 continue
             target = team.agents[relation.target]
             tool_name = relation.tool_name or relation.relation
+            relation_id = self._thread_id_factory.relation_id(relation)
             lanes.append(
                 RuntimeLane(
-                    lane_id=f"relation:{relation.source}:{tool_name}:{relation.target}",
+                    lane_id=f"relation:{relation_id}",
                     kind="tool-relation",
                     agent_id=relation.target,
                     agent_name=target.id,
+                    relation_id=relation_id,
                     source_agent_id=relation.source,
                     target_agent_id=relation.target,
                     tool_name=tool_name,

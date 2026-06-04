@@ -8,6 +8,7 @@ from src.team_loader.models._coercion import as_json_object, optional_string, st
 
 @dataclass(frozen=True)
 class RelationDefinition:
+    id: str
     source: str
     target: str
     relation: str
@@ -19,6 +20,7 @@ class RelationDefinition:
     def from_mapping(cls, value: object) -> RelationDefinition:
         mapping = as_json_object(value)
         return cls(
+            id=optional_string(mapping.get("id")) or "",
             source=string_value(mapping.get("from")),
             target=string_value(mapping.get("to")),
             relation=string_value(mapping.get("relation")),

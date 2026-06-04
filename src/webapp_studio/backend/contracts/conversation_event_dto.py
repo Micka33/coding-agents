@@ -17,6 +17,8 @@ class ConversationEventDto(ContractModel):
     logical_message_id: str | None = None
     version_parent_event_id: str | None = None
     parent_event_id: str | None = None
+    frontier_before_event_id: str | None = None
+    frontier_after_event_id: str | None = None
     seq: int
     created_at: str
     author_id: str

@@ -41,6 +41,7 @@ _DELIVERY_STATUSES: tuple[DeliveryStatus, ...] = (
 _INTERRUPT_DECISIONS: tuple[ConversationInterruptDecision, ...] = ("approve", "reject", "edit", "respond")
 _INTERRUPT_KINDS: tuple[ConversationInterruptKind, ...] = ("approve", "edit", "respond", "review")
 _INTERRUPT_STATUSES: tuple[ConversationInterruptStatus, ...] = ("pending", "resolved")
+_HISTORY_SCHEMA_VERSION = "branching.v1"
 
 
 class ConversationStore:
@@ -81,6 +82,8 @@ class ConversationStore:
         logical_message_id: str | None = None,
         version_parent_event_id: str | None = None,
         parent_event_id: str | None = None,
+        frontier_before_event_id: str | None = None,
+        frontier_after_event_id: str | None = None,
         mentions: tuple[str, ...] = (),
         attachments: tuple[ConversationFileRef, ...] = (),
         source_thread_id: str | None = None,
@@ -90,14 +93,23 @@ class ConversationStore:
         with self._lock:
             seq = self._next_seq()
             event_id = f"evt_{uuid.uuid4().hex}"
+            resolved_branch_id = self._resolved_branch_id(branch_id)
+            previous_event = self._latest_visible_event(resolved_branch_id)
+            resolved_frontier_before_event_id = (
+                frontier_before_event_id
+                if frontier_before_event_id is not None
+                else (previous_event.frontier_after_event_id if previous_event is not None else None)
+            )
             event = ConversationEvent(
                 id=event_id,
                 team_id=self.team_id,
                 conversation_id=self.conversation_id,
-                branch_id=self._resolved_branch_id(branch_id),
+                branch_id=resolved_branch_id,
                 logical_message_id=logical_message_id or event_id,
                 version_parent_event_id=version_parent_event_id,
                 parent_event_id=parent_event_id,
+                frontier_before_event_id=resolved_frontier_before_event_id,
+                frontier_after_event_id=frontier_after_event_id or f"frontier_{event_id}_after",
                 seq=seq,
                 created_at=self._now(),
                 author_id=author_id,
@@ -122,6 +134,8 @@ class ConversationStore:
                     logical_message_id,
                     version_parent_event_id,
                     parent_event_id,
+                    frontier_before_event_id,
+                    frontier_after_event_id,
                     seq,
                     id,
                     created_at,
@@ -133,7 +147,7 @@ class ConversationStore:
                     source_message_id,
                     metadata_json
                 )
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     event.team_id,
@@ -142,6 +156,8 @@ class ConversationStore:
                     event.logical_message_id or event.id,
                     event.version_parent_event_id,
                     event.parent_event_id,
+                    event.frontier_before_event_id,
+                    event.frontier_after_event_id,
                     event.seq,
                     event.id,
                     event.created_at,
@@ -216,6 +232,8 @@ class ConversationStore:
                     logical_message_id,
                     version_parent_event_id,
                     parent_event_id,
+                    frontier_before_event_id,
+                    frontier_after_event_id,
                     seq,
                     id,
                     created_at,
@@ -251,6 +269,8 @@ class ConversationStore:
                     logical_message_id,
                     version_parent_event_id,
                     parent_event_id,
+                    frontier_before_event_id,
+                    frontier_after_event_id,
                     seq,
                     id,
                     created_at,
@@ -946,6 +966,8 @@ class ConversationStore:
                 logical_message_id text,
                 version_parent_event_id text,
                 parent_event_id text,
+                frontier_before_event_id text,
+                frontier_after_event_id text,
                 seq integer not null,
                 id text not null,
                 created_at text not null,
@@ -1028,6 +1050,17 @@ class ConversationStore:
         )
         connection.execute(
             """
+            create table if not exists team_conversation_history_schema (
+                team_id text not null,
+                conversation_id text not null,
+                history_schema_version text not null,
+                initialized_at text not null,
+                primary key (team_id, conversation_id)
+            )
+            """
+        )
+        connection.execute(
+            """
             create table if not exists team_conversation_branches (
                 team_id text not null,
                 conversation_id text not null,
@@ -1066,10 +1099,13 @@ class ConversationStore:
         self._ensure_column("team_conversation_events", "logical_message_id", "text")
         self._ensure_column("team_conversation_events", "version_parent_event_id", "text")
         self._ensure_column("team_conversation_events", "parent_event_id", "text")
+        self._ensure_column("team_conversation_events", "frontier_before_event_id", "text")
+        self._ensure_column("team_conversation_events", "frontier_after_event_id", "text")
         self._ensure_branch_scoped_agent_state()
         self._ensure_column("team_conversation_deliveries", "branch_id", "text not null default 'branch_main'")
         self._ensure_column("team_conversation_branches", "origin_event_id", "text")
         self._ensure_column("team_conversation_branches", "origin_event_seq", "integer")
+        self._ensure_branch_aware_history_schema()
         connection.commit()
         self.get_runtime_state()
 
@@ -1112,10 +1148,10 @@ class ConversationStore:
         self._connection.commit()
 
     def _event_from_row(self, row: tuple[object, ...]) -> ConversationEvent:
-        event_id = str(row[7])
-        raw_mentions: object = json.loads(str(row[12] or "[]"))
+        event_id = str(row[9])
+        raw_mentions: object = json.loads(str(row[14] or "[]"))
         mentions = tuple(item for item in raw_mentions if isinstance(item, str)) if isinstance(raw_mentions, list) else ()
-        raw_metadata: object = json.loads(str(row[15] or "{}"))
+        raw_metadata: object = json.loads(str(row[17] or "{}"))
         return ConversationEvent(
             team_id=str(row[0]),
             conversation_id=str(row[1]),
@@ -1123,16 +1159,18 @@ class ConversationStore:
             logical_message_id=str(row[3]) if row[3] is not None else event_id,
             version_parent_event_id=str(row[4]) if row[4] is not None else None,
             parent_event_id=str(row[5]) if row[5] is not None else None,
-            seq=int(row[6]),
+            frontier_before_event_id=str(row[6]) if row[6] is not None else None,
+            frontier_after_event_id=str(row[7]) if row[7] is not None else None,
+            seq=int(row[8]),
             id=event_id,
-            created_at=str(row[8]),
-            author_id=str(row[9]),
-            author_kind="agent" if row[10] == "agent" else "human",
-            content=str(row[11] or ""),
+            created_at=str(row[10]),
+            author_id=str(row[11]),
+            author_kind="agent" if row[12] == "agent" else "human",
+            content=str(row[13] or ""),
             mentions=mentions,
             attachments=tuple(self._attachments_for(event_id)),
-            source_thread_id=str(row[13]) if row[13] is not None else None,
-            source_message_id=str(row[14]) if row[14] is not None else None,
+            source_thread_id=str(row[15]) if row[15] is not None else None,
+            source_message_id=str(row[16]) if row[16] is not None else None,
             metadata=raw_metadata if is_json_object(raw_metadata) else {},
         )
 
@@ -1250,6 +1288,77 @@ class ConversationStore:
         if column not in columns:
             self._connection.execute(f"alter table {table} add column {column} {definition}")
 
+    def _ensure_branch_aware_history_schema(self) -> None:
+        if self._connection is None:
+            return
+        row = self._connection.execute(
+            """
+            select history_schema_version
+            from team_conversation_history_schema
+            where team_id = ? and conversation_id = ?
+            """,
+            (self.team_id, self.conversation_id),
+        ).fetchone()
+        if row is not None and row[0] == _HISTORY_SCHEMA_VERSION:
+            return
+        if row is None and not self._has_persisted_conversation_history():
+            self._upsert_history_schema_version()
+            return
+
+        self._delete_persisted_conversation_history()
+        self._upsert_history_schema_version()
+
+    def _has_persisted_conversation_history(self) -> bool:
+        if self._connection is None:
+            return False
+        row = self._connection.execute(
+            """
+            select 1
+            from team_conversation_events
+            where team_id = ? and conversation_id = ?
+            limit 1
+            """,
+            (self.team_id, self.conversation_id),
+        ).fetchone()
+        return row is not None
+
+    def _delete_persisted_conversation_history(self) -> None:
+        if self._connection is None:
+            return
+        tables = (
+            "team_conversation_events",
+            "team_conversation_files",
+            "team_conversation_agent_state",
+            "team_conversation_deliveries",
+            "team_conversation_runtime_state",
+            "team_conversation_branches",
+            "team_conversation_interrupts",
+        )
+        for table in tables:
+            self._connection.execute(
+                f"delete from {table} where team_id = ? and conversation_id = ?",
+                (self.team_id, self.conversation_id),
+            )
+
+    def _upsert_history_schema_version(self) -> None:
+        if self._connection is None:
+            return
+        self._connection.execute(
+            """
+            insert into team_conversation_history_schema (
+                team_id,
+                conversation_id,
+                history_schema_version,
+                initialized_at
+            )
+            values (?, ?, ?, ?)
+            on conflict(team_id, conversation_id) do update set
+                history_schema_version = excluded.history_schema_version,
+                initialized_at = excluded.initialized_at
+            """,
+            (self.team_id, self.conversation_id, _HISTORY_SCHEMA_VERSION, self._now()),
+        )
+
     def _ensure_branch_scoped_agent_state(self) -> None:
         if self._connection is None:
             return
@@ -1315,6 +1424,10 @@ class ConversationStore:
 
     def _resolved_branch_id(self, branch_id: str | None) -> str:
         return branch_id or self.current_branch_id()
+
+    def _latest_visible_event(self, branch_id: str | None) -> ConversationEvent | None:
+        events = self.list_events(branch_id=branch_id)
+        return events[-1] if events else None
 
     def _event_visible_in_branch(self, event: ConversationEvent, branch_id: str | None) -> bool:
         return self._event_visible_in_branch_id(event, branch_id, set())

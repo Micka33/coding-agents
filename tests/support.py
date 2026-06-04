@@ -98,6 +98,7 @@ def agent(
 
 def relation(
     *,
+    relation_id: str | None = None,
     source: str = "entry",
     target: str = "worker",
     relation_type: str = "tool",
@@ -105,6 +106,7 @@ def relation(
     description: str | None = None,
 ) -> SimpleNamespace:
     return SimpleNamespace(
+        id=relation_id or f"rel_{target}",
         source=source,
         target=target,
         relation=relation_type,

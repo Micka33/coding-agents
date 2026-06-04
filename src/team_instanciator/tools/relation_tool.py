@@ -32,12 +32,22 @@ class RelationTool:
         """Send a message to a related agent."""
 
         graph = self._registry.graph(self._relation.target)
-        thread_id = self._thread_id_factory.relation(self._parent_thread_id(runtime), self._relation)
+        parent_thread_id = self._parent_thread_id(runtime)
+        thread_id = self._thread_id_factory.relation(parent_thread_id, self._relation)
+        metadata = {
+            **self._checkpoint_metadata,
+            "branch_id": self._thread_id_factory.branch_id_from_thread_id(parent_thread_id) or "",
+            "parent_logical_thread_key": self._thread_id_factory.logical_thread_key(parent_thread_id),
+            "parent_physical_thread_id": parent_thread_id,
+            "relation_id": self._thread_id_factory.relation_id(self._relation),
+            "logical_thread_key": self._thread_id_factory.logical_thread_key(thread_id),
+            "physical_thread_id": thread_id,
+        }
         result = graph.invoke(
             {"messages": [{"role": "user", "content": message}]},
             config=self._metadata_injector.inject(
                 {"configurable": {"thread_id": thread_id}},
-                self._checkpoint_metadata,
+                metadata,
             ),
         )
         return self._last_message_text(result)

@@ -6,6 +6,11 @@ from src.team_loader.models.team_definition import TeamDefinition
 
 
 class CheckpointMetadataFactory:
+    def __init__(self) -> None:
+        from src.team_instanciator.runtime.thread_id_factory import ThreadIdFactory
+
+        self._thread_id_factory = ThreadIdFactory()
+
     def entrypoint(self, team: TeamDefinition, agent: AgentDefinition) -> dict[str, str]:
         return self._agent_metadata(team, agent, "entrypoint", f"entrypoint:{agent.id}")
 
@@ -15,14 +20,16 @@ class CheckpointMetadataFactory:
     def tool_relation(self, team: TeamDefinition, relation: RelationDefinition) -> dict[str, str]:
         target = team.agents[relation.target]
         tool_name = relation.tool_name or relation.relation
+        relation_id = self._thread_id_factory.relation_id(relation)
         metadata = self._agent_metadata(
             team,
             target,
             "tool-relation",
-            f"relation:{relation.source}:{tool_name}:{relation.target}",
+            f"relation:{relation_id}",
         )
         metadata.update(
             {
+                "relation_id": relation_id,
                 "source_agent_id": relation.source,
                 "target_agent_id": relation.target,
                 "tool_name": tool_name,

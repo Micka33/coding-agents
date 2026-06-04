@@ -651,6 +651,7 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(events[0]["branch_id"], current_branch_id)
         self.assertEqual(events[0]["logical_message_id"], "event_01")
         self.assertEqual(events[0]["version_parent_event_id"], "event_01")
+        self.assertEqual(events[0]["frontier_before_event_id"], "frontier_event_01_before")
         self.assertEqual(missing["errors"][0]["field"], "message_id")
         stream_events = [frame.event for frame in buffer.replay_after(None) or []]
         self.assertIn("conversation.event.appended", stream_events)
@@ -1498,6 +1499,8 @@ class BackendApiTests(unittest.TestCase):
                 "logical_message_id": "event_01",
                 "version_parent_event_id": None,
                 "parent_event_id": None,
+                "frontier_before_event_id": "frontier_event_01_before",
+                "frontier_after_event_id": "frontier_event_01_after",
                 "seq": 1,
                 "created_at": "2026-06-01T10:00:00Z",
                 "author_id": "human",
@@ -1580,6 +1583,7 @@ class BackendApiTests(unittest.TestCase):
                 raise ValueError("message event is not visible in the current branch.")
             branch = branch_store.create_branch(
                 label="Edit #1",
+                origin_checkpoint_id="frontier_event_01_before",
                 origin_event_id=event_id,
                 origin_event_seq=0,
                 parent_branch_id=branch_store.current_branch_id(),
@@ -1593,6 +1597,8 @@ class BackendApiTests(unittest.TestCase):
                 logical_message_id="event_01",
                 version_parent_event_id="event_01",
                 parent_event_id=None,
+                frontier_before_event_id="frontier_event_01_before",
+                frontier_after_event_id=f"frontier_event_edit_{len(replay_events) + 1}_after",
                 seq=len(replay_events) + 2,
                 created_at="2026-06-01T10:00:05Z",
                 author_id=author_id,

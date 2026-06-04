@@ -228,6 +228,61 @@ class ConversationRuntimeTests(unittest.TestCase):
                 [row[1] for row in connection.execute("pragma table_info(team_conversation_branches)").fetchall()],
             )
 
+    def test_store_deletes_legacy_unversioned_conversation_history(self) -> None:
+        connection = sqlite3.connect(":memory:")
+        connection.execute(
+            """
+            create table team_conversation_events (
+                team_id text not null,
+                conversation_id text not null,
+                seq integer not null,
+                id text not null,
+                created_at text not null,
+                author_id text not null,
+                author_kind text not null,
+                content text not null,
+                mentions_json text not null,
+                source_thread_id text,
+                source_message_id text,
+                metadata_json text not null,
+                primary key (team_id, conversation_id, seq)
+            )
+            """
+        )
+        connection.execute(
+            """
+            insert into team_conversation_events (
+                team_id,
+                conversation_id,
+                seq,
+                id,
+                created_at,
+                author_id,
+                author_kind,
+                content,
+                mentions_json,
+                source_thread_id,
+                source_message_id,
+                metadata_json
+            )
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("team", "thread", 1, "legacy_event", "2026-06-01T10:00:00Z", "human", "human", "legacy", "[]", None, None, "{}"),
+        )
+        connection.commit()
+
+        store = ConversationStore(team_id="team", conversation_id="thread", connection=connection)
+
+        self.assertEqual(store.list_events(), [])
+        schema_row = connection.execute(
+            """
+            select history_schema_version
+            from team_conversation_history_schema
+            where team_id = 'team' and conversation_id = 'thread'
+            """
+        ).fetchone()
+        self.assertEqual(schema_row[0], "branching.v1")
+
     def test_store_cancels_and_clears_pending_queue_without_stopping_running_agents(self) -> None:
         store = ConversationStore(team_id="team", conversation_id="thread")
         event = store.append_event(author_id="human", author_kind="human", content="@agent")
@@ -607,20 +662,25 @@ class ConversationRuntimeTests(unittest.TestCase):
     def test_mention_aware_team_edit_human_message_creates_version_branch_and_requeues_agents(self) -> None:
         graph = FakeGraph("edited reply")
         runtime = self._conversation_runtime({"agent-b": graph})
+        first = runtime.append_human_message("hello", author_id="mickael").event
         original = runtime.append_human_message("@agent-b original", author_id="mickael").event
 
         edited = runtime.edit_human_message(original.id, "@agent-b edited", author_id="mickael")
         current_branch_id = runtime.store.current_branch_id()
+        current_branch = next(branch for branch in runtime.store.list_branches() if branch.id == current_branch_id)
         current_events = runtime.store.list_events()
         main_events = runtime.store.list_events(branch_id="branch_main")
 
         self.assertNotEqual(current_branch_id, "branch_main")
+        self.assertEqual(original.frontier_before_event_id, first.frontier_after_event_id)
+        self.assertEqual(current_branch.origin_checkpoint_id, original.frontier_before_event_id)
         self.assertEqual(edited.event.branch_id, current_branch_id)
         self.assertEqual(edited.event.logical_message_id, original.logical_message_id)
         self.assertEqual(edited.event.version_parent_event_id, original.id)
-        self.assertEqual(edited.event.parent_event_id, None)
-        self.assertEqual([event.content for event in current_events], ["@agent-b edited", "edited reply"])
-        self.assertEqual([event.content for event in main_events], ["@agent-b original", "edited reply"])
+        self.assertEqual(edited.event.parent_event_id, first.id)
+        self.assertEqual(edited.event.frontier_before_event_id, original.frontier_before_event_id)
+        self.assertEqual([event.content for event in current_events], ["hello", "@agent-b edited", "edited reply"])
+        self.assertEqual([event.content for event in main_events], ["hello", "@agent-b original", "edited reply"])
         self.assertEqual(graph.calls[0][1]["configurable"]["thread_id"], "thread:branch:branch_main:mention:agent-b")
         self.assertEqual(graph.calls[1][1]["configurable"]["thread_id"], f"thread:branch:{current_branch_id}:mention:agent-b")
 

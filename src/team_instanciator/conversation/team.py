@@ -155,6 +155,7 @@ class MentionAwareTeam:
         previous_event = visible_events[edited_index - 1] if edited_index > 0 else None
         branch = self.store.create_branch(
             label=f"Edit #{edited_event.seq}",
+            origin_checkpoint_id=edited_event.frontier_before_event_id,
             origin_event_id=edited_event.id,
             origin_event_seq=previous_event.seq if previous_event is not None else 0,
             parent_branch_id=current_branch_id,
@@ -169,6 +170,7 @@ class MentionAwareTeam:
             logical_message_id=edited_event.logical_message_id or edited_event.id,
             version_parent_event_id=edited_event.id,
             parent_event_id=previous_event.id if previous_event is not None else None,
+            frontier_before_event_id=edited_event.frontier_before_event_id,
             mentions=mentions,
             attachments=edited_event.attachments,
             metadata={

@@ -57,14 +57,15 @@ class RuntimeComponentsTests(unittest.TestCase):
 
         entrypoint_lane = RuntimeLane("entrypoint:entry", "entrypoint", "entry", "Entry", thread_id_pattern="{parent_thread_id}")
         relation_lane = RuntimeLane(
-            "relation:entry:ask_worker:worker",
+            "relation:rel_worker",
             "tool-relation",
             "worker",
             "Worker",
+            relation_id="rel_worker",
             source_agent_id="entry",
             target_agent_id="worker",
             tool_name="ask_worker",
-            thread_id_pattern="{parent_thread_id}:entry:ask_worker:worker",
+            thread_id_pattern="{parent_thread_id}:relation:rel_worker:agent:worker",
         )
         manifest = TeamRuntimeManifest("team", 1, (entrypoint_lane, relation_lane))
         relation_config = relation(source="entry", target="worker", tool_name=None)
@@ -72,12 +73,18 @@ class RuntimeComponentsTests(unittest.TestCase):
 
         self.assertEqual(entrypoint_lane.thread_id("root"), "root")
         self.assertIsNone(RuntimeLane("task", "task-subagent-type", "worker", "Worker").thread_id("root"))
-        self.assertEqual(relation_lane.to_dict("root")["thread_id"], "root:entry:ask_worker:worker")
+        self.assertEqual(relation_lane.to_dict("root")["thread_id"], "root:relation:rel_worker:agent:worker")
         self.assertEqual(manifest.lanes_for("root")[0]["thread_id"], "root")
         self.assertEqual(manifest.to_dict()["team_id"], "team")
         self.assertEqual(thread_factory.root("team"), "team")
-        self.assertEqual(thread_factory.relation("root", relation_config), "root:entry:tool:worker")
-        self.assertEqual(thread_factory.relation_pattern(relation_config), "{parent_thread_id}:entry:tool:worker")
+        self.assertEqual(thread_factory.relation("root", relation_config), "root:relation:rel_worker:agent:worker")
+        self.assertEqual(thread_factory.relation_pattern(relation_config), "{parent_thread_id}:relation:rel_worker:agent:worker")
+        self.assertEqual(thread_factory.branch_id_from_thread_id("root:branch:branch_01:mention:agent"), "branch_01")
+        self.assertEqual(thread_factory.logical_thread_key("root:branch:branch_01:mention:agent"), "root:mention:agent")
+        parsed = thread_factory.parse_relation_thread_id("root:relation:rel_worker:agent:worker")
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed.relation_id, "rel_worker")
+        self.assertEqual(parsed.target_agent_id, "worker")
         self.assertEqual(thread_factory.mention("root", "architect"), "root:mention:architect")
         self.assertEqual(thread_factory.mention_pattern("architect"), "{parent_thread_id}:mention:architect")
         self.assertEqual(thread_factory.parse_relation_thread_id("root:entry:ask_worker:worker").tool_name, "ask_worker")

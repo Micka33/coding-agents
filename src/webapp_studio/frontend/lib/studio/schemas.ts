@@ -71,6 +71,8 @@ export const ConversationEventSchema = z
     logical_message_id: z.string().nullable().default(null),
     version_parent_event_id: z.string().nullable().default(null),
     parent_event_id: z.string().nullable().default(null),
+    frontier_before_event_id: z.string().nullable().default(null),
+    frontier_after_event_id: z.string().nullable().default(null),
     seq: z.number().int(),
     created_at: z.string(),
     author_id: z.string(),

@@ -38,8 +38,44 @@ class RelationToolTests(unittest.TestCase):
         self.assertEqual(result, "answer")
         self.assertEqual(registry.graph_calls, ["worker"])
         self.assertEqual(graph.calls[0][0], {"messages": [{"role": "user", "content": "question"}]})
-        self.assertEqual(graph.calls[0][1]["configurable"]["thread_id"], "root:entry:ask_worker:worker")
-        self.assertEqual(graph.calls[0][1]["metadata"], {"team_id": "team", "agent_id": "worker"})
+        self.assertEqual(graph.calls[0][1]["configurable"]["thread_id"], "root:relation:rel_worker:agent:worker")
+        self.assertEqual(
+            graph.calls[0][1]["metadata"],
+            {
+                "team_id": "team",
+                "agent_id": "worker",
+                "branch_id": "",
+                "parent_logical_thread_key": "root",
+                "parent_physical_thread_id": "root",
+                "relation_id": "rel_worker",
+                "logical_thread_key": "root:relation:rel_worker:agent:worker",
+                "physical_thread_id": "root:relation:rel_worker:agent:worker",
+            },
+        )
+
+    def test_run_preserves_relation_identity_when_tool_name_changes(self) -> None:
+        first_graph = FakeGraph({"messages": [SimpleNamespace(content="first")]})
+        second_graph = FakeGraph({"messages": [SimpleNamespace(content="second")]})
+        registry = Registry(first_graph)
+        stable_relation = relation(source="entry", target="worker", tool_name="ask_worker", relation_id="stable-reviewer")
+        renamed_relation = relation(source="entry", target="worker", tool_name="ask_better_worker", relation_id="stable-reviewer")
+
+        first = RelationTool(stable_relation, registry, "fallback", ThreadIdFactory(), {})
+        second = RelationTool(renamed_relation, Registry(second_graph), "fallback", ThreadIdFactory(), {})
+
+        first.run("question", SimpleNamespace(config={"configurable": {"thread_id": "root:branch:branch_01:mention:entry"}}, state={}))
+        second.run("question", SimpleNamespace(config={"configurable": {"thread_id": "root:branch:branch_01:mention:entry"}}, state={}))
+
+        self.assertEqual(
+            first_graph.calls[0][1]["configurable"]["thread_id"],
+            "root:branch:branch_01:mention:entry:relation:stable-reviewer:agent:worker",
+        )
+        self.assertEqual(second_graph.calls[0][1]["configurable"]["thread_id"], first_graph.calls[0][1]["configurable"]["thread_id"])
+        self.assertEqual(first_graph.calls[0][1]["metadata"]["branch_id"], "branch_01")
+        self.assertEqual(
+            first_graph.calls[0][1]["metadata"]["logical_thread_key"],
+            "root:mention:entry:relation:stable-reviewer:agent:worker",
+        )
 
     def test_parent_thread_falls_back_and_last_message_text_handles_result_shapes(self) -> None:
         tool = RelationTool(relation(), Registry(FakeGraph()), "fallback", ThreadIdFactory(), {})

@@ -53,8 +53,8 @@ class TeamDefinition:
         agent_id_lookup = cls._case_insensitive_lookup(agent_references)
         raw_relations = mapping.get("relations")
         relations = tuple(
-            cls._canonical_relation(RelationDefinition.from_mapping(item), agent_id_lookup)
-            for item in (raw_relations if isinstance(raw_relations, list) else ())
+            cls._canonical_relation(RelationDefinition.from_mapping(item), agent_id_lookup, index)
+            for index, item in enumerate(raw_relations if isinstance(raw_relations, list) else ())
         )
         conversation = (
             TeamConversationSettings.from_mapping(mapping.get("conversation"))
@@ -109,9 +109,11 @@ class TeamDefinition:
         cls,
         relation: RelationDefinition,
         agent_id_lookup: dict[str, str],
+        index: int = 0,
     ) -> RelationDefinition:
         return replace(
             relation,
+            id=relation.id or f"relation_{index + 1:03d}",
             source=cls._canonical_agent_id(relation.source, agent_id_lookup),
             target=cls._canonical_agent_id(relation.target, agent_id_lookup),
         )

@@ -30,6 +30,7 @@ class TeamRuntimeManifestStore:
                 kind text not null,
                 agent_id text,
                 agent_name text,
+                relation_id text,
                 source_agent_id text,
                 target_agent_id text,
                 tool_name text,
@@ -38,6 +39,7 @@ class TeamRuntimeManifestStore:
             )
             """
         )
+        self._ensure_column(checkpointer_handle, "team_runtime_lanes", "relation_id", "text")
         self._upsert_manifest(checkpointer_handle, manifest)
         self._replace_lanes(checkpointer_handle, manifest)
         connection.commit()
@@ -71,12 +73,13 @@ class TeamRuntimeManifestStore:
                     kind,
                     agent_id,
                     agent_name,
+                    relation_id,
                     source_agent_id,
                     target_agent_id,
                     tool_name,
                     thread_id_pattern
                 )
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     manifest.team_id,
@@ -84,9 +87,24 @@ class TeamRuntimeManifestStore:
                     lane.kind,
                     lane.agent_id,
                     lane.agent_name,
+                    lane.relation_id,
                     lane.source_agent_id,
                     lane.target_agent_id,
                     lane.tool_name,
                     lane.thread_id_pattern,
                 ),
             )
+
+    def _ensure_column(
+        self,
+        checkpointer_handle: CheckpointerHandle,
+        table_name: str,
+        column_name: str,
+        column_definition: str,
+    ) -> None:
+        existing = {
+            str(row[1])
+            for row in checkpointer_handle.connection.execute(f"pragma table_info({table_name})").fetchall()
+        }
+        if column_name not in existing:
+            checkpointer_handle.connection.execute(f"alter table {table_name} add column {column_name} {column_definition}")
