@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+import uuid
 from collections.abc import Mapping, Sequence
 
 from langchain.tools import ToolRuntime
@@ -9,6 +11,12 @@ from src.team_loader.models.relation_definition import RelationDefinition
 from src.team_instanciator.conversation.protocols import GraphRegistry
 from src.team_instanciator.runtime.runnable_config_metadata_injector import RunnableConfigMetadataInjector
 from src.team_instanciator.runtime.thread_id_factory import ThreadIdFactory
+from src.team_instanciator.runtime.tool_call_edge import ToolCallEdge
+from src.team_instanciator.runtime.tool_call_edge_recorder import ToolCallEdgeRecorder
+
+
+_LOGICAL_THREAD_LOCKS: dict[tuple[str, str], threading.Lock] = {}
+_LOGICAL_THREAD_LOCKS_GUARD = threading.Lock()
 
 
 class RelationTool:
@@ -19,6 +27,7 @@ class RelationTool:
         parent_thread_id: str,
         thread_id_factory: ThreadIdFactory,
         checkpoint_metadata: Mapping[str, object],
+        tool_call_edge_recorder: ToolCallEdgeRecorder | None = None,
         metadata_injector: RunnableConfigMetadataInjector | None = None,
     ) -> None:
         self._relation = relation
@@ -26,6 +35,7 @@ class RelationTool:
         self._fallback_parent_thread_id = parent_thread_id
         self._thread_id_factory = thread_id_factory
         self._checkpoint_metadata = dict(checkpoint_metadata)
+        self._tool_call_edge_recorder = tool_call_edge_recorder or ToolCallEdgeRecorder()
         self._metadata_injector = metadata_injector or RunnableConfigMetadataInjector()
 
     def run(self, message: str, runtime: ToolRuntime) -> str:
@@ -34,22 +44,52 @@ class RelationTool:
         graph = self._registry.graph(self._relation.target)
         parent_thread_id = self._parent_thread_id(runtime)
         thread_id = self._thread_id_factory.relation(parent_thread_id, self._relation)
+        runtime_metadata = self._runtime_metadata(runtime)
+        branch_id = self._thread_id_factory.branch_id_from_thread_id(parent_thread_id) or self._metadata_value(runtime_metadata, "branch_id") or ""
+        parent_logical_thread_key = self._thread_id_factory.logical_thread_key(parent_thread_id)
+        child_logical_thread_key = self._thread_id_factory.logical_thread_key(thread_id)
+        edge_id = self._tool_call_id(runtime) or f"edge_{uuid.uuid4().hex}"
+        commit_id = f"commit_{edge_id}"
         metadata = {
             **self._checkpoint_metadata,
-            "branch_id": self._thread_id_factory.branch_id_from_thread_id(parent_thread_id) or "",
-            "parent_logical_thread_key": self._thread_id_factory.logical_thread_key(parent_thread_id),
+            "branch_id": branch_id,
+            "parent_logical_thread_key": parent_logical_thread_key,
             "parent_physical_thread_id": parent_thread_id,
             "relation_id": self._thread_id_factory.relation_id(self._relation),
-            "logical_thread_key": self._thread_id_factory.logical_thread_key(thread_id),
+            "logical_thread_key": child_logical_thread_key,
             "physical_thread_id": thread_id,
+            "run_id": self._metadata_value(runtime_metadata, "run_id") or "",
+            "tool_call_edge_id": edge_id,
+            "commit_id": commit_id,
         }
-        result = graph.invoke(
-            {"messages": [{"role": "user", "content": message}]},
-            config=self._metadata_injector.inject(
-                {"configurable": {"thread_id": thread_id}},
-                metadata,
-            ),
+        edge = ToolCallEdge(
+            id=edge_id,
+            commit_id=commit_id,
+            branch_id=branch_id,
+            parent_logical_thread_key=parent_logical_thread_key,
+            parent_physical_thread_id=parent_thread_id,
+            relation_id=self._thread_id_factory.relation_id(self._relation),
+            target_agent_id=self._relation.target,
+            child_logical_thread_key=child_logical_thread_key,
+            child_physical_thread_id=thread_id,
+            run_id=metadata["run_id"] or None,
+            status="running",
         )
+        lock = self._logical_thread_lock(branch_id, child_logical_thread_key)
+        with lock:
+            self._tool_call_edge_recorder.record_started(edge)
+            try:
+                result = graph.invoke(
+                    {"messages": [{"role": "user", "content": message}]},
+                    config=self._metadata_injector.inject(
+                        {"configurable": {"thread_id": thread_id}},
+                        metadata,
+                    ),
+                )
+            except Exception:
+                self._tool_call_edge_recorder.record_finished(edge_id, "failed")
+                raise
+            self._tool_call_edge_recorder.record_finished(edge_id, "success")
         return self._last_message_text(result)
 
     def _parent_thread_id(self, runtime: ToolRuntime) -> str:
@@ -58,6 +98,27 @@ class RelationTool:
         if isinstance(thread_id, str) and thread_id:
             return thread_id
         return self._fallback_parent_thread_id
+
+    def _runtime_metadata(self, runtime: ToolRuntime) -> Mapping[str, object]:
+        metadata = runtime.config.get("metadata", {}) if runtime.config else {}
+        return metadata if isinstance(metadata, Mapping) else {}
+
+    def _metadata_value(self, metadata: Mapping[str, object], key: str) -> str | None:
+        value = metadata.get(key)
+        return value if isinstance(value, str) and value else None
+
+    def _tool_call_id(self, runtime: ToolRuntime) -> str | None:
+        value = getattr(runtime, "tool_call_id", None)
+        return value if isinstance(value, str) and value else None
+
+    def _logical_thread_lock(self, branch_id: str, logical_thread_key: str) -> threading.Lock:
+        key = (branch_id, logical_thread_key)
+        with _LOGICAL_THREAD_LOCKS_GUARD:
+            lock = _LOGICAL_THREAD_LOCKS.get(key)
+            if lock is None:
+                lock = threading.Lock()
+                _LOGICAL_THREAD_LOCKS[key] = lock
+            return lock
 
     def _last_message_text(self, result: object) -> str:
         messages = result.get("messages") if isinstance(result, Mapping) else None

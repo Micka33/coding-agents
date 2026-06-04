@@ -14,6 +14,7 @@ from src.team_instanciator.factories.langchain_agent_factory import LangChainAge
 from src.team_instanciator.factories.relation_tool_factory import RelationToolFactory
 from src.team_instanciator.runtime.runnable_config_metadata_injector import RunnableConfigMetadataInjector
 from src.team_instanciator.runtime.thread_id_factory import ThreadIdFactory
+from src.team_instanciator.runtime.tool_call_edge_recorder import ToolCallEdgeRecorder
 from src.team_instanciator.resolvers.toolset_resolver import ToolsetResolver
 
 
@@ -34,6 +35,7 @@ class SubagentFactory:
         relation_tool_factory: RelationToolFactory,
         thread_id_factory: ThreadIdFactory,
         checkpoint_metadata_factory: CheckpointMetadataFactory | None = None,
+        tool_call_edge_recorder: ToolCallEdgeRecorder | None = None,
     ) -> None:
         self._runtime_resolver = runtime_resolver
         self._langchain_agent_factory = langchain_agent_factory
@@ -41,6 +43,7 @@ class SubagentFactory:
         self._relation_tool_factory = relation_tool_factory
         self._thread_id_factory = thread_id_factory
         self._checkpoint_metadata_factory = checkpoint_metadata_factory or CheckpointMetadataFactory()
+        self._tool_call_edge_recorder = tool_call_edge_recorder
         self._metadata_injector = RunnableConfigMetadataInjector()
 
     def create(self, team: TeamDefinition, registry: GraphRegistry, agent_id: str) -> SubagentSpec:
@@ -73,6 +76,7 @@ class SubagentFactory:
                 self._thread_id_factory.root(team.id),
                 self._thread_id_factory,
                 self._checkpoint_metadata_factory,
+                self._tool_call_edge_recorder,
             )
             for relation in team.relations
             if relation.source == agent_id and relation.relation == "tool"

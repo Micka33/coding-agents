@@ -25,6 +25,7 @@ from src.team_instanciator.configuration.runtime_configuration_validator import 
 from src.team_instanciator.resolvers.skills_resolver import SkillsResolver
 from src.team_instanciator.factories.subagent_factory import SubagentFactory
 from src.team_instanciator.runtime.thread_id_factory import ThreadIdFactory
+from src.team_instanciator.runtime.tool_call_edge_recorder import ToolCallEdgeRecorder
 from src.team_instanciator.manifest.team_runtime_manifest_builder import TeamRuntimeManifestBuilder
 from src.team_instanciator.manifest.team_runtime_manifest_store import TeamRuntimeManifestStore
 from src.team_instanciator.resolvers.toolset_resolver import ToolsetResolver
@@ -54,6 +55,7 @@ class TeamInstanciator:
         relation_tool_factory = RelationToolFactory()
         thread_id_factory = ThreadIdFactory()
         checkpoint_metadata_factory = CheckpointMetadataFactory()
+        tool_call_edge_recorder = ToolCallEdgeRecorder(checkpointer_handle.connection)
         runtime_manifest = TeamRuntimeManifestBuilder(thread_id_factory).build(team)
         langchain_agent_factory = LangChainAgentFactory(model_resolver, toolset_resolver)
         subagent_factory = SubagentFactory(
@@ -63,6 +65,7 @@ class TeamInstanciator:
             relation_tool_factory,
             thread_id_factory,
             checkpoint_metadata_factory,
+            tool_call_edge_recorder,
         )
         deep_agent_factory = DeepAgentFactory(
             model_resolver,
@@ -80,6 +83,7 @@ class TeamInstanciator:
             relation_tool_factory,
             thread_id_factory,
             checkpoint_metadata_factory,
+            tool_call_edge_recorder,
         )
         entrypoint = team.entrypoint()
         if entrypoint is None:

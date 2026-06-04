@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import sqlite3
+import threading
+import time
 import unittest
 from types import SimpleNamespace
 
@@ -7,6 +10,7 @@ from src.team_instanciator.tools.relation_tool import RelationTool
 from src.team_instanciator.factories.relation_tool_factory import RelationToolFactory
 from src.team_instanciator.errors.team_instanciator_error import TeamInstanciatorError
 from src.team_instanciator.runtime.thread_id_factory import ThreadIdFactory
+from src.team_instanciator.runtime.tool_call_edge_recorder import ToolCallEdgeRecorder
 from tests.support import FakeGraph, agent, relation, team
 
 
@@ -50,8 +54,128 @@ class RelationToolTests(unittest.TestCase):
                 "relation_id": "rel_worker",
                 "logical_thread_key": "root:relation:rel_worker:agent:worker",
                 "physical_thread_id": "root:relation:rel_worker:agent:worker",
+                "run_id": "",
+                "tool_call_edge_id": "call",
+                "commit_id": "commit_call",
             },
         )
+
+    def test_run_persists_tool_call_edge_success_and_failure(self) -> None:
+        connection = sqlite3.connect(":memory:")
+        success_graph = FakeGraph({"messages": [SimpleNamespace(content="answer")]})
+        relation_config = relation(source="entry", target="worker", tool_name="ask_worker")
+        tool = RelationTool(
+            relation_config,
+            Registry(success_graph),
+            parent_thread_id="fallback",
+            thread_id_factory=ThreadIdFactory(),
+            checkpoint_metadata={},
+            tool_call_edge_recorder=ToolCallEdgeRecorder(connection),
+        )
+
+        tool.run(
+            "question",
+            SimpleNamespace(
+                config={
+                    "configurable": {"thread_id": "root:branch:branch_01:mention:entry"},
+                    "metadata": {"run_id": "run_01"},
+                },
+                state={},
+                tool_call_id="call_success",
+            ),
+        )
+
+        success_row = connection.execute(
+            """
+            select
+                id,
+                commit_id,
+                branch_id,
+                parent_logical_thread_key,
+                parent_physical_thread_id,
+                relation_id,
+                target_agent_id,
+                child_logical_thread_key,
+                child_physical_thread_id,
+                run_id,
+                status
+            from tool_call_edges
+            where id = 'call_success'
+            """
+        ).fetchone()
+        self.assertEqual(
+            success_row,
+            (
+                "call_success",
+                "commit_call_success",
+                "branch_01",
+                "root:mention:entry",
+                "root:branch:branch_01:mention:entry",
+                "rel_worker",
+                "worker",
+                "root:mention:entry:relation:rel_worker:agent:worker",
+                "root:branch:branch_01:mention:entry:relation:rel_worker:agent:worker",
+                "run_01",
+                "success",
+            ),
+        )
+
+        class FailingGraph:
+            def invoke(self, *_args, **_kwargs):
+                raise RuntimeError("boom")
+
+        failing_tool = RelationTool(
+            relation_config,
+            Registry(FailingGraph()),
+            parent_thread_id="fallback",
+            thread_id_factory=ThreadIdFactory(),
+            checkpoint_metadata={},
+            tool_call_edge_recorder=ToolCallEdgeRecorder(connection),
+        )
+        with self.assertRaisesRegex(RuntimeError, "boom"):
+            failing_tool.run(
+                "question",
+                SimpleNamespace(config={"configurable": {"thread_id": "root:branch:branch_01:mention:entry"}}, state={}, tool_call_id="call_failed"),
+            )
+        self.assertEqual(connection.execute("select status from tool_call_edges where id = 'call_failed'").fetchone()[0], "failed")
+
+    def test_run_serializes_concurrent_calls_to_same_branch_and_logical_thread(self) -> None:
+        class BlockingGraph:
+            def __init__(self) -> None:
+                self.active = 0
+                self.max_active = 0
+                self.lock = threading.Lock()
+
+            def invoke(self, *_args, **_kwargs):
+                with self.lock:
+                    self.active += 1
+                    self.max_active = max(self.max_active, self.active)
+                time.sleep(0.02)
+                with self.lock:
+                    self.active -= 1
+                return {"messages": [SimpleNamespace(content="answer")]}
+
+        graph = BlockingGraph()
+        tool = RelationTool(
+            relation(source="entry", target="worker", tool_name="ask_worker"),
+            Registry(graph),
+            parent_thread_id="fallback",
+            thread_id_factory=ThreadIdFactory(),
+            checkpoint_metadata={},
+        )
+        runtime_one = SimpleNamespace(config={"configurable": {"thread_id": "root:branch:branch_01:mention:entry"}}, state={}, tool_call_id="call_1")
+        runtime_two = SimpleNamespace(config={"configurable": {"thread_id": "root:branch:branch_01:mention:entry"}}, state={}, tool_call_id="call_2")
+        threads = [
+            threading.Thread(target=tool.run, args=("question", runtime_one)),
+            threading.Thread(target=tool.run, args=("question", runtime_two)),
+        ]
+
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        self.assertEqual(graph.max_active, 1)
 
     def test_run_preserves_relation_identity_when_tool_name_changes(self) -> None:
         first_graph = FakeGraph({"messages": [SimpleNamespace(content="first")]})
