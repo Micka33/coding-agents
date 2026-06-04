@@ -108,8 +108,10 @@ export const AudioPlayerPlayButton = ({
 }: AudioPlayerPlayButtonProps) => (
   <Button asChild size="icon-sm" variant="outline">
     <MediaPlayButton
+      aria-label="Play or pause audio"
       className={cn("bg-transparent", className)}
       data-slot="audio-player-play-button"
+      title="Play or pause audio"
       {...props}
     />
   </Button>
@@ -125,8 +127,10 @@ export const AudioPlayerSeekBackwardButton = ({
 }: AudioPlayerSeekBackwardButtonProps) => (
   <Button asChild size="icon-sm" variant="outline">
     <MediaSeekBackwardButton
+      aria-label={`Seek backward ${seekOffset} seconds`}
       data-slot="audio-player-seek-backward-button"
       seekOffset={seekOffset}
+      title={`Seek backward ${seekOffset} seconds`}
       {...props}
     />
   </Button>
@@ -142,8 +146,10 @@ export const AudioPlayerSeekForwardButton = ({
 }: AudioPlayerSeekForwardButtonProps) => (
   <Button asChild size="icon-sm" variant="outline">
     <MediaSeekForwardButton
+      aria-label={`Seek forward ${seekOffset} seconds`}
       data-slot="audio-player-seek-forward-button"
       seekOffset={seekOffset}
+      title={`Seek forward ${seekOffset} seconds`}
       {...props}
     />
   </Button>
@@ -206,8 +212,10 @@ export const AudioPlayerMuteButton = ({
 }: AudioPlayerMuteButtonProps) => (
   <ButtonGroupText asChild className="bg-transparent">
     <MediaMuteButton
+      aria-label="Mute or unmute audio"
       className={cn("", className)}
       data-slot="audio-player-mute-button"
+      title="Mute or unmute audio"
       {...props}
     />
   </ButtonGroupText>

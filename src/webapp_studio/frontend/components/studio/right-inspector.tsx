@@ -115,6 +115,7 @@ export function RightInspector({
           changes={changes}
           files={files}
           generatedUi={generatedUi}
+          onViewChange={onViewChange}
           session={session}
           state={state}
           view={view}
@@ -129,6 +130,7 @@ function InspectorBody({
   changes,
   files,
   generatedUi,
+  onViewChange,
   session,
   state,
   view,
@@ -137,6 +139,7 @@ function InspectorBody({
   changes: StudioChanges | null
   files: StudioFileItem[]
   generatedUi: GeneratedUiSpec[]
+  onViewChange: (view: InspectorView) => void
   session: StudioSession | null
   state: StudioState
   view: InspectorView
@@ -146,7 +149,14 @@ function InspectorBody({
   }
 
   if (view.kind === "activity") {
-    return <ActivityPanel focusedAgentId={view.agentId} state={state} />
+    return (
+      <ActivityPanel
+        focusedAgentId={view.agentId}
+        onAgentSelect={(agentId) => onViewChange({ kind: "activity", agentId })}
+        onBack={() => onViewChange({ kind: "activity" })}
+        state={state}
+      />
+    )
   }
 
   if (view.kind === "changes") {
@@ -320,11 +330,13 @@ function ChangesInspector({
       <div className="grid gap-2">
         {changeItems.map((change) => (
           <button
+            aria-label={`Open change for ${change.path}`}
             className={`flex min-w-0 items-center gap-2 rounded-md border p-2 text-left hover:bg-muted ${
               change.id === selected?.id ? "bg-muted" : ""
             }`}
             key={change.id}
             onClick={() => setManualSelectedId(change.id)}
+            title={`Open change for ${change.path}`}
             type="button"
           >
             <GitCompareIcon className="size-4 shrink-0 text-emerald-600" />
@@ -487,10 +499,10 @@ function TerminalInspector({
               placeholder="Command"
               value={input}
             />
-            <Button disabled={!running || !input.trim()} onClick={() => void sendInput()} size="icon-sm" type="button">
+            <Button aria-label="Send terminal input" disabled={!running || !input.trim()} onClick={() => void sendInput()} size="icon-sm" type="button">
               <PlayIcon className="size-4" />
             </Button>
-            <Button disabled={!running} onClick={() => void stopTerminal()} size="icon-sm" type="button" variant="outline">
+            <Button aria-label="Stop terminal" disabled={!running} onClick={() => void stopTerminal()} size="icon-sm" type="button" variant="outline">
               <SquareIcon className="size-4" />
             </Button>
           </>

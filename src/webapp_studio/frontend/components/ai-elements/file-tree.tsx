@@ -177,7 +177,9 @@ export const FileTreeFolder = ({
           >
             <CollapsibleTrigger asChild>
               <button
+                aria-label={`${isExpanded ? "Collapse" : "Expand"} ${name}`}
                 className="flex shrink-0 cursor-pointer items-center border-none bg-transparent p-0"
+                title={`${isExpanded ? "Collapse" : "Expand"} ${name}`}
                 type="button"
               >
                 <ChevronRightIcon
@@ -189,8 +191,10 @@ export const FileTreeFolder = ({
               </button>
             </CollapsibleTrigger>
             <button
+              aria-label={`Select folder ${name}`}
               className="flex min-w-0 flex-1 cursor-pointer items-center gap-1 border-none bg-transparent p-0 text-start"
               onClick={handleSelect}
+              title={`Select folder ${name}`}
               type="button"
             >
               <FileTreeIcon>

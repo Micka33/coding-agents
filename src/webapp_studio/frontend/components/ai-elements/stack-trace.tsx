@@ -443,6 +443,10 @@ const FilePathButton = memo(
       }
     }, [frame, onFilePathClick]);
 
+    const location = `${frame.filePath}${
+      frame.lineNumber !== null ? `:${frame.lineNumber}` : ""
+    }${frame.columnNumber !== null ? `:${frame.columnNumber}` : ""}`;
+
     return (
       <button
         className={cn(
@@ -451,6 +455,7 @@ const FilePathButton = memo(
         )}
         disabled={!onFilePathClick}
         onClick={handleClick}
+        title={onFilePathClick ? `Open ${location}` : location}
         type="button"
       >
         {frame.filePath}

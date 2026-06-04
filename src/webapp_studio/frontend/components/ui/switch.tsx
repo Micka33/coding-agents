@@ -22,6 +22,7 @@ function Switch({
   onCheckedChange,
   onClick,
   size = "default",
+  title,
   type = "button",
   ...props
 }: SwitchProps) {
@@ -48,6 +49,10 @@ function Switch({
     onCheckedChange?.(nextChecked)
   }
 
+  const hint =
+    title ??
+    (typeof props["aria-label"] === "string" ? props["aria-label"] : undefined)
+
   return (
     <button
       aria-checked={isChecked}
@@ -60,6 +65,7 @@ function Switch({
       disabled={disabled}
       onClick={handleClick}
       role="switch"
+      title={hint}
       type={type}
       {...props}
     >

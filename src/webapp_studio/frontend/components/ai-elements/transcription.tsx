@@ -101,6 +101,10 @@ export const TranscriptionSegment = ({
     [onSeek, segment.startSecond, onClick]
   );
 
+  const segmentTitle = onSeek
+    ? `Jump to transcript segment at ${segment.startSecond} seconds`
+    : "Transcript segment";
+
   return (
     <button
       className={cn(
@@ -116,6 +120,7 @@ export const TranscriptionSegment = ({
       data-index={index}
       data-slot="transcription-segment"
       onClick={handleClick}
+      title={segmentTitle}
       type="button"
       {...props}
     >

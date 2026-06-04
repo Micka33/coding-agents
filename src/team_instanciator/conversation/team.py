@@ -290,29 +290,103 @@ class MentionAwareTeam:
         if connection is None:
             return []
         try:
-            rows = connection.execute(
-                """
-                select type, value
-                from writes
-                where thread_id = ? and checkpoint_ns = '' and channel = 'messages'
-                order by checkpoint_id asc, task_id asc, idx asc
-                """,
-                (thread_id,),
-            ).fetchall()
+            rows = self._private_message_rows(connection, thread_id)
         except Exception:
             return []
 
         messages: list[object] = []
-        for type_name, value in rows:
+        created_at_by_key: dict[str, str] = {}
+        for type_name, value, checkpoint_type, checkpoint_value in rows:
             try:
                 loaded = self._serde.loads_typed((type_name, value))
             except Exception:
                 continue
+            checkpoint_created_at = self._checkpoint_created_at(checkpoint_type, checkpoint_value)
             if isinstance(loaded, Overwrite):
                 messages = list(loaded.value if isinstance(loaded.value, list) else [loaded.value])
+                self._remember_message_timestamps(created_at_by_key, messages, checkpoint_created_at)
             else:
+                previous_keys = {self._message_timestamp_key(message) for message in messages}
+                loaded_messages = list(loaded if isinstance(loaded, list) else [loaded])
                 messages = add_messages(messages, loaded)
-        return [self._message_summary(message) for message in messages]
+                new_keys = {self._message_timestamp_key(message) for message in messages} - previous_keys
+                new_messages = [
+                    message
+                    for message in messages
+                    if self._message_timestamp_key(message) in new_keys
+                ]
+                self._remember_message_timestamps(
+                    created_at_by_key,
+                    loaded_messages + new_messages,
+                    checkpoint_created_at,
+                )
+        return [
+            self._message_summary(message, created_at=self._message_created_at(created_at_by_key, message))
+            for message in messages
+        ]
+
+    def _private_message_rows(self, connection, thread_id: str) -> list[tuple[object, object, object, object]]:
+        try:
+            return list(
+                connection.execute(
+                    """
+                    select w.type, w.value, c.type, c.checkpoint
+                    from writes w
+                    left join checkpoints c
+                      on c.thread_id = w.thread_id
+                     and c.checkpoint_ns = w.checkpoint_ns
+                     and c.checkpoint_id = w.checkpoint_id
+                    where w.thread_id = ? and w.checkpoint_ns = '' and w.channel = 'messages'
+                    order by w.checkpoint_id asc, w.task_id asc, w.idx asc
+                    """,
+                    (thread_id,),
+                ).fetchall()
+            )
+        except Exception:
+            return [
+                (type_name, value, None, None)
+                for type_name, value in connection.execute(
+                    """
+                    select type, value
+                    from writes
+                    where thread_id = ? and checkpoint_ns = '' and channel = 'messages'
+                    order by checkpoint_id asc, task_id asc, idx asc
+                    """,
+                    (thread_id,),
+                ).fetchall()
+            ]
+
+    def _checkpoint_created_at(self, type_name: object, value: object) -> str | None:
+        if not type_name or value is None:
+            return None
+        try:
+            loaded = self._serde.loads_typed((str(type_name), value))
+        except Exception:
+            return None
+        if not isinstance(loaded, Mapping):
+            return None
+        timestamp = loaded.get("ts") or loaded.get("created_at")
+        return str(timestamp).replace("+00:00", "Z") if timestamp else None
+
+    def _remember_message_timestamps(
+        self,
+        created_at_by_key: dict[str, str],
+        messages: list[object],
+        created_at: str | None,
+    ) -> None:
+        if created_at is None:
+            return
+        for message in messages:
+            created_at_by_key[self._message_timestamp_key(message)] = created_at
+
+    def _message_created_at(self, created_at_by_key: Mapping[str, str], message: object) -> str | None:
+        return created_at_by_key.get(self._message_timestamp_key(message))
+
+    def _message_timestamp_key(self, message: object) -> str:
+        raw_id = message.get("id") if isinstance(message, Mapping) else getattr(message, "id", None)
+        if raw_id:
+            return f"id:{raw_id}"
+        return f"object:{id(message)}"
 
     def _checkpoint_branch_label(self, mode: str) -> str:
         if mode == "edit":
@@ -328,17 +402,37 @@ class MentionAwareTeam:
         agent_id = thread_id.rsplit(marker, maxsplit=1)[-1]
         return agent_id if agent_id in self.parser.participants else None
 
-    def _message_summary(self, message: object) -> MessageSummaryDict:
+    def _message_summary(
+        self,
+        message: object,
+        *,
+        created_at: str | None = None,
+    ) -> MessageSummaryDict:
         content = getattr(message, "content", "")
         if isinstance(message, Mapping):
             content = message.get("content", "")
-        tool_calls = getattr(message, "tool_calls", None) if not isinstance(message, Mapping) else message.get("tool_calls")
-        return {
-            "type": str(getattr(message, "type", None) or (message.get("role") if isinstance(message, Mapping) else None) or "message"),
-            "name": self._optional_text(getattr(message, "name", None) if not isinstance(message, Mapping) else message.get("name")),
+        tool_calls = (
+            getattr(message, "tool_calls", None)
+            if not isinstance(message, Mapping)
+            else message.get("tool_calls")
+        )
+        summary: MessageSummaryDict = {
+            "type": str(
+                getattr(message, "type", None)
+                or (message.get("role") if isinstance(message, Mapping) else None)
+                or "message"
+            ),
+            "name": self._optional_text(
+                getattr(message, "name", None)
+                if not isinstance(message, Mapping)
+                else message.get("name")
+            ),
             "content": self._content_text(content),
             "tool_calls": tool_calls if tool_calls is not None and is_json_value(tool_calls) else [],
         }
+        if created_at is not None:
+            summary["created_at"] = created_at
+        return summary
 
     def _content_text(self, content: object) -> str:
         if isinstance(content, str):

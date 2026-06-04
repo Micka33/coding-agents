@@ -122,14 +122,20 @@ export type QueueItemActionProps = Omit<
 
 export const QueueItemAction = ({
   className,
+  title,
   ...props
 }: QueueItemActionProps) => (
   <Button
+    aria-label={props["aria-label"] ?? title ?? "Queue action"}
     className={cn(
       "size-auto rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-muted-foreground/10 hover:text-foreground group-hover:opacity-100",
       className
     )}
     size="icon"
+    title={
+      title ??
+      (typeof props["aria-label"] === "string" ? props["aria-label"] : "Queue action")
+    }
     type="button"
     variant="ghost"
     {...props}
@@ -210,6 +216,7 @@ export type QueueSectionTriggerProps = ComponentProps<"button">;
 export const QueueSectionTrigger = ({
   children,
   className,
+  title,
   ...props
 }: QueueSectionTriggerProps) => (
   <CollapsibleTrigger asChild>
@@ -218,6 +225,7 @@ export const QueueSectionTrigger = ({
         "group flex w-full items-center justify-between rounded-md bg-muted/40 px-3 py-2 text-start font-medium text-muted-foreground text-sm transition-colors hover:bg-muted",
         className
       )}
+      title={title ?? "Toggle queue section"}
       type="button"
       {...props}
     >

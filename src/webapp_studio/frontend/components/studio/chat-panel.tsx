@@ -1,15 +1,19 @@
 "use client"
 
-import type { KeyboardEvent } from "react"
+import type { KeyboardEvent, ReactNode } from "react"
 import { useEffect, useId, useMemo, useState } from "react"
 import type { FileUIPart } from "ai"
 import {
   ActivityIcon,
   AppWindowIcon,
+  CheckIcon,
+  CopyIcon,
   FileTextIcon,
   GitCompareIcon,
   PaperclipIcon,
+  PencilIcon,
   SendIcon,
+  XIcon,
 } from "lucide-react"
 
 import {
@@ -33,6 +37,12 @@ import type { InspectorView } from "@/components/studio/right-inspector"
 import { RichMarkdown } from "@/components/studio/rich-markdown"
 import { StatusPill } from "@/components/studio/status-pill"
 import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import type { StudioStreamStatus } from "@/lib/studio/use-studio-stream"
 import type {
   ConversationEvent,
@@ -67,6 +77,12 @@ type LocalOutboxItem = {
 type MentionOption = {
   aliases: string[]
   participant: string
+}
+
+type TranscriptTimestamp = {
+  dateTime: string
+  label: string
+  title: string
 }
 
 export function ChatPanel({
@@ -306,6 +322,7 @@ export function ChatPanel({
                           insertMention(option.participant)
                         }}
                         role="option"
+                        title={`Mention ${option.participant}`}
                         type="button"
                       >
                         <span>@{option.participant}</span>
@@ -355,9 +372,11 @@ export function ChatPanel({
               <div className="hidden min-w-0 gap-1 sm:flex">
                 {state.participants.map((participant) => (
                   <button
+                    aria-label={`Mention ${participant}`}
                     className="rounded-md border px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
                     key={participant}
                     onClick={() => insertMention(participant)}
+                    title={`Mention ${participant}`}
                     type="button"
                   >
                     @{participant}
@@ -393,8 +412,10 @@ function ActivityHint({
     const agent = activeAgents[0]
     return (
       <button
+        aria-label={`Open activity for ${agent.agent_id}`}
         className="mb-2 flex w-full items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-left text-sm text-amber-950 hover:bg-amber-100 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-100"
         onClick={() => onOpenInspector({ kind: "activity", agentId: agent.agent_id })}
+        title={`Open activity for ${agent.agent_id}`}
         type="button"
       >
         <ActivityIcon className="size-4" />
@@ -407,8 +428,10 @@ function ActivityHint({
   return (
     <div className="mb-2 rounded-md border border-amber-200 bg-amber-50 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-100">
       <button
+        aria-label={expanded ? "Collapse running agents" : "Expand running agents"}
         className="flex w-full items-center gap-2 px-3 py-2 text-left"
         onClick={onToggleExpanded}
+        title={expanded ? "Collapse running agents" : "Expand running agents"}
         type="button"
       >
         <ActivityIcon className="size-4" />
@@ -418,9 +441,11 @@ function ActivityHint({
         <div className="grid gap-1 border-t border-amber-200 p-2 dark:border-amber-900">
           {activeAgents.map((agent) => (
             <button
+              aria-label={`Open activity for ${agent.agent_id}`}
               className="flex items-center justify-between gap-2 rounded-md px-2 py-1 text-left hover:bg-amber-100 dark:hover:bg-amber-900"
               key={agent.agent_id}
               onClick={() => onOpenInspector({ kind: "activity", agentId: agent.agent_id })}
+              title={`Open activity for ${agent.agent_id}`}
               type="button"
             >
               <span className="truncate">{agent.agent_id}</span>
@@ -507,9 +532,44 @@ function TranscriptMessage({
   const linkedChanges = fileChangeLinks(event, changes)
   const sending = event.metadata.optimistic === true
   const failed = event.metadata.optimistic_status === "failed"
+  const [content, setContent] = useState(event.content)
+  const [draft, setDraft] = useState(event.content)
+  const [editing, setEditing] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const timestamp = transcriptTimestamp(event.created_at)
+
+  async function copyMessage() {
+    if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+      return
+    }
+    try {
+      await navigator.clipboard.writeText(content)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1200)
+    } catch {
+      setCopied(false)
+    }
+  }
+
+  function startEditing() {
+    setDraft(content)
+    setCopied(false)
+    setEditing(true)
+  }
+
+  function saveEdit() {
+    setContent(draft)
+    setCopied(false)
+    setEditing(false)
+  }
+
+  function cancelEdit() {
+    setDraft(content)
+    setEditing(false)
+  }
 
   return (
-    <Message from={from}>
+    <Message data-transcript-message from={from}>
       <MessageContent>
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <span>{event.author_id}</span>
@@ -521,14 +581,25 @@ function TranscriptMessage({
             <StatusPill key={mention} label={`@${mention}`} tone="sky" />
           ))}
         </div>
-        <RichMarkdown content={event.content} />
+        {editing ? (
+          <Textarea
+            aria-label="Edited human message"
+            className="min-h-24 bg-background/80"
+            onChange={(editEvent) => setDraft(editEvent.target.value)}
+            value={draft}
+          />
+        ) : (
+          <RichMarkdown content={content} />
+        )}
         {event.attachments.length > 0 ? (
           <div className="flex flex-wrap gap-2">
             {event.attachments.map((attachment) => (
               <button
+                aria-label={`Open attachment ${attachment.filename}`}
                 className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
                 key={attachment.id}
                 onClick={() => onOpenInspector({ kind: "files", selectedFileId: attachment.id })}
+                title={`Open attachment ${attachment.filename}`}
                 type="button"
               >
                 <FileTextIcon className="size-3" />
@@ -570,7 +641,148 @@ function TranscriptMessage({
           </div>
         ) : null}
       </MessageContent>
+      <TranscriptMessageActions
+        align={event.author_kind === "human" ? "end" : "start"}
+        canEdit={event.author_kind === "human"}
+        copied={copied}
+        editing={editing}
+        onCancelEdit={cancelEdit}
+        onCopy={copyMessage}
+        onSaveEdit={saveEdit}
+        onStartEdit={startEditing}
+        timestamp={timestamp}
+      />
     </Message>
+  )
+}
+
+function TranscriptMessageActions({
+  align,
+  canEdit,
+  copied,
+  editing,
+  onCancelEdit,
+  onCopy,
+  onSaveEdit,
+  onStartEdit,
+  timestamp,
+}: {
+  align: "end" | "start"
+  canEdit: boolean
+  copied: boolean
+  editing: boolean
+  onCancelEdit: () => void
+  onCopy: () => void
+  onSaveEdit: () => void
+  onStartEdit: () => void
+  timestamp: TranscriptTimestamp | null
+}) {
+  const actions = (
+    <>
+      <TranscriptActionButton
+        ariaLabel={copied ? "Message copied" : "Copy message"}
+        label="copier"
+        onClick={onCopy}
+      >
+        {copied ? (
+          <CheckIcon className="size-3" />
+        ) : (
+          <CopyIcon className="size-3" />
+        )}
+      </TranscriptActionButton>
+      {canEdit && !editing ? (
+        <TranscriptActionButton
+          ariaLabel="Edit human message"
+          label="éditer"
+          onClick={onStartEdit}
+        >
+          <PencilIcon className="size-3" />
+        </TranscriptActionButton>
+      ) : null}
+      {editing ? (
+        <>
+          <TranscriptActionButton
+            ariaLabel="Save message edit"
+            label="Enregistrer"
+            onClick={onSaveEdit}
+          >
+            <CheckIcon className="size-3" />
+          </TranscriptActionButton>
+          <TranscriptActionButton
+            ariaLabel="Cancel message edit"
+            label="Annuler"
+            onClick={onCancelEdit}
+          >
+            <XIcon className="size-3" />
+          </TranscriptActionButton>
+        </>
+      ) : null}
+    </>
+  )
+
+  return (
+    <div
+      className={`flex h-6 items-center gap-1 text-muted-foreground ${
+        align === "end" ? "justify-end" : "justify-start"
+      }`}
+    >
+      {align === "end" ? (
+        <>
+          <TranscriptTimestampLabel value={timestamp} />
+          {actions}
+        </>
+      ) : (
+        <>
+          {actions}
+          <TranscriptTimestampLabel value={timestamp} />
+        </>
+      )}
+    </div>
+  )
+}
+
+function TranscriptTimestampLabel({ value }: { value: TranscriptTimestamp | null }) {
+  if (!value) {
+    return null
+  }
+
+  return (
+    <time
+      className="px-1 text-[11px] leading-none text-muted-foreground"
+      dateTime={value.dateTime}
+      title={value.title}
+    >
+      {value.label}
+    </time>
+  )
+}
+
+function TranscriptActionButton({
+  ariaLabel,
+  children,
+  label,
+  onClick,
+}: {
+  ariaLabel: string
+  children: ReactNode
+  label: string
+  onClick: () => void
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          aria-label={ariaLabel}
+          onClick={onClick}
+          size="icon-xs"
+          type="button"
+          variant="ghost"
+        >
+          {children}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
   )
 }
 
@@ -601,6 +813,49 @@ function fileChangeLinks(event: ConversationEvent, changes: StudioChanges | null
       },
     ]
   })
+}
+
+function transcriptTimestamp(value: string): TranscriptTimestamp | null {
+  const parsed = Date.parse(value)
+  if (Number.isNaN(parsed)) {
+    return null
+  }
+
+  const date = new Date(parsed)
+  return {
+    dateTime: date.toISOString(),
+    label: formatTranscriptTimestampLabel(date, new Date()),
+    title: date.toLocaleString(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }),
+  }
+}
+
+function formatTranscriptTimestampLabel(date: Date, now: Date) {
+  const time = `${padDatePart(date.getHours())}:${padDatePart(date.getMinutes())}`
+  if (sameLocalDate(date, now)) {
+    return time
+  }
+
+  const day = `${padDatePart(date.getDate())}/${padDatePart(date.getMonth() + 1)}`
+  if (date.getFullYear() === now.getFullYear()) {
+    return `${day} ${time}`
+  }
+
+  return `${day}/${date.getFullYear()} ${time}`
+}
+
+function sameLocalDate(left: Date, right: Date) {
+  return (
+    left.getFullYear() === right.getFullYear() &&
+    left.getMonth() === right.getMonth() &&
+    left.getDate() === right.getDate()
+  )
+}
+
+function padDatePart(value: number) {
+  return String(value).padStart(2, "0")
 }
 
 function activeMentionQuery(value: string, cursorPosition: number) {

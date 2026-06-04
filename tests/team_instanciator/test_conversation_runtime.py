@@ -835,6 +835,69 @@ class ConversationRuntimeTests(unittest.TestCase):
             self.assertEqual(runtime._content_text(None), "")
             self.assertEqual(runtime._content_text(123), "123")
 
+    def test_mention_aware_team_activity_private_messages_include_checkpoint_created_at(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            connection = sqlite3.connect(":memory:", check_same_thread=False)
+            runtime = self._conversation_runtime({"agent-b": FakeGraph("answer")}, root=root, connection=connection)
+            thread_id = runtime.thread_id_factory.mention("thread", "agent-b")
+            checkpoint_type, checkpoint_blob = runtime._serde.dumps_typed(
+                {"id": "checkpoint-1", "ts": "2026-06-01T10:00:02+00:00"}
+            )
+            message_type, message_blob = runtime._serde.dumps_typed(AIMessage(content="working", id="message-1"))
+
+            connection.execute(
+                """
+                create table checkpoints (
+                    thread_id text not null,
+                    checkpoint_ns text not null default '',
+                    checkpoint_id text not null,
+                    parent_checkpoint_id text,
+                    type text,
+                    checkpoint blob,
+                    metadata blob,
+                    primary key (thread_id, checkpoint_ns, checkpoint_id)
+                )
+                """
+            )
+            connection.execute(
+                """
+                create table writes (
+                    thread_id text not null,
+                    checkpoint_ns text not null default '',
+                    checkpoint_id text not null,
+                    task_id text not null,
+                    idx integer not null,
+                    channel text not null,
+                    type text,
+                    value blob,
+                    primary key (thread_id, checkpoint_ns, checkpoint_id, task_id, idx)
+                )
+                """
+            )
+            connection.execute(
+                """
+                insert into checkpoints (
+                    thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, type, checkpoint, metadata
+                )
+                values (?, '', 'checkpoint-1', null, ?, ?, null)
+                """,
+                (thread_id, checkpoint_type, checkpoint_blob),
+            )
+            connection.execute(
+                """
+                insert into writes (thread_id, checkpoint_ns, checkpoint_id, task_id, idx, channel, type, value)
+                values (?, '', 'checkpoint-1', 'task', 0, 'messages', ?, ?)
+                """,
+                (thread_id, message_type, message_blob),
+            )
+            connection.commit()
+
+            activity = runtime.activity("agent-b")
+
+            self.assertEqual(activity["private_messages"][0]["content"], "working")
+            self.assertEqual(activity["private_messages"][0]["created_at"], "2026-06-01T10:00:02Z")
+
     def test_mention_aware_team_requires_conversation_config(self) -> None:
         with self.assertRaisesRegex(ValueError, "top-level conversation"):
             MentionAwareTeam(

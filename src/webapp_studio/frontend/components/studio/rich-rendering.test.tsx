@@ -1,33 +1,55 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react"
 import type { ComponentProps } from "react"
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
+import { ActivityPanel } from "@/components/studio/activity-panel"
 import { ChatPanel } from "@/components/studio/chat-panel"
 import { SchemaDisplay } from "@/components/ai-elements/schema-display"
-import { WebPreview, WebPreviewBody } from "@/components/ai-elements/web-preview"
+import {
+  WebPreview,
+  WebPreviewBody,
+} from "@/components/ai-elements/web-preview"
 import { GeneratedUiPanel } from "@/components/studio/generated-ui-panel"
 import { RichMarkdown } from "@/components/studio/rich-markdown"
 import { StudioSidebar } from "@/components/studio/studio-sidebar"
 import { ToolCallList } from "@/components/studio/tool-call-list"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import { loadStudioMock } from "@/lib/studio/fixtures"
+import type { StudioState } from "@/lib/studio/schemas"
 import { studioToolCallsFromValue } from "@/lib/studio/tool-calls"
 
+afterEach(() => {
+  vi.useRealTimers()
+})
+
 describe("rich markdown rendering", () => {
+  function renderRichMarkdown(content: string) {
+    return render(
+      <TooltipProvider>
+        <RichMarkdown content={content} />
+      </TooltipProvider>
+    )
+  }
+
   it("renders GFM content while skipping raw HTML", () => {
-    const { container } = render(
-      <RichMarkdown
-        content={[
-          "| Name | Status |",
-          "| --- | --- |",
-          "| Studio | ready |",
-          "",
-          "- [x] typed contracts",
-          "",
-          "[docs](https://example.com)",
-          "",
-          "<script>alert(1)</script>",
-        ].join("\n")}
-      />
+    const { container } = renderRichMarkdown(
+      [
+        "| Name | Status |",
+        "| --- | --- |",
+        "| Studio | ready |",
+        "",
+        "- [x] typed contracts",
+        "",
+        "[docs](https://example.com)",
+        "",
+        "<script>alert(1)</script>",
+      ].join("\n")
     )
 
     const link = screen.getByRole("link", { name: "docs" })
@@ -37,6 +59,44 @@ describe("rich markdown rendering", () => {
     expect(link).toHaveAttribute("target", "_blank")
     expect(link).toHaveAttribute("rel", "noopener noreferrer")
     expect(container.querySelector("script")).toBeNull()
+  })
+
+  it("copies code blocks without line numbers or language labels", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    })
+
+    renderRichMarkdown(["```bash", "pnpm test", "```"].join("\n"))
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Copy code block" })
+    )
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("pnpm test"))
+  })
+
+  it("copies tables as spreadsheet-ready TSV", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    })
+
+    renderRichMarkdown(
+      ["| Name | Status |", "| --- | --- |", "| Studio | ready |"].join("\n")
+    )
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Copy table for spreadsheet",
+      })
+    )
+
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith("Name\tStatus\nStudio\tready")
+    )
   })
 })
 
@@ -143,6 +203,310 @@ describe("studio sidebar controls", () => {
   })
 })
 
+function renderActivityPanel(props: ComponentProps<typeof ActivityPanel>) {
+  return render(
+    <TooltipProvider>
+      <ActivityPanel {...props} />
+    </TooltipProvider>
+  )
+}
+
+describe("activity panel navigation", () => {
+  it("shows the agent list before an agent is selected", () => {
+    const state = stateWithAgentActivity()
+    const onAgentSelect = vi.fn()
+
+    renderActivityPanel({
+      onAgentSelect,
+      onBack: () => undefined,
+      state,
+    })
+
+    expect(screen.getByRole("heading", { name: "Agents" })).toBeInTheDocument()
+    expect(screen.queryByText("Activity History")).not.toBeInTheDocument()
+    expect(screen.queryByText("agent history")).not.toBeInTheDocument()
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open activity for reviewer" })
+    )
+
+    expect(onAgentSelect).toHaveBeenCalledWith("reviewer")
+  })
+
+  it("shows the selected agent history and filters deliveries", () => {
+    const state = stateWithAgentActivity()
+    const onBack = vi.fn()
+
+    renderActivityPanel({
+      focusedAgentId: "agent",
+      onAgentSelect: () => undefined,
+      onBack,
+      state,
+    })
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Back to activity agents" })
+    )
+
+    expect(onBack).toHaveBeenCalledOnce()
+    expect(screen.queryByText("Activity History")).not.toBeInTheDocument()
+    expect(screen.queryByText("observable threads")).not.toBeInTheDocument()
+    expect(screen.getByText("agent history")).toBeInTheDocument()
+    expect(screen.getByText("older agent history")).toBeInTheDocument()
+    expect(screen.getByText("success")).toBeInTheDocument()
+    expect(screen.queryByText("reviewer history")).not.toBeInTheDocument()
+    expect(
+      screen.queryByText("reviewer delivery failed")
+    ).not.toBeInTheDocument()
+
+    const historyText =
+      screen.getByLabelText("Agent activity history").textContent ?? ""
+    expect(historyText.indexOf("agent history")).toBeLessThan(
+      historyText.indexOf("older agent history")
+    )
+  })
+
+  it("shows message timestamps beside actions without today's date", () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-06-04T12:00:00Z"))
+    const state = stateWithAgentActivity()
+    state.activity.private_threads = [
+      {
+        agent_id: "agent",
+        thread_id: "thread:mention:agent",
+        last_activity_at: "2026-06-04T10:45:00Z",
+        messages: [
+          {
+            type: "human",
+            name: "human",
+            created_at: "2026-06-04T10:30:00Z",
+            content: "@agent today",
+            tool_calls: [],
+          },
+          {
+            type: "ai",
+            name: "agent",
+            created_at: "2026-06-03T10:45:00Z",
+            content: "older final response",
+            tool_calls: [],
+          },
+        ],
+      },
+    ]
+
+    const { container } = renderActivityPanel({
+      focusedAgentId: "agent",
+      onAgentSelect: () => undefined,
+      onBack: () => undefined,
+      state,
+    })
+
+    const todayTime = container.querySelector(
+      'time[datetime="2026-06-04T10:30:00.000Z"]'
+    )
+    const olderTime = container.querySelector(
+      'time[datetime="2026-06-03T10:45:00.000Z"]'
+    )
+
+    expect(todayTime?.textContent).toMatch(/^\d{2}:\d{2}$/)
+    expect(olderTime?.textContent).toContain("/")
+  })
+
+  it("keeps human activity messages read-only while allowing copy", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    })
+    const state = stateWithAgentActivity()
+    const activeThread = state.activity.private_threads[0]!
+    activeThread.messages = [
+      {
+        type: "human",
+        name: "human",
+        content: "@agent please update",
+        tool_calls: [],
+      },
+      ...activeThread.messages,
+    ]
+
+    renderActivityPanel({
+      focusedAgentId: "agent",
+      onAgentSelect: () => undefined,
+      onBack: () => undefined,
+      state,
+    })
+
+    const humanMessage = screen
+      .getByText("@agent please update")
+      .closest("[data-activity-message]")
+
+    expect(humanMessage).not.toBeNull()
+    expect(
+      within(humanMessage as HTMLElement).queryByRole("button", {
+        name: "Edit human message",
+      })
+    ).not.toBeInTheDocument()
+
+    fireEvent.click(
+      within(humanMessage as HTMLElement).getByRole("button", {
+        name: "Copy message",
+      })
+    )
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith("@agent please update")
+    })
+  })
+
+  it("shows a persistent copy action under the final AI message", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    })
+    const finalContent = [
+      "## Final Answer",
+      "",
+      "- Done",
+      "",
+      "```bash",
+      "pnpm test",
+      "```",
+    ].join("\n")
+    const state = stateWithAgentActivity()
+    state.activity.private_threads = [
+      {
+        agent_id: "agent",
+        thread_id: "thread:mention:agent",
+        last_activity_at: "2026-06-01T10:00:05Z",
+        messages: [
+          {
+            type: "ai",
+            name: "agent",
+            content: "Working through the request.",
+            tool_calls: [
+              {
+                id: "call_1",
+                name: "shell",
+                input: { command: "pnpm test" },
+                output: "passed",
+              },
+            ],
+          },
+          {
+            type: "ai",
+            name: "agent",
+            content: finalContent,
+            tool_calls: [],
+          },
+        ],
+      },
+    ]
+
+    renderActivityPanel({
+      focusedAgentId: "agent",
+      onAgentSelect: () => undefined,
+      onBack: () => undefined,
+      state,
+    })
+
+    const finalHeading = screen.getByRole("heading", { name: "Final Answer" })
+    const finalMessage = finalHeading.closest("[data-activity-message]")
+
+    expect(finalMessage).not.toBeNull()
+
+    const finalCopyButton = within(finalMessage as HTMLElement).getByRole(
+      "button",
+      { name: "Copy message" }
+    )
+    expect(finalCopyButton).toBeVisible()
+
+    fireEvent.click(finalCopyButton)
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith(finalContent)
+    })
+  })
+})
+
+describe("chat panel transcript actions", () => {
+  it("shows timestamps and supports copy and local edit on public human messages", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    })
+    const fixture = loadStudioMock()
+    const state = {
+      ...fixture.state,
+      conversation: {
+        ...fixture.state.conversation,
+        events: [
+          {
+            ...fixture.state.conversation.events[0]!,
+            attachments: [],
+            author_id: "human",
+            author_kind: "human" as const,
+            content: "Original public prompt",
+            created_at: "2026-06-03T10:30:00Z",
+            id: "event_public_human_actions",
+            mentions: [],
+            metadata: {},
+          },
+        ],
+      },
+    }
+
+    const { container } = renderChatPanel({ state })
+    const timestamp = container.querySelector(
+      'time[datetime="2026-06-03T10:30:00.000Z"]'
+    )
+    const humanMessage = screen
+      .getByText("Original public prompt")
+      .closest("[data-transcript-message]")
+
+    expect(timestamp?.textContent).toContain("/")
+    expect(humanMessage).not.toBeNull()
+
+    fireEvent.click(
+      within(humanMessage as HTMLElement).getByRole("button", {
+        name: "Copy message",
+      })
+    )
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith("Original public prompt")
+    })
+
+    fireEvent.click(
+      within(humanMessage as HTMLElement).getByRole("button", {
+        name: "Edit human message",
+      })
+    )
+    fireEvent.change(screen.getByLabelText("Edited human message"), {
+      target: { value: "Edited public prompt" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Save message edit" }))
+
+    expect(screen.queryByText("Original public prompt")).not.toBeInTheDocument()
+
+    const editedMessage = screen
+      .getByText("Edited public prompt")
+      .closest("[data-transcript-message]")
+    expect(editedMessage).not.toBeNull()
+
+    fireEvent.click(
+      within(editedMessage as HTMLElement).getByRole("button", {
+        name: "Copy message",
+      })
+    )
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenLastCalledWith("Edited public prompt")
+    })
+  })
+})
+
 describe("chat panel local recovery", () => {
   it("persists failed submitted prompts in the per-thread outbox", async () => {
     const fixture = loadStudioMock()
@@ -164,18 +528,20 @@ describe("chat panel local recovery", () => {
     localStorage.clear()
 
     render(
-      <ChatPanel
-        busy={false}
-        changes={null}
-        liveApi
-        onOpenInspector={() => undefined}
-        onSubmitDraft={async () => {
-          throw new Error("offline")
-        }}
-        session={session}
-        state={state}
-        streamStatus="connected"
-      />
+      <TooltipProvider>
+        <ChatPanel
+          busy={false}
+          changes={null}
+          liveApi
+          onOpenInspector={() => undefined}
+          onSubmitDraft={async () => {
+            throw new Error("offline")
+          }}
+          session={session}
+          state={state}
+          streamStatus="connected"
+        />
+      </TooltipProvider>
     )
 
     fireEvent.change(screen.getByLabelText("Message"), {
@@ -232,7 +598,9 @@ describe("chat panel transcript affordances", () => {
       state,
     })
 
-    fireEvent.click(screen.getByRole("button", { name: "Open file change change_1" }))
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open file change change_1" })
+    )
 
     expect(onOpenInspector).toHaveBeenCalledWith({
       kind: "changes",
@@ -322,16 +690,18 @@ function renderChatPanel(
     Partial<ComponentProps<typeof ChatPanel>>
 ) {
   return render(
-    <ChatPanel
-      busy={false}
-      changes={null}
-      liveApi={false}
-      onOpenInspector={() => undefined}
-      onSubmitDraft={() => undefined}
-      session={null}
-      streamStatus="connected"
-      {...props}
-    />
+    <TooltipProvider>
+      <ChatPanel
+        busy={false}
+        changes={null}
+        liveApi={false}
+        onOpenInspector={() => undefined}
+        onSubmitDraft={() => undefined}
+        session={null}
+        streamStatus="connected"
+        {...props}
+      />
+    </TooltipProvider>
   )
 }
 
@@ -363,6 +733,99 @@ function renderSidebar(
       {...props}
     />
   )
+}
+
+function stateWithAgentActivity(): StudioState {
+  const fixture = loadStudioMock()
+  const agentState = fixture.state.conversation.agent_states[0]!
+  return {
+    ...fixture.state,
+    participants: ["agent", "reviewer"],
+    conversation: {
+      ...fixture.state.conversation,
+      agent_states: [
+        agentState,
+        {
+          ...agentState,
+          agent_id: "reviewer",
+          current_run_id: null,
+          current_snapshot_seq: null,
+          last_delivered_seq: 2,
+          queued: false,
+          running: false,
+        },
+      ],
+      deliveries: [
+        {
+          id: "delivery_agent",
+          team_id: "team",
+          conversation_id: "thread",
+          agent_id: "agent",
+          run_id: "run_agent",
+          snapshot_seq: 1,
+          status: "success",
+          created_at: "2026-06-01T10:00:01Z",
+          completed_at: "2026-06-01T10:00:02Z",
+          error: null,
+        },
+        {
+          id: "delivery_reviewer",
+          team_id: "team",
+          conversation_id: "thread",
+          agent_id: "reviewer",
+          run_id: "run_reviewer",
+          snapshot_seq: 2,
+          status: "failed",
+          created_at: "2026-06-01T10:00:03Z",
+          completed_at: "2026-06-01T10:00:04Z",
+          error: "reviewer delivery failed",
+        },
+      ],
+    },
+    activity: {
+      active_agent_ids: ["agent"],
+      private_threads: [
+        {
+          agent_id: "agent",
+          thread_id: "thread:mention:agent",
+          last_activity_at: "2026-06-01T10:00:05Z",
+          messages: [
+            {
+              type: "ai",
+              name: "agent",
+              content: "agent history",
+              tool_calls: [],
+            },
+          ],
+        },
+        {
+          agent_id: "agent",
+          thread_id: "thread:mention:agent:older",
+          last_activity_at: "2026-06-01T10:00:01Z",
+          messages: [
+            {
+              type: "ai",
+              name: "agent",
+              content: "older agent history",
+              tool_calls: [],
+            },
+          ],
+        },
+        {
+          agent_id: "reviewer",
+          thread_id: "thread:mention:reviewer",
+          messages: [
+            {
+              type: "ai",
+              name: "reviewer",
+              content: "reviewer history",
+              tool_calls: [],
+            },
+          ],
+        },
+      ],
+    },
+  }
 }
 
 describe("tool-call rendering", () => {
@@ -398,13 +861,17 @@ describe("tool-call rendering", () => {
     ])
   })
 
-  it("renders specialized terminal and test-result cards", () => {
+  it("renders compact collapsed action groups", () => {
     render(
       <ToolCallList
         value={[
           {
             id: "call_terminal",
             name: "shell",
+            args: {
+              command:
+                "uv run coverage report --include src/really/long/path/that/should/not/wrap/in/parameters/**/*.ts",
+            },
             output: "uv run coverage report",
           },
           {
@@ -412,14 +879,42 @@ describe("tool-call rendering", () => {
             name: "test_results",
             output: { passed: 2, failed: 0, skipped: 1, total: 3 },
           },
+          {
+            id: "call_pending",
+            name: "custom_tool",
+            input: { value: true },
+          },
         ]}
       />
     )
 
-    expect(screen.getByText("terminal: shell")).toBeInTheDocument()
+    const completedGroup = screen.getByRole("button", {
+      name: "2 actions effectuées",
+    })
+    const pendingGroup = screen.getByRole("button", {
+      name: "1 action en cours",
+    })
+
+    expect(completedGroup).toHaveAttribute("aria-expanded", "false")
+    expect(pendingGroup).toHaveAttribute("aria-expanded", "false")
+    expect(screen.queryByText("uv run coverage report")).not.toBeInTheDocument()
+
+    fireEvent.click(completedGroup)
+
+    const shellAction = screen.getByRole("button", {
+      name: /Open action run uv run coverage report/,
+    })
+    expect(shellAction).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", {
+        name: "Open action 2 passed, 0 failed, 1 skipped",
+      })
+    ).toBeInTheDocument()
+    expect(screen.queryByText("uv run coverage report")).not.toBeInTheDocument()
+
+    fireEvent.click(shellAction)
+
     expect(screen.getByText("uv run coverage report")).toBeInTheDocument()
-    expect(screen.getByText("test-results: test_results")).toBeInTheDocument()
-    expect(screen.getByText("2 passed")).toBeInTheDocument()
-    expect(screen.getByText("1 skipped")).toBeInTheDocument()
+    expect(screen.getByText("Result")).toBeInTheDocument()
   })
 })

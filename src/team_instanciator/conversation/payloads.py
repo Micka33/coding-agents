@@ -15,6 +15,7 @@ class MessageSummaryDict(TypedDict):
     name: str | None
     content: str
     tool_calls: JsonValue
+    created_at: NotRequired[str]
 
 
 class ConversationStateDict(TypedDict):

@@ -211,6 +211,7 @@ export function StudioSidebar({
               <div className="grid gap-1">
                 {conversationList.conversations.slice(0, 4).map((conversation) => (
                   <button
+                    aria-label={`Switch to thread ${conversation.conversation_id}`}
                     className={cn(
                       "min-w-0 rounded-md border px-2 py-1 text-left text-xs hover:bg-muted",
                       conversation.conversation_id === state.conversation_id ? "bg-muted" : null
@@ -220,6 +221,7 @@ export function StudioSidebar({
                       updateThreadDraft(conversation.conversation_id)
                       switchThread(conversation.conversation_id)
                     }}
+                    title={`Switch to thread ${conversation.conversation_id}`}
                     type="button"
                   >
                     <span className="block truncate font-medium">{conversation.conversation_id}</span>
@@ -260,6 +262,7 @@ export function StudioSidebar({
           <label className="flex items-center justify-between gap-3">
             <span className="text-sm">Mention hook</span>
             <Switch
+              aria-label="Toggle mention hook"
               checked={state.runtime.mention_hook_enabled}
               onCheckedChange={onRuntimeChange}
             />
@@ -409,8 +412,10 @@ export function StudioSidebar({
             activeAgents.map((agent) => (
               <div className="flex items-center justify-between gap-2 rounded-md border p-2" key={agent.agent_id}>
                 <button
+                  aria-label={`Open activity for ${agent.agent_id}`}
                   className="min-w-0 truncate text-left text-sm font-medium hover:underline"
                   onClick={() => onOpenInspector({ kind: "activity", agentId: agent.agent_id })}
+                  title={`Open activity for ${agent.agent_id}`}
                   type="button"
                 >
                   {agent.agent_id}

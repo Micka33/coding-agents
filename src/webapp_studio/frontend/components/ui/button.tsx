@@ -44,22 +44,68 @@ function Button({
   variant = "default",
   size = "default",
   asChild = false,
+  title,
+  children,
   ...props
 }: React.ComponentProps<"button"> &
   VariantProps<typeof buttonVariants> & {
     asChild?: boolean
   }) {
   const Comp = asChild ? Slot.Root : "button"
+  const ariaLabel =
+    typeof props["aria-label"] === "string" ? props["aria-label"] : undefined
+  const hint = title ?? ariaLabel ?? buttonTitleFromChildren(children)
 
   return (
     <Comp
       data-slot="button"
       data-variant={variant}
       data-size={size}
+      title={hint}
       className={cn(buttonVariants({ variant, size, className }))}
       {...props}
-    />
+    >
+      {children}
+    </Comp>
   )
+}
+
+function buttonTitleFromChildren(
+  children: React.ReactNode
+): string | undefined {
+  if (typeof children === "string" || typeof children === "number") {
+    return String(children).trim() || undefined
+  }
+
+  if (Array.isArray(children)) {
+    const title = children
+      .map((child) => buttonTitleFromChildren(child))
+      .filter(Boolean)
+      .join(" ")
+      .trim()
+
+    return title || undefined
+  }
+
+  if (
+    React.isValidElement<{
+      "aria-label"?: unknown
+      children?: React.ReactNode
+      title?: unknown
+    }>(children)
+  ) {
+    if (typeof children.props.title === "string") {
+      return children.props.title.trim() || undefined
+    }
+
+    if (typeof children.props["aria-label"] === "string") {
+      return children.props["aria-label"].trim() || undefined
+    }
+
+    return buttonTitleFromChildren(children.props.children)
+  }
+
+  return undefined
 }
 
 export { Button, buttonVariants }
