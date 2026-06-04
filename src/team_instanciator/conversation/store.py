@@ -58,7 +58,7 @@ class ConversationStore:
         self._default_max_cascade_turns = default_max_cascade_turns
         self._lock = threading.RLock()
         self._events: list[ConversationEvent] = []
-        self._agent_states: dict[str, AgentDeliveryState] = {}
+        self._agent_states: dict[tuple[str, str], AgentDeliveryState] = {}
         self._deliveries: list[ConversationDelivery] = []
         self._branches: dict[str, ConversationBranch] = {}
         self._interrupts: dict[str, ConversationInterrupt] = {}
@@ -77,6 +77,10 @@ class ConversationStore:
         author_id: str,
         author_kind: AuthorKind,
         content: str,
+        branch_id: str | None = None,
+        logical_message_id: str | None = None,
+        version_parent_event_id: str | None = None,
+        parent_event_id: str | None = None,
         mentions: tuple[str, ...] = (),
         attachments: tuple[ConversationFileRef, ...] = (),
         source_thread_id: str | None = None,
@@ -85,10 +89,15 @@ class ConversationStore:
     ) -> ConversationEvent:
         with self._lock:
             seq = self._next_seq()
+            event_id = f"evt_{uuid.uuid4().hex}"
             event = ConversationEvent(
-                id=f"evt_{uuid.uuid4().hex}",
+                id=event_id,
                 team_id=self.team_id,
                 conversation_id=self.conversation_id,
+                branch_id=self._resolved_branch_id(branch_id),
+                logical_message_id=logical_message_id or event_id,
+                version_parent_event_id=version_parent_event_id,
+                parent_event_id=parent_event_id,
                 seq=seq,
                 created_at=self._now(),
                 author_id=author_id,
@@ -109,6 +118,10 @@ class ConversationStore:
                 insert into team_conversation_events (
                     team_id,
                     conversation_id,
+                    branch_id,
+                    logical_message_id,
+                    version_parent_event_id,
+                    parent_event_id,
                     seq,
                     id,
                     created_at,
@@ -120,11 +133,15 @@ class ConversationStore:
                     source_message_id,
                     metadata_json
                 )
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     event.team_id,
                     event.conversation_id,
+                    event.branch_id,
+                    event.logical_message_id or event.id,
+                    event.version_parent_event_id,
+                    event.parent_event_id,
                     event.seq,
                     event.id,
                     event.created_at,
@@ -168,13 +185,21 @@ class ConversationStore:
             self._connection.commit()
             return event
 
-    def list_events(self, *, after_seq: int = 0, through_seq: int | None = None) -> list[ConversationEvent]:
+    def list_events(
+        self,
+        *,
+        after_seq: int = 0,
+        through_seq: int | None = None,
+        branch_id: str | None | _UnsetType = _UNSET,
+    ) -> list[ConversationEvent]:
         with self._lock:
+            resolved_branch_id = self.current_branch_id() if branch_id is _UNSET else branch_id
             if self._connection is None:
                 return [
                     event
                     for event in self._events
                     if event.seq > after_seq and (through_seq is None or event.seq <= through_seq)
+                    and self._event_visible_in_branch(event, resolved_branch_id)
                 ]
 
             clauses = ["team_id = ?", "conversation_id = ?", "seq > ?"]
@@ -187,6 +212,10 @@ class ConversationStore:
                 select
                     team_id,
                     conversation_id,
+                    branch_id,
+                    logical_message_id,
+                    version_parent_event_id,
+                    parent_event_id,
                     seq,
                     id,
                     created_at,
@@ -203,7 +232,41 @@ class ConversationStore:
                 """,
                 tuple(params),
             ).fetchall()
-            return [self._event_from_row(row) for row in rows]
+            events = [self._event_from_row(row) for row in rows]
+            return [event for event in events if self._event_visible_in_branch(event, resolved_branch_id)]
+
+    def get_event(self, event_id: str) -> ConversationEvent | None:
+        with self._lock:
+            if self._connection is None:
+                for event in self._events:
+                    if event.id == event_id:
+                        return replace(event)
+                return None
+            row = self._connection.execute(
+                """
+                select
+                    team_id,
+                    conversation_id,
+                    branch_id,
+                    logical_message_id,
+                    version_parent_event_id,
+                    parent_event_id,
+                    seq,
+                    id,
+                    created_at,
+                    author_id,
+                    author_kind,
+                    content,
+                    mentions_json,
+                    source_thread_id,
+                    source_message_id,
+                    metadata_json
+                from team_conversation_events
+                where team_id = ? and conversation_id = ? and id = ?
+                """,
+                (self.team_id, self.conversation_id, event_id),
+            ).fetchone()
+            return self._event_from_row(row) if row is not None else None
 
     def get_runtime_state(self) -> ConversationRuntimeState:
         with self._lock:
@@ -247,23 +310,31 @@ class ConversationStore:
                 self._upsert_runtime_state(updated)
             return replace(updated)
 
-    def ensure_agent_state(self, agent_id: str) -> AgentDeliveryState:
+    def ensure_agent_state(self, agent_id: str, *, branch_id: str | None = None) -> AgentDeliveryState:
         with self._lock:
-            state = self.get_agent_state(agent_id)
+            resolved_branch_id = self._resolved_branch_id(branch_id)
+            state = self.get_agent_state(agent_id, branch_id=resolved_branch_id)
             if state is not None:
                 return state
-            state = AgentDeliveryState(team_id=self.team_id, conversation_id=self.conversation_id, agent_id=agent_id)
+            state = AgentDeliveryState(
+                team_id=self.team_id,
+                conversation_id=self.conversation_id,
+                branch_id=resolved_branch_id,
+                agent_id=agent_id,
+            )
             self.save_agent_state(state)
             return replace(state)
 
-    def get_agent_state(self, agent_id: str) -> AgentDeliveryState | None:
+    def get_agent_state(self, agent_id: str, *, branch_id: str | None = None) -> AgentDeliveryState | None:
         with self._lock:
+            resolved_branch_id = self._resolved_branch_id(branch_id)
             if self._connection is None:
-                state = self._agent_states.get(agent_id)
+                state = self._agent_states.get((resolved_branch_id, agent_id))
                 return replace(state) if state is not None else None
             row = self._connection.execute(
                 """
                 select
+                    branch_id,
                     last_delivered_seq,
                     running,
                     queued,
@@ -274,51 +345,68 @@ class ConversationStore:
                     last_identity_refresh_seq,
                     token_estimate_since_identity_refresh
                 from team_conversation_agent_state
-                where team_id = ? and conversation_id = ? and agent_id = ?
+                where team_id = ? and conversation_id = ? and branch_id = ? and agent_id = ?
                 """,
-                (self.team_id, self.conversation_id, agent_id),
+                (self.team_id, self.conversation_id, resolved_branch_id, agent_id),
             ).fetchone()
             if row is None:
                 return None
             return AgentDeliveryState(
                 team_id=self.team_id,
                 conversation_id=self.conversation_id,
+                branch_id=str(row[0]),
                 agent_id=agent_id,
-                last_delivered_seq=int(row[0] or 0),
-                running=bool(row[1]),
-                queued=bool(row[2]),
-                queued_after_seq=row[3],
-                current_run_id=row[4],
-                current_snapshot_seq=row[5],
-                stop_requested=bool(row[6]),
-                last_identity_refresh_seq=int(row[7] or 0),
-                token_estimate_since_identity_refresh=int(row[8] or 0),
+                last_delivered_seq=int(row[1] or 0),
+                running=bool(row[2]),
+                queued=bool(row[3]),
+                queued_after_seq=row[4],
+                current_run_id=row[5],
+                current_snapshot_seq=row[6],
+                stop_requested=bool(row[7]),
+                last_identity_refresh_seq=int(row[8] or 0),
+                token_estimate_since_identity_refresh=int(row[9] or 0),
             )
 
-    def list_agent_states(self) -> list[AgentDeliveryState]:
+    def list_agent_states(self, *, branch_id: str | None | _UnsetType = _UNSET) -> list[AgentDeliveryState]:
         with self._lock:
+            resolved_branch_id = self.current_branch_id() if branch_id is _UNSET else branch_id
             if self._connection is None:
-                return [replace(self._agent_states[agent_id]) for agent_id in sorted(self._agent_states)]
+                states = [
+                    state
+                    for (state_branch_id, _agent_id), state in self._agent_states.items()
+                    if resolved_branch_id is None or state_branch_id == resolved_branch_id
+                ]
+                return [replace(state) for state in sorted(states, key=lambda item: (item.branch_id, item.agent_id))]
+            clauses = ["team_id = ?", "conversation_id = ?"]
+            params: list[object] = [self.team_id, self.conversation_id]
+            if resolved_branch_id is not None:
+                clauses.append("branch_id = ?")
+                params.append(resolved_branch_id)
             rows = self._connection.execute(
-                """
-                select agent_id from team_conversation_agent_state
-                where team_id = ? and conversation_id = ?
-                order by agent_id asc
+                f"""
+                select branch_id, agent_id from team_conversation_agent_state
+                where {" and ".join(clauses)}
+                order by branch_id asc, agent_id asc
                 """,
-                (self.team_id, self.conversation_id),
+                tuple(params),
             ).fetchall()
-            return [state for row in rows if (state := self.get_agent_state(row[0])) is not None]
+            return [
+                state
+                for row in rows
+                if (state := self.get_agent_state(str(row[1]), branch_id=str(row[0]))) is not None
+            ]
 
     def save_agent_state(self, state: AgentDeliveryState) -> None:
         with self._lock:
             if self._connection is None:
-                self._agent_states[state.agent_id] = replace(state)
+                self._agent_states[(state.branch_id, state.agent_id)] = replace(state)
                 return
             self._connection.execute(
                 """
                 insert into team_conversation_agent_state (
                     team_id,
                     conversation_id,
+                    branch_id,
                     agent_id,
                     last_delivered_seq,
                     running,
@@ -330,8 +418,8 @@ class ConversationStore:
                     last_identity_refresh_seq,
                     token_estimate_since_identity_refresh
                 )
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                on conflict(team_id, conversation_id, agent_id) do update set
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                on conflict(team_id, conversation_id, branch_id, agent_id) do update set
                     last_delivered_seq = excluded.last_delivered_seq,
                     running = excluded.running,
                     queued = excluded.queued,
@@ -345,6 +433,7 @@ class ConversationStore:
                 (
                     state.team_id,
                     state.conversation_id,
+                    state.branch_id,
                     state.agent_id,
                     state.last_delivered_seq,
                     int(state.running),
@@ -359,47 +448,54 @@ class ConversationStore:
             )
             self._connection.commit()
 
-    def enqueue(self, agent_id: str, after_seq: int) -> AgentDeliveryState:
+    def enqueue(self, agent_id: str, after_seq: int, *, branch_id: str | None = None) -> AgentDeliveryState:
         with self._lock:
-            state = self.ensure_agent_state(agent_id)
+            state = self.ensure_agent_state(agent_id, branch_id=branch_id)
             queued_after_seq = max(after_seq, state.queued_after_seq or 0)
             updated = replace(state, queued=True, queued_after_seq=queued_after_seq)
             self.save_agent_state(updated)
             return updated
 
-    def cancel_queued(self, agent_id: str) -> AgentDeliveryState:
+    def cancel_queued(self, agent_id: str, *, branch_id: str | None = None) -> AgentDeliveryState:
         with self._lock:
-            state = self.ensure_agent_state(agent_id)
+            state = self.ensure_agent_state(agent_id, branch_id=branch_id)
             if state.running:
                 return state
             updated = replace(state, queued=False, queued_after_seq=None, stop_requested=False)
             self.save_agent_state(updated)
             return updated
 
-    def clear_pending_queue(self) -> list[AgentDeliveryState]:
+    def clear_pending_queue(self, *, branch_id: str | None = None) -> list[AgentDeliveryState]:
         with self._lock:
             cleared = []
-            for state in self.list_agent_states():
+            for state in self.list_agent_states(branch_id=self._resolved_branch_id(branch_id)):
                 if state.queued and not state.running:
-                    cleared.append(self.cancel_queued(state.agent_id))
+                    cleared.append(self.cancel_queued(state.agent_id, branch_id=state.branch_id))
             return cleared
 
-    def pending_idle_agent_ids(self, *, limit: int | None = None) -> list[str]:
+    def pending_idle_agent_ids(self, *, limit: int | None = None, branch_id: str | None = None) -> list[str]:
         states = [
             state
-            for state in self.list_agent_states()
+            for state in self.list_agent_states(branch_id=self._resolved_branch_id(branch_id))
             if state.queued and not state.running and not state.stop_requested
         ]
         states.sort(key=lambda item: (item.queued_after_seq or 0, item.agent_id))
         agent_ids = [state.agent_id for state in states]
         return agent_ids[:limit] if limit is not None else agent_ids
 
-    def running_count(self) -> int:
-        return sum(1 for state in self.list_agent_states() if state.running)
+    def running_count(self, *, branch_id: str | None = None) -> int:
+        return sum(1 for state in self.list_agent_states(branch_id=self._resolved_branch_id(branch_id)) if state.running)
 
-    def mark_run_started(self, agent_id: str, *, run_id: str, snapshot_seq: int) -> AgentDeliveryState:
+    def mark_run_started(
+        self,
+        agent_id: str,
+        *,
+        run_id: str,
+        snapshot_seq: int,
+        branch_id: str | None = None,
+    ) -> AgentDeliveryState:
         with self._lock:
-            state = self.ensure_agent_state(agent_id)
+            state = self.ensure_agent_state(agent_id, branch_id=branch_id)
             keep_queued = bool(state.queued and state.queued_after_seq is not None and state.queued_after_seq > snapshot_seq)
             updated = replace(
                 state,
@@ -422,9 +518,10 @@ class ConversationStore:
         delivered: bool,
         identity_inserted: bool,
         token_estimate: int,
+        branch_id: str | None = None,
     ) -> bool:
         with self._lock:
-            state = self.ensure_agent_state(agent_id)
+            state = self.ensure_agent_state(agent_id, branch_id=branch_id)
             if state.current_run_id != run_id:
                 return False
             queued_after_seq = state.queued_after_seq
@@ -448,15 +545,15 @@ class ConversationStore:
             self.save_agent_state(updated)
             return True
 
-    def request_stop(self, agent_id: str) -> AgentDeliveryState:
+    def request_stop(self, agent_id: str, *, branch_id: str | None = None) -> AgentDeliveryState:
         with self._lock:
-            state = self.ensure_agent_state(agent_id)
+            state = self.ensure_agent_state(agent_id, branch_id=branch_id)
             updated = replace(state, stop_requested=True)
             self.save_agent_state(updated)
             return updated
 
-    def is_stop_requested(self, agent_id: str, run_id: str) -> bool:
-        state = self.get_agent_state(agent_id)
+    def is_stop_requested(self, agent_id: str, run_id: str, *, branch_id: str | None = None) -> bool:
+        state = self.get_agent_state(agent_id, branch_id=branch_id)
         return bool(state and state.current_run_id == run_id and state.stop_requested)
 
     def record_delivery(
@@ -467,11 +564,13 @@ class ConversationStore:
         run_id: str | None = None,
         snapshot_seq: int | None = None,
         error: str | None = None,
+        branch_id: str | None = None,
     ) -> ConversationDelivery:
         delivery = ConversationDelivery(
             id=f"dlv_{uuid.uuid4().hex}",
             team_id=self.team_id,
             conversation_id=self.conversation_id,
+            branch_id=self._resolved_branch_id(branch_id),
             agent_id=agent_id,
             run_id=run_id,
             snapshot_seq=snapshot_seq,
@@ -489,6 +588,7 @@ class ConversationStore:
                 insert into team_conversation_deliveries (
                     team_id,
                     conversation_id,
+                    branch_id,
                     id,
                     agent_id,
                     run_id,
@@ -498,11 +598,12 @@ class ConversationStore:
                     completed_at,
                     error
                 )
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     delivery.team_id,
                     delivery.conversation_id,
+                    delivery.branch_id,
                     delivery.id,
                     delivery.agent_id,
                     delivery.run_id,
@@ -543,6 +644,7 @@ class ConversationStore:
         with self._lock:
             if self._connection is None:
                 self._branches[branch.id] = replace(branch)
+                self._initialize_branch_agent_states(branch)
                 return replace(branch)
             self._connection.execute(
                 """
@@ -576,6 +678,7 @@ class ConversationStore:
                 ),
             )
             self._connection.commit()
+            self._initialize_branch_agent_states(branch)
             return replace(branch)
 
     def list_branches(self) -> list[ConversationBranch]:
@@ -781,13 +884,24 @@ class ConversationStore:
             self._connection.commit()
             return replace(resolved)
 
-    def list_deliveries(self) -> list[ConversationDelivery]:
+    def list_deliveries(self, *, branch_id: str | None | _UnsetType = _UNSET) -> list[ConversationDelivery]:
         with self._lock:
+            resolved_branch_id = self.current_branch_id() if branch_id is _UNSET else branch_id
             if self._connection is None:
-                return list(self._deliveries)
+                return [
+                    delivery
+                    for delivery in self._deliveries
+                    if resolved_branch_id is None or delivery.branch_id == resolved_branch_id
+                ]
+            clauses = ["team_id = ?", "conversation_id = ?"]
+            params: list[object] = [self.team_id, self.conversation_id]
+            if resolved_branch_id is not None:
+                clauses.append("branch_id = ?")
+                params.append(resolved_branch_id)
             rows = self._connection.execute(
-                """
+                f"""
                 select
+                    branch_id,
                     id,
                     agent_id,
                     run_id,
@@ -797,23 +911,24 @@ class ConversationStore:
                     completed_at,
                     error
                 from team_conversation_deliveries
-                where team_id = ? and conversation_id = ?
+                where {" and ".join(clauses)}
                 order by created_at asc, id asc
                 """,
-                (self.team_id, self.conversation_id),
+                tuple(params),
             ).fetchall()
             return [
                 ConversationDelivery(
-                    id=str(row[0]),
+                    id=str(row[1]),
                     team_id=self.team_id,
                     conversation_id=self.conversation_id,
-                    agent_id=str(row[1]),
-                    run_id=str(row[2]) if row[2] is not None else None,
-                    snapshot_seq=int(row[3]) if row[3] is not None else None,
-                    status=self._delivery_status(row[4]),
-                    created_at=str(row[5]),
-                    completed_at=str(row[6]) if row[6] is not None else None,
-                    error=str(row[7]) if row[7] is not None else None,
+                    branch_id=str(row[0]),
+                    agent_id=str(row[2]),
+                    run_id=str(row[3]) if row[3] is not None else None,
+                    snapshot_seq=int(row[4]) if row[4] is not None else None,
+                    status=self._delivery_status(row[5]),
+                    created_at=str(row[6]),
+                    completed_at=str(row[7]) if row[7] is not None else None,
+                    error=str(row[8]) if row[8] is not None else None,
                 )
                 for row in rows
             ]
@@ -827,6 +942,10 @@ class ConversationStore:
             create table if not exists team_conversation_events (
                 team_id text not null,
                 conversation_id text not null,
+                branch_id text not null default 'branch_main',
+                logical_message_id text,
+                version_parent_event_id text,
+                parent_event_id text,
                 seq integer not null,
                 id text not null,
                 created_at text not null,
@@ -863,6 +982,7 @@ class ConversationStore:
             create table if not exists team_conversation_agent_state (
                 team_id text not null,
                 conversation_id text not null,
+                branch_id text not null default 'branch_main',
                 agent_id text not null,
                 last_delivered_seq integer not null,
                 running integer not null,
@@ -873,7 +993,7 @@ class ConversationStore:
                 stop_requested integer not null,
                 last_identity_refresh_seq integer not null,
                 token_estimate_since_identity_refresh integer not null,
-                primary key (team_id, conversation_id, agent_id)
+                primary key (team_id, conversation_id, branch_id, agent_id)
             )
             """
         )
@@ -882,6 +1002,7 @@ class ConversationStore:
             create table if not exists team_conversation_deliveries (
                 team_id text not null,
                 conversation_id text not null,
+                branch_id text not null default 'branch_main',
                 id text not null,
                 agent_id text not null,
                 run_id text,
@@ -941,6 +1062,12 @@ class ConversationStore:
             )
             """
         )
+        self._ensure_column("team_conversation_events", "branch_id", "text not null default 'branch_main'")
+        self._ensure_column("team_conversation_events", "logical_message_id", "text")
+        self._ensure_column("team_conversation_events", "version_parent_event_id", "text")
+        self._ensure_column("team_conversation_events", "parent_event_id", "text")
+        self._ensure_branch_scoped_agent_state()
+        self._ensure_column("team_conversation_deliveries", "branch_id", "text not null default 'branch_main'")
         self._ensure_column("team_conversation_branches", "origin_event_id", "text")
         self._ensure_column("team_conversation_branches", "origin_event_seq", "integer")
         connection.commit()
@@ -985,23 +1112,27 @@ class ConversationStore:
         self._connection.commit()
 
     def _event_from_row(self, row: tuple[object, ...]) -> ConversationEvent:
-        event_id = str(row[3])
-        raw_mentions: object = json.loads(str(row[8] or "[]"))
+        event_id = str(row[7])
+        raw_mentions: object = json.loads(str(row[12] or "[]"))
         mentions = tuple(item for item in raw_mentions if isinstance(item, str)) if isinstance(raw_mentions, list) else ()
-        raw_metadata: object = json.loads(str(row[11] or "{}"))
+        raw_metadata: object = json.loads(str(row[15] or "{}"))
         return ConversationEvent(
             team_id=str(row[0]),
             conversation_id=str(row[1]),
-            seq=int(row[2]),
+            branch_id=str(row[2] or "branch_main"),
+            logical_message_id=str(row[3]) if row[3] is not None else event_id,
+            version_parent_event_id=str(row[4]) if row[4] is not None else None,
+            parent_event_id=str(row[5]) if row[5] is not None else None,
+            seq=int(row[6]),
             id=event_id,
-            created_at=str(row[4]),
-            author_id=str(row[5]),
-            author_kind="agent" if row[6] == "agent" else "human",
-            content=str(row[7] or ""),
+            created_at=str(row[8]),
+            author_id=str(row[9]),
+            author_kind="agent" if row[10] == "agent" else "human",
+            content=str(row[11] or ""),
             mentions=mentions,
             attachments=tuple(self._attachments_for(event_id)),
-            source_thread_id=str(row[9]) if row[9] is not None else None,
-            source_message_id=str(row[10]) if row[10] is not None else None,
+            source_thread_id=str(row[13]) if row[13] is not None else None,
+            source_message_id=str(row[14]) if row[14] is not None else None,
             metadata=raw_metadata if is_json_object(raw_metadata) else {},
         )
 
@@ -1118,6 +1249,125 @@ class ConversationStore:
         columns = {str(row[1]) for row in self._connection.execute(f"pragma table_info({table})").fetchall()}
         if column not in columns:
             self._connection.execute(f"alter table {table} add column {column} {definition}")
+
+    def _ensure_branch_scoped_agent_state(self) -> None:
+        if self._connection is None:
+            return
+        columns = {str(row[1]) for row in self._connection.execute("pragma table_info(team_conversation_agent_state)").fetchall()}
+        if "branch_id" in columns:
+            return
+        self._connection.execute("alter table team_conversation_agent_state rename to team_conversation_agent_state_legacy")
+        self._connection.execute(
+            """
+            create table team_conversation_agent_state (
+                team_id text not null,
+                conversation_id text not null,
+                branch_id text not null default 'branch_main',
+                agent_id text not null,
+                last_delivered_seq integer not null,
+                running integer not null,
+                queued integer not null,
+                queued_after_seq integer,
+                current_run_id text,
+                current_snapshot_seq integer,
+                stop_requested integer not null,
+                last_identity_refresh_seq integer not null,
+                token_estimate_since_identity_refresh integer not null,
+                primary key (team_id, conversation_id, branch_id, agent_id)
+            )
+            """
+        )
+        self._connection.execute(
+            """
+            insert into team_conversation_agent_state (
+                team_id,
+                conversation_id,
+                branch_id,
+                agent_id,
+                last_delivered_seq,
+                running,
+                queued,
+                queued_after_seq,
+                current_run_id,
+                current_snapshot_seq,
+                stop_requested,
+                last_identity_refresh_seq,
+                token_estimate_since_identity_refresh
+            )
+            select
+                team_id,
+                conversation_id,
+                'branch_main',
+                agent_id,
+                last_delivered_seq,
+                running,
+                queued,
+                queued_after_seq,
+                current_run_id,
+                current_snapshot_seq,
+                stop_requested,
+                last_identity_refresh_seq,
+                token_estimate_since_identity_refresh
+            from team_conversation_agent_state_legacy
+            """
+        )
+        self._connection.execute("drop table team_conversation_agent_state_legacy")
+
+    def _resolved_branch_id(self, branch_id: str | None) -> str:
+        return branch_id or self.current_branch_id()
+
+    def _event_visible_in_branch(self, event: ConversationEvent, branch_id: str | None) -> bool:
+        return self._event_visible_in_branch_id(event, branch_id, set())
+
+    def _event_visible_in_branch_id(
+        self,
+        event: ConversationEvent,
+        branch_id: str | None,
+        visited_branch_ids: set[str],
+    ) -> bool:
+        if branch_id is None:
+            return True
+        if branch_id == "branch_main":
+            return event.branch_id == "branch_main"
+        if branch_id in visited_branch_ids:
+            return False
+        visited_branch_ids.add(branch_id)
+        if event.branch_id == branch_id:
+            return True
+        branch = self._branch_by_id(branch_id)
+        if branch is None:
+            return False
+        if branch.origin_event_seq is not None and event.seq > branch.origin_event_seq:
+            return False
+        return self._event_visible_in_branch_id(event, branch.parent_branch_id or "branch_main", visited_branch_ids)
+
+    def _initialize_branch_agent_states(self, branch: ConversationBranch) -> None:
+        parent_branch_id = branch.parent_branch_id or "branch_main"
+        for state in self.list_agent_states(branch_id=parent_branch_id):
+            fork_seq = state.last_delivered_seq
+            if branch.origin_event_seq is not None:
+                fork_seq = min(fork_seq, branch.origin_event_seq)
+            self.save_agent_state(
+                AgentDeliveryState(
+                    team_id=state.team_id,
+                    conversation_id=state.conversation_id,
+                    branch_id=branch.id,
+                    agent_id=state.agent_id,
+                    last_delivered_seq=fork_seq,
+                    running=False,
+                    queued=False,
+                    queued_after_seq=None,
+                    current_run_id=None,
+                    current_snapshot_seq=None,
+                    stop_requested=False,
+                    last_identity_refresh_seq=(
+                        min(state.last_identity_refresh_seq, fork_seq)
+                        if branch.origin_event_seq is not None
+                        else state.last_identity_refresh_seq
+                    ),
+                    token_estimate_since_identity_refresh=state.token_estimate_since_identity_refresh,
+                )
+            )
 
     def _set_current_branch(self, branch_id: str | None) -> None:
         if self._connection is None:

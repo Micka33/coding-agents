@@ -3,7 +3,7 @@
   "private_threads": [
     {
       "agent_id": "agent",
-      "thread_id": "thread:mention:agent",
+      "thread_id": "thread:branch:branch_main:mention:agent",
       "messages": [
         {
           "type": "ai",

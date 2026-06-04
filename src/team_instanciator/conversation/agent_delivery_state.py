@@ -7,6 +7,7 @@ from typing import TypedDict
 class AgentDeliveryStateDict(TypedDict):
     team_id: str
     conversation_id: str
+    branch_id: str
     agent_id: str
     last_delivered_seq: int
     running: bool
@@ -24,6 +25,7 @@ class AgentDeliveryState:
     team_id: str
     conversation_id: str
     agent_id: str
+    branch_id: str = "branch_main"
     last_delivered_seq: int = 0
     running: bool = False
     queued: bool = False
@@ -38,6 +40,7 @@ class AgentDeliveryState:
         return {
             "team_id": self.team_id,
             "conversation_id": self.conversation_id,
+            "branch_id": self.branch_id,
             "agent_id": self.agent_id,
             "last_delivered_seq": self.last_delivered_seq,
             "running": self.running,

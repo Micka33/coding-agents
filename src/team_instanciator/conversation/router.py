@@ -48,7 +48,7 @@ class MentionRouter:
 
     def enqueue_targets(self, event: ConversationEvent, targets: tuple[str, ...]) -> None:
         for target in targets:
-            self._store.enqueue(target, event.seq)
+            self._store.enqueue(target, event.seq, branch_id=event.branch_id)
 
     def dispatch(self, *, wait: bool = True) -> None:
         if wait:
@@ -66,10 +66,11 @@ class MentionRouter:
         context = DispatchContext()
         try:
             while True:
-                available = max(0, self._team.conversation.mentions.max_parallel_agents - self._store.running_count())
+                branch_id = self._store.current_branch_id()
+                available = max(0, self._team.conversation.mentions.max_parallel_agents - self._store.running_count(branch_id=branch_id))
                 if available <= 0:
                     return
-                agent_ids = self._store.pending_idle_agent_ids(limit=available)
+                agent_ids = self._store.pending_idle_agent_ids(limit=available, branch_id=branch_id)
                 if not agent_ids:
                     return
                 threads = [
@@ -103,8 +104,9 @@ class MentionRouter:
             thread.join()
 
     def _run_agent(self, agent_id: str, context: DispatchContext) -> None:
-        state = self._store.ensure_agent_state(agent_id)
-        events = self._store.list_events(after_seq=state.last_delivered_seq)
+        branch_id = self._store.current_branch_id()
+        state = self._store.ensure_agent_state(agent_id, branch_id=branch_id)
+        events = self._store.list_events(after_seq=state.last_delivered_seq, branch_id=branch_id)
         if not events:
             self._store.complete_run(
                 agent_id,
@@ -113,14 +115,18 @@ class MentionRouter:
                 delivered=False,
                 identity_inserted=False,
                 token_estimate=0,
+                branch_id=branch_id,
             )
             return
 
         snapshot_seq = max(event.seq for event in events)
         run_id = f"run_{uuid.uuid4().hex}"
-        self._store.mark_run_started(agent_id, run_id=run_id, snapshot_seq=snapshot_seq)
+        self._store.mark_run_started(agent_id, run_id=run_id, snapshot_seq=snapshot_seq, branch_id=branch_id)
         target = self._team.agents[agent_id]
-        thread_id = self._thread_id_factory.mention(self._root_thread_id, agent_id)
+        thread_id = self._thread_id_factory.mention(
+            self._thread_id_factory.branch(self._root_thread_id, branch_id),
+            agent_id,
+        )
 
         try:
             sync = self._sync_builder.build(target=target, state=state, events=events)
@@ -132,8 +138,15 @@ class MentionRouter:
                     delivered=True,
                     identity_inserted=False,
                     token_estimate=sync.token_estimate,
+                    branch_id=branch_id,
                 )
-                self._store.record_delivery(agent_id=agent_id, run_id=run_id, snapshot_seq=snapshot_seq, status="skipped")
+                self._store.record_delivery(
+                    agent_id=agent_id,
+                    run_id=run_id,
+                    snapshot_seq=snapshot_seq,
+                    status="skipped",
+                    branch_id=branch_id,
+                )
                 return
 
             graph = self._registry.graph(agent_id)
@@ -144,7 +157,7 @@ class MentionRouter:
                     self._checkpoint_metadata_factory.mention(self._team, target),
                 ),
             )
-            if self._store.is_stop_requested(agent_id, run_id):
+            if self._store.is_stop_requested(agent_id, run_id, branch_id=branch_id):
                 self._store.complete_run(
                     agent_id,
                     run_id=run_id,
@@ -152,8 +165,15 @@ class MentionRouter:
                     delivered=False,
                     identity_inserted=False,
                     token_estimate=0,
+                    branch_id=branch_id,
                 )
-                self._store.record_delivery(agent_id=agent_id, run_id=run_id, snapshot_seq=snapshot_seq, status="stopped")
+                self._store.record_delivery(
+                    agent_id=agent_id,
+                    run_id=run_id,
+                    snapshot_seq=snapshot_seq,
+                    status="stopped",
+                    branch_id=branch_id,
+                )
                 return
 
             delivered = self._store.complete_run(
@@ -163,9 +183,16 @@ class MentionRouter:
                 delivered=True,
                 identity_inserted=sync.identity_inserted,
                 token_estimate=sync.token_estimate,
+                branch_id=branch_id,
             )
             if not delivered:
-                self._store.record_delivery(agent_id=agent_id, run_id=run_id, snapshot_seq=snapshot_seq, status="ignored")
+                self._store.record_delivery(
+                    agent_id=agent_id,
+                    run_id=run_id,
+                    snapshot_seq=snapshot_seq,
+                    status="ignored",
+                    branch_id=branch_id,
+                )
                 return
 
             reply = self._reply_extractor.extract(result)
@@ -176,15 +203,17 @@ class MentionRouter:
                     snapshot_seq=snapshot_seq,
                     status="empty",
                     error="Agent run returned no final textual AI reply.",
+                    branch_id=branch_id,
                 )
                 return
 
-            self._store.record_delivery(agent_id=agent_id, run_id=run_id, snapshot_seq=snapshot_seq, status="success")
+            self._store.record_delivery(agent_id=agent_id, run_id=run_id, snapshot_seq=snapshot_seq, status="success", branch_id=branch_id)
             self._append_public_reply(
                 agent_id,
                 reply.content,
                 source_thread_id=thread_id,
                 source_message_id=reply.source_message_id,
+                branch_id=branch_id,
                 context=context,
             )
         except Exception as exc:
@@ -195,6 +224,7 @@ class MentionRouter:
                 delivered=False,
                 identity_inserted=False,
                 token_estimate=0,
+                branch_id=branch_id,
             )
             self._store.record_delivery(
                 agent_id=agent_id,
@@ -202,6 +232,7 @@ class MentionRouter:
                 snapshot_seq=snapshot_seq,
                 status="failed",
                 error=str(exc),
+                branch_id=branch_id,
             )
 
     def _append_public_reply(
@@ -211,6 +242,7 @@ class MentionRouter:
         *,
         source_thread_id: str,
         source_message_id: str | None,
+        branch_id: str,
         context: DispatchContext,
     ) -> None:
         mentions = self._parser.parse(content, author_id=agent_id)
@@ -218,6 +250,7 @@ class MentionRouter:
             author_id=agent_id,
             author_kind="agent",
             content=content,
+            branch_id=branch_id,
             mentions=mentions,
             source_thread_id=source_thread_id,
             source_message_id=source_message_id,

@@ -28,6 +28,21 @@ class ConversationRuntimeController:
     def stop_agent(self, agent_id: str) -> None:
         self._team.router.stop(agent_id)
 
+    def edit_human_message(
+        self,
+        event_id: str,
+        content: str,
+        *,
+        author_id: str = "human",
+        wait: bool = True,
+    ):
+        return self._team.edit_human_message(
+            event_id,
+            content,
+            author_id=author_id,
+            wait=wait,
+        )
+
     def cancel_queued_agent(self, agent_id: str) -> ConversationRuntimeStateDict:
         self._team.store.cancel_queued(agent_id)
         return self._team.store.get_runtime_state().to_dict()

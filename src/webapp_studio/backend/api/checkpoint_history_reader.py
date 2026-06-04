@@ -24,7 +24,15 @@ class CheckpointHistoryReader:
         if not participants:
             return []
         conversation_id = state["conversation_id"]
-        thread_ids = [f"{conversation_id}:mention:{participant}" for participant in participants]
+        branch_id = self._current_branch_id(conversation)
+        thread_ids = [
+            thread_id
+            for participant in participants
+            for thread_id in (
+                f"{conversation_id}:branch:{branch_id}:mention:{participant}",
+                f"{conversation_id}:mention:{participant}",
+            )
+        ]
         placeholders = ",".join("?" for _ in thread_ids)
         try:
             rows = connection.execute(
@@ -45,6 +53,13 @@ class CheckpointHistoryReader:
     def _connection(self, conversation: WebConversation) -> sqlite3.Connection | None:
         checkpointer_handle = getattr(conversation, "checkpointer_handle", None)
         return getattr(checkpointer_handle, "connection", None)
+
+    def _current_branch_id(self, conversation: WebConversation) -> str:
+        runtime = getattr(conversation, "runtime", None)
+        current_branch_id = getattr(runtime, "current_branch_id", None)
+        if callable(current_branch_id):
+            return str(current_branch_id())
+        return "branch_main"
 
     def _checkpoint_summary(self, connection: sqlite3.Connection, row: tuple[Any, ...], *, seq: int) -> CheckpointSummary:
         thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, type_name, checkpoint_blob, metadata_blob = row

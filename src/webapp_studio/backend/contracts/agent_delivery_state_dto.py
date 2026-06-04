@@ -6,6 +6,7 @@ from src.webapp_studio.backend.contracts.contract_model import ContractModel
 class AgentDeliveryStateDto(ContractModel):
     team_id: str
     conversation_id: str
+    branch_id: str = "branch_main"
     agent_id: str
     last_delivered_seq: int
     running: bool

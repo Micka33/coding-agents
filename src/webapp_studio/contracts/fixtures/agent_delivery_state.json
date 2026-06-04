@@ -1,6 +1,7 @@
 {
   "team_id": "team",
   "conversation_id": "thread",
+  "branch_id": "branch_main",
   "agent_id": "agent",
   "last_delivered_seq": 1,
   "running": true,

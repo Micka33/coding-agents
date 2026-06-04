@@ -166,6 +166,27 @@ export class StudioApiClient {
     })
   }
 
+  async editMessage(
+    messageId: string,
+    content: string
+  ): Promise<StudioState> {
+    return this.request(
+      `/messages/${encodeURIComponent(messageId)}/edit`,
+      StudioStateSchema,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          content,
+          author_id: "human",
+          wait: false,
+        }),
+        headers: {
+          "Content-Type": "application/json",
+        },
+      }
+    )
+  }
+
   async updateRuntime(settings: Partial<RuntimeSettings>): Promise<StudioState> {
     return this.request("/runtime", StudioStateSchema, {
       method: "PATCH",

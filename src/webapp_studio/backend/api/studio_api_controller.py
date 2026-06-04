@@ -27,6 +27,7 @@ from src.webapp_studio.backend.contracts.branch_summary import BranchSummary
 from src.webapp_studio.backend.contracts.checkpoint_resume_request import CheckpointResumeRequest
 from src.webapp_studio.backend.contracts.checkpoint_summary import CheckpointSummary
 from src.webapp_studio.backend.contracts.conversation_delivery_dto import ConversationDeliveryDto
+from src.webapp_studio.backend.contracts.edit_message_request import EditMessageRequest
 from src.webapp_studio.backend.contracts.health_status import HealthStatus
 from src.webapp_studio.backend.contracts.interrupt_request import InterruptRequest
 from src.webapp_studio.backend.contracts.interrupt_resume_request import InterruptResumeRequest
@@ -124,6 +125,34 @@ class StudioApiController:
             self._publish_delivery_state(delivery)
         self._publish_queue_state(self.state())
         return result
+
+    def edit_message(self, message_id: str, request: EditMessageRequest) -> StudioState:
+        edit_message = self._runtime_method("edit_human_message")
+        if edit_message is None:
+            raise self._unsupported("branching", "Message editing is not supported by this runtime.")
+        try:
+            edited = edit_message(
+                message_id,
+                request.content,
+                author_id=request.author_id,
+                wait=request.wait,
+            )
+        except ValueError as error:
+            raise StudioApiError(
+                status_code=400,
+                code="invalid_request",
+                message=str(error),
+                field="message_id",
+            ) from error
+        state = self.state()
+        self._stream_buffer.publish("conversation.event.appended", edited.event.to_dict())
+        for delivery in edited.deliveries + edited.failures:
+            self._publish_delivery_state(ConversationDeliveryDto.model_validate(delivery.to_dict()))
+        branch = self._branch_by_id(state.history.branches, state.history.current_branch_id)
+        if branch is not None:
+            self._stream_buffer.publish("branch.updated", branch.model_dump(mode="json"))
+        self._stream_buffer.publish("snapshot.replace", state.model_dump(mode="json"))
+        return state
 
     def session(self) -> dict[str, Any]:
         state = self._compat.state()
@@ -555,6 +584,7 @@ class StudioApiController:
             cursor=self._stream_buffer.latest_cursor(),
             metadata={
                 "delivery_id": delivery.id,
+                "branch_id": delivery.branch_id,
                 "delivery_status": delivery.status,
                 "snapshot_seq": delivery.snapshot_seq,
             },
@@ -574,6 +604,7 @@ class StudioApiController:
             cursor=self._stream_buffer.latest_cursor(),
             metadata={
                 "delivery_id": delivery.id,
+                "branch_id": delivery.branch_id,
                 "delivery_status": delivery.status,
                 "error": delivery.error,
                 "snapshot_seq": delivery.snapshot_seq,

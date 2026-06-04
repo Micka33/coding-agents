@@ -2,6 +2,7 @@
   "id": "delivery_01",
   "team_id": "team",
   "conversation_id": "thread",
+  "branch_id": "branch_main",
   "agent_id": "agent",
   "run_id": "run_01",
   "snapshot_seq": 1,

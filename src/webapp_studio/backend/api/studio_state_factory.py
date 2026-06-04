@@ -116,7 +116,7 @@ class StudioStateFactory:
                         agent_id=item.agent_id,
                         status="running" if item.running else "queued" if item.queued else "unknown",
                         cursor=cursor,
-                        metadata={"current_snapshot_seq": item.current_snapshot_seq},
+                        metadata={"branch_id": item.branch_id, "current_snapshot_seq": item.current_snapshot_seq},
                     )
                 )
         for delivery in reversed(deliveries):
@@ -135,6 +135,7 @@ class StudioStateFactory:
                     cursor=cursor,
                     metadata={
                         "delivery_id": delivery.id,
+                        "branch_id": delivery.branch_id,
                         "delivery_status": delivery.status,
                         "error": delivery.error,
                         "snapshot_seq": delivery.snapshot_seq,
@@ -251,7 +252,7 @@ class StudioStateFactory:
     ) -> list[dict[str, Any]]:
         events: list[dict[str, Any]] = state.get("events", [])
         if current_branch_id == "branch_main":
-            return [event for event in events if self._event_branch_id(event) is None]
+            return [event for event in events if self._event_branch_id(event) == "branch_main"]
         branch = next((item for item in branches if item.id == current_branch_id), None)
         origin_seq = branch.origin_event_seq if branch is not None else None
         visible = []
@@ -259,14 +260,17 @@ class StudioStateFactory:
             branch_id = self._event_branch_id(event)
             if branch_id == current_branch_id:
                 visible.append(event)
-            elif branch_id is None and (origin_seq is None or int(event.get("seq") or 0) <= origin_seq):
+            elif branch_id == "branch_main" and (origin_seq is None or int(event.get("seq") or 0) <= origin_seq):
                 visible.append(event)
         return visible
 
-    def _event_branch_id(self, event: dict[str, Any]) -> str | None:
+    def _event_branch_id(self, event: dict[str, Any]) -> str:
+        branch_id = event.get("branch_id")
+        if branch_id:
+            return str(branch_id)
         metadata = event.get("metadata", {})
-        branch_id = metadata.get("branch_id") if isinstance(metadata, dict) else None
-        return str(branch_id) if branch_id else None
+        metadata_branch_id = metadata.get("branch_id") if isinstance(metadata, dict) else None
+        return str(metadata_branch_id) if metadata_branch_id else "branch_main"
 
     def _generated_ui(self, state: ConversationStateDict) -> list[GeneratedUiSpec]:
         specs: dict[str, GeneratedUiSpec] = {}

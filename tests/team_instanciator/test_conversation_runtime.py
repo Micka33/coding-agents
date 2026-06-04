@@ -211,8 +211,10 @@ class ConversationRuntimeTests(unittest.TestCase):
             self.assertEqual(reloaded.list_events(through_seq=event.seq)[0].id, event.id)
             self.assertEqual(reloaded.get_runtime_state().mention_hook_enabled, False)
             self.assertEqual(reloaded.get_runtime_state().max_cascade_turns, 3)
-            self.assertEqual(reloaded.ensure_agent_state("agent").queued_after_seq, event.seq)
-            self.assertEqual(reloaded.list_deliveries()[0].error, "boom")
+            self.assertIsNone(reloaded.ensure_agent_state("agent").queued_after_seq)
+            self.assertEqual(reloaded.ensure_agent_state("agent", branch_id="branch_main").queued_after_seq, event.seq)
+            self.assertEqual(reloaded.list_deliveries(branch_id="branch_main")[0].error, "boom")
+            self.assertEqual(reloaded.list_deliveries(), [])
             self.assertEqual(reloaded.list_branches()[0].label, "Alternative")
             self.assertEqual(resolved.status if resolved else None, "resolved")
             self.assertEqual(reloaded.list_interrupts(), [])
@@ -580,6 +582,51 @@ class ConversationRuntimeTests(unittest.TestCase):
         self.assertEqual(graph.calls[0][0]["messages"][1].name, "mickael")
         self.assertIn(":mention:agent-b", graph.calls[0][1]["configurable"]["thread_id"])
 
+    def test_mention_aware_team_uses_branch_scoped_agent_threads_and_delivery_state(self) -> None:
+        graph = FakeGraph("branch-aware reply")
+        runtime = self._conversation_runtime({"agent-b": graph})
+
+        first = runtime.append_human_message("@agent-b first", author_id="mickael").event
+        branch = runtime.store.create_branch(label="Alternative", origin_event_seq=first.seq, origin_event_id=first.id)
+        runtime.store.switch_branch(branch.id)
+        second = runtime.append_human_message("@agent-b edited", author_id="mickael").event
+
+        self.assertEqual(graph.calls[0][1]["configurable"]["thread_id"], "thread:branch:branch_main:mention:agent-b")
+        self.assertEqual(graph.calls[1][1]["configurable"]["thread_id"], f"thread:branch:{branch.id}:mention:agent-b")
+        self.assertEqual(runtime.store.ensure_agent_state("agent-b", branch_id="branch_main").last_delivered_seq, first.seq)
+        self.assertEqual(runtime.store.ensure_agent_state("agent-b", branch_id=branch.id).last_delivered_seq, second.seq)
+        self.assertEqual(
+            [event.content for event in runtime.store.list_events(branch_id=branch.id)],
+            ["@agent-b first", "@agent-b edited", "branch-aware reply"],
+        )
+        self.assertEqual(
+            [event.content for event in runtime.store.list_events(branch_id="branch_main")],
+            ["@agent-b first", "branch-aware reply"],
+        )
+
+    def test_mention_aware_team_edit_human_message_creates_version_branch_and_requeues_agents(self) -> None:
+        graph = FakeGraph("edited reply")
+        runtime = self._conversation_runtime({"agent-b": graph})
+        original = runtime.append_human_message("@agent-b original", author_id="mickael").event
+
+        edited = runtime.edit_human_message(original.id, "@agent-b edited", author_id="mickael")
+        current_branch_id = runtime.store.current_branch_id()
+        current_events = runtime.store.list_events()
+        main_events = runtime.store.list_events(branch_id="branch_main")
+
+        self.assertNotEqual(current_branch_id, "branch_main")
+        self.assertEqual(edited.event.branch_id, current_branch_id)
+        self.assertEqual(edited.event.logical_message_id, original.logical_message_id)
+        self.assertEqual(edited.event.version_parent_event_id, original.id)
+        self.assertEqual(edited.event.parent_event_id, None)
+        self.assertEqual([event.content for event in current_events], ["@agent-b edited", "edited reply"])
+        self.assertEqual([event.content for event in main_events], ["@agent-b original", "edited reply"])
+        self.assertEqual(graph.calls[0][1]["configurable"]["thread_id"], "thread:branch:branch_main:mention:agent-b")
+        self.assertEqual(graph.calls[1][1]["configurable"]["thread_id"], f"thread:branch:{current_branch_id}:mention:agent-b")
+
+        with self.assertRaisesRegex(ValueError, "only human"):
+            runtime.edit_human_message(current_events[-1].id, "@agent-b invalid")
+
     def test_mention_aware_team_identity_uses_team_aliases_and_agent_descriptions(self) -> None:
         graph = FakeGraph("answer")
         team_config = team(
@@ -771,6 +818,7 @@ class ConversationRuntimeTests(unittest.TestCase):
             "@agent-c disabled",
             source_thread_id="thread:mention:agent-b",
             source_message_id=None,
+            branch_id="branch_main",
             context=DispatchContext(),
         )
         self.assertFalse(runtime.store.ensure_agent_state("agent-c").queued)
@@ -824,7 +872,16 @@ class ConversationRuntimeTests(unittest.TestCase):
                 type_name, payload = value
                 connection.execute(
                     "insert into writes values (?, '', 'messages', ?, 'task', ?, ?, ?)",
-                    (runtime.thread_id_factory.mention("thread", "agent-b"), f"checkpoint-{index}", index, type_name, payload),
+                    (
+                        runtime.thread_id_factory.mention(
+                            runtime.thread_id_factory.branch("thread", "branch_main"),
+                            "agent-b",
+                        ),
+                        f"checkpoint-{index}",
+                        index,
+                        type_name,
+                        payload,
+                    ),
                 )
             connection.commit()
 
@@ -840,7 +897,10 @@ class ConversationRuntimeTests(unittest.TestCase):
             root = Path(tmp)
             connection = sqlite3.connect(":memory:", check_same_thread=False)
             runtime = self._conversation_runtime({"agent-b": FakeGraph("answer")}, root=root, connection=connection)
-            thread_id = runtime.thread_id_factory.mention("thread", "agent-b")
+            thread_id = runtime.thread_id_factory.mention(
+                runtime.thread_id_factory.branch("thread", "branch_main"),
+                "agent-b",
+            )
             checkpoint_type, checkpoint_blob = runtime._serde.dumps_typed(
                 {"id": "checkpoint-1", "ts": "2026-06-01T10:00:02+00:00"}
             )

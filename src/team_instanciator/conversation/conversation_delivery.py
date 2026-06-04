@@ -18,6 +18,7 @@ class ConversationDeliveryDict(TypedDict):
     id: str
     team_id: str
     conversation_id: str
+    branch_id: str
     agent_id: str
     run_id: str | None
     snapshot_seq: int | None
@@ -39,12 +40,14 @@ class ConversationDelivery:
     created_at: str
     completed_at: str | None = None
     error: str | None = None
+    branch_id: str = "branch_main"
 
     def to_dict(self) -> ConversationDeliveryDict:
         return {
             "id": self.id,
             "team_id": self.team_id,
             "conversation_id": self.conversation_id,
+            "branch_id": self.branch_id,
             "agent_id": self.agent_id,
             "run_id": self.run_id,
             "snapshot_seq": self.snapshot_seq,

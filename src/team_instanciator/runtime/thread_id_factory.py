@@ -9,6 +9,9 @@ class ThreadIdFactory:
     def root(self, team_id: str) -> str:
         return team_id
 
+    def branch(self, parent_thread_id: str, branch_id: str) -> str:
+        return f"{parent_thread_id}:branch:{branch_id}"
+
     def relation(self, parent_thread_id: str, relation: RelationDefinition) -> str:
         tool_name = relation.tool_name or relation.relation
         return f"{parent_thread_id}:{relation.source}:{tool_name}:{relation.target}"

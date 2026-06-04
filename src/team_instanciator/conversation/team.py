@@ -135,6 +135,58 @@ class MentionAwareTeam:
         deliveries = tuple(self.store.list_deliveries()[deliveries_before:])
         return ConversationAppendResult(event=event, deliveries=deliveries)
 
+    def edit_human_message(
+        self,
+        event_id: str,
+        content: str,
+        *,
+        author_id: str = "human",
+        wait: bool = True,
+    ) -> ConversationAppendResult:
+        current_branch_id = self.store.current_branch_id()
+        visible_events = self.store.list_events(branch_id=current_branch_id)
+        edited_index = next((index for index, event in enumerate(visible_events) if event.id == event_id), None)
+        if edited_index is None:
+            raise ValueError("message event is not visible in the current branch.")
+        edited_event = visible_events[edited_index]
+        if edited_event.author_kind != "human":
+            raise ValueError("only human messages can be edited.")
+
+        previous_event = visible_events[edited_index - 1] if edited_index > 0 else None
+        branch = self.store.create_branch(
+            label=f"Edit #{edited_event.seq}",
+            origin_event_id=edited_event.id,
+            origin_event_seq=previous_event.seq if previous_event is not None else 0,
+            parent_branch_id=current_branch_id,
+        )
+        self.store.switch_branch(branch.id)
+        mentions = self.parser.parse(content, author_id=author_id)
+        event = self.store.append_event(
+            author_id=author_id,
+            author_kind="human",
+            content=content,
+            branch_id=branch.id,
+            logical_message_id=edited_event.logical_message_id or edited_event.id,
+            version_parent_event_id=edited_event.id,
+            parent_event_id=previous_event.id if previous_event is not None else None,
+            mentions=mentions,
+            attachments=edited_event.attachments,
+            metadata={
+                "edited_from_event_id": edited_event.id,
+                "edited_from_branch_id": current_branch_id,
+            },
+        )
+        deliveries_before = len(self.store.list_deliveries(branch_id=branch.id))
+        runtime_state = self.store.get_runtime_state()
+        if runtime_state.mention_hook_enabled:
+            targets = mentions
+            if not targets and content.strip():
+                targets = self.team.conversation.human_input.default_targets
+            self.router.enqueue_targets(event, tuple(targets))
+            self.router.dispatch(wait=wait)
+        deliveries = tuple(self.store.list_deliveries(branch_id=branch.id)[deliveries_before:])
+        return ConversationAppendResult(event=event, deliveries=deliveries)
+
     def append_agent_message(
         self,
         *,
@@ -258,7 +310,10 @@ class MentionAwareTeam:
             state["agent_states"] = [item for item in state["agent_states"] if item["agent_id"] == agent_id]
             state["deliveries"] = [item for item in state["deliveries"] if item["agent_id"] == agent_id]
         if agent_id:
-            private_thread_id = self.thread_id_factory.mention(self.conversation_id, agent_id)
+            private_thread_id = self.thread_id_factory.mention(
+                self.thread_id_factory.branch(self.conversation_id, self.store.current_branch_id()),
+                agent_id,
+            )
             state["private_thread_id"] = private_thread_id
             state["private_messages"] = self._private_messages(private_thread_id)
         return state

@@ -19,6 +19,7 @@ from src.webapp_studio.backend.api.studio_api_error import StudioApiError
 from src.webapp_studio.backend.contracts.append_message_request import AppendMessageRequest
 from src.webapp_studio.backend.contracts.branch_create_request import BranchCreateRequest
 from src.webapp_studio.backend.contracts.checkpoint_resume_request import CheckpointResumeRequest
+from src.webapp_studio.backend.contracts.edit_message_request import EditMessageRequest
 from src.webapp_studio.backend.contracts.interrupt_resume_request import InterruptResumeRequest
 from src.webapp_studio.backend.contracts.queue_clear_request import QueueClearRequest
 from src.webapp_studio.backend.contracts.runtime_update_request import RuntimeUpdateRequest
@@ -130,6 +131,10 @@ def create_app(conversation: WebConversation, *, stream_buffer: StreamBuffer | N
     @app.post("/api/studio/v1/messages")
     async def append_message(request: AppendMessageRequest) -> JSONResponse:
         return ok(controller.append_message(request))
+
+    @app.post("/api/studio/v1/messages/{message_id}/edit")
+    async def edit_message(message_id: str, request: EditMessageRequest) -> JSONResponse:
+        return ok(controller.edit_message(message_id, request))
 
     @app.patch("/api/studio/v1/runtime")
     async def update_runtime(request: RuntimeUpdateRequest) -> JSONResponse:

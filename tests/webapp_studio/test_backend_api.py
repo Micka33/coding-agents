@@ -629,6 +629,33 @@ class BackendApiTests(unittest.TestCase):
 
             self.assertEqual(unsupported_message["errors"][0]["details"]["capability"], "branching")
 
+    def test_message_edit_creates_branch_and_versioned_human_event(self) -> None:
+        fake = self._fake_conversation(branching=True)
+        buffer = StreamBuffer()
+        client = TestClient(create_app(fake, stream_buffer=buffer))
+
+        edited = client.post(
+            "/api/studio/v1/messages/event_01/edit",
+            json={"content": "@agent edited", "author_id": "human"},
+        ).json()
+        missing = client.post(
+            "/api/studio/v1/messages/event_missing/edit",
+            json={"content": "@agent edited", "author_id": "human"},
+        ).json()
+
+        current_branch_id = edited["data"]["history"]["current_branch_id"]
+        events = edited["data"]["conversation"]["events"]
+
+        self.assertNotEqual(current_branch_id, "branch_main")
+        self.assertEqual(events[0]["content"], "@agent edited")
+        self.assertEqual(events[0]["branch_id"], current_branch_id)
+        self.assertEqual(events[0]["logical_message_id"], "event_01")
+        self.assertEqual(events[0]["version_parent_event_id"], "event_01")
+        self.assertEqual(missing["errors"][0]["field"], "message_id")
+        stream_events = [frame.event for frame in buffer.replay_after(None) or []]
+        self.assertIn("conversation.event.appended", stream_events)
+        self.assertIn("branch.updated", stream_events)
+
     def test_file_download_serves_public_attachments_with_content_checks(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root_dir = Path(temp_dir)
@@ -716,6 +743,7 @@ class BackendApiTests(unittest.TestCase):
             "/api/studio/v1/state",
             "/api/studio/v1/activity",
             "/api/studio/v1/messages",
+            "/api/studio/v1/messages/{message_id}/edit",
             "/api/studio/v1/runtime",
             "/api/studio/v1/agents/{agent_id}/stop",
             "/api/studio/v1/stream",
@@ -753,12 +781,14 @@ class BackendApiTests(unittest.TestCase):
 
         resume_checkpoint = client.post("/api/studio/v1/checkpoints/checkpoint_01/resume", json={"mode": "edit"}).json()
         create_branch = client.post("/api/studio/v1/branches", json={"label": "Alternative"}).json()
+        edit_message = client.post("/api/studio/v1/messages/event_01/edit", json={"content": "edited"}).json()
         switch_branch = client.post("/api/studio/v1/branches/branch_alt/switch").json()
         resume_interrupt = client.post("/api/studio/v1/interrupts/interrupt_01/resume", json={"decision": "approve"}).json()
         invalid_request = client.post("/api/studio/v1/messages", json={"author_id": "human"}).json()
 
         self.assertEqual(resume_checkpoint["errors"][0]["code"], "not_found")
         self.assertEqual(create_branch["errors"][0]["details"]["capability"], "branching")
+        self.assertEqual(edit_message["errors"][0]["details"]["capability"], "branching")
         self.assertEqual(switch_branch["errors"][0]["details"]["capability"], "branching")
         self.assertEqual(resume_interrupt["errors"][0]["details"]["capability"], "interrupts")
         self.assertEqual(invalid_request["errors"][0]["code"], "invalid_request")
@@ -1464,6 +1494,10 @@ class BackendApiTests(unittest.TestCase):
                 "id": "event_01",
                 "team_id": "team",
                 "conversation_id": "thread",
+                "branch_id": "branch_main",
+                "logical_message_id": "event_01",
+                "version_parent_event_id": None,
+                "parent_event_id": None,
                 "seq": 1,
                 "created_at": "2026-06-01T10:00:00Z",
                 "author_id": "human",
@@ -1504,6 +1538,7 @@ class BackendApiTests(unittest.TestCase):
                 id=f"event_{len(replay_events) + 2:02d}",
                 team_id="team",
                 conversation_id="thread",
+                branch_id=branch_store.current_branch_id() if branch_store is not None else "branch_main",
                 seq=len(replay_events) + 2,
                 created_at="2026-06-01T10:00:01Z",
                 author_id=author_id,
@@ -1524,6 +1559,7 @@ class BackendApiTests(unittest.TestCase):
                             "id": "delivery_01",
                             "team_id": "team",
                             "conversation_id": "thread",
+                            "branch_id": branch_store.current_branch_id() if branch_store is not None else "branch_main",
                             "agent_id": "agent",
                             "run_id": "run_01",
                             "snapshot_seq": 2,
@@ -1536,6 +1572,37 @@ class BackendApiTests(unittest.TestCase):
                 ),
                 failures=(),
             )
+
+        def edit_human_message(event_id, content, *, author_id="human", wait=False):
+            if branch_store is None:
+                raise AssertionError("branching is not enabled for this fake conversation")
+            if event_id != "event_01":
+                raise ValueError("message event is not visible in the current branch.")
+            branch = branch_store.create_branch(
+                label="Edit #1",
+                origin_event_id=event_id,
+                origin_event_seq=0,
+                parent_branch_id=branch_store.current_branch_id(),
+            )
+            branch_store.switch_branch(branch.id)
+            event = ConversationEvent(
+                id=f"event_edit_{len(replay_events) + 1}",
+                team_id="team",
+                conversation_id="thread",
+                branch_id=branch.id,
+                logical_message_id="event_01",
+                version_parent_event_id="event_01",
+                parent_event_id=None,
+                seq=len(replay_events) + 2,
+                created_at="2026-06-01T10:00:05Z",
+                author_id=author_id,
+                author_kind="human",
+                content=content,
+                mentions=("agent",),
+                metadata={"edited_from_event_id": event_id},
+            )
+            replay_events.append(event)
+            return SimpleNamespace(event=event, deliveries=(), failures=())
 
         def create_public_file_ref(*, filename, content, added_by, media_type=None):
             return SimpleNamespace(
@@ -1641,6 +1708,7 @@ class BackendApiTests(unittest.TestCase):
                 id=f"event_replay_{len(replay_events) + 1}",
                 team_id="team",
                 conversation_id="thread",
+                branch_id=branch.id,
                 seq=len(replay_events) + 2,
                 created_at="2026-06-01T10:00:04Z",
                 author_id="agent",
@@ -1683,6 +1751,7 @@ class BackendApiTests(unittest.TestCase):
                     "list_branches": list_branches,
                     "current_branch_id": current_branch_id,
                     "switch_branch": switch_branch,
+                    "edit_human_message": edit_human_message,
                     "resume_checkpoint": resume_checkpoint,
                 }
             )

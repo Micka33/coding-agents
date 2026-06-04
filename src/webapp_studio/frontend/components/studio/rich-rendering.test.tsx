@@ -431,8 +431,9 @@ describe("activity panel navigation", () => {
 })
 
 describe("chat panel transcript actions", () => {
-  it("shows timestamps and supports copy and local edit on public human messages", async () => {
+  it("shows timestamps and supports copy and edit on public human messages", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
+    const editMessage = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
       value: { writeText },
@@ -451,6 +452,9 @@ describe("chat panel transcript actions", () => {
             content: "Original public prompt",
             created_at: "2026-06-03T10:30:00Z",
             id: "event_public_human_actions",
+            logical_message_id: "event_public_human_actions",
+            version_parent_event_id: null,
+            parent_event_id: null,
             mentions: [],
             metadata: {},
           },
@@ -458,7 +462,7 @@ describe("chat panel transcript actions", () => {
       },
     }
 
-    const { container } = renderChatPanel({ state })
+    const { container } = renderChatPanel({ onEditMessage: editMessage, state })
     const timestamp = container.querySelector(
       'time[datetime="2026-06-03T10:30:00.000Z"]'
     )
@@ -488,7 +492,13 @@ describe("chat panel transcript actions", () => {
     })
     fireEvent.click(screen.getByRole("button", { name: "Save message edit" }))
 
-    expect(screen.queryByText("Original public prompt")).not.toBeInTheDocument()
+    await waitFor(() => {
+      expect(editMessage).toHaveBeenCalledWith(
+        "event_public_human_actions",
+        "Edited public prompt"
+      )
+      expect(screen.queryByText("Original public prompt")).not.toBeInTheDocument()
+    })
 
     const editedMessage = screen
       .getByText("Edited public prompt")
@@ -533,6 +543,7 @@ describe("chat panel local recovery", () => {
           busy={false}
           changes={null}
           liveApi
+          onEditMessage={() => undefined}
           onOpenInspector={() => undefined}
           onSubmitDraft={async () => {
             throw new Error("offline")
@@ -695,6 +706,7 @@ function renderChatPanel(
         busy={false}
         changes={null}
         liveApi={false}
+        onEditMessage={() => undefined}
         onOpenInspector={() => undefined}
         onSubmitDraft={() => undefined}
         session={null}
@@ -760,6 +772,7 @@ function stateWithAgentActivity(): StudioState {
           id: "delivery_agent",
           team_id: "team",
           conversation_id: "thread",
+          branch_id: "branch_main",
           agent_id: "agent",
           run_id: "run_agent",
           snapshot_seq: 1,
@@ -772,6 +785,7 @@ function stateWithAgentActivity(): StudioState {
           id: "delivery_reviewer",
           team_id: "team",
           conversation_id: "thread",
+          branch_id: "branch_main",
           agent_id: "reviewer",
           run_id: "run_reviewer",
           snapshot_seq: 2,

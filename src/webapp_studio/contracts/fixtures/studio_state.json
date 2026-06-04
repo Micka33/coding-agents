@@ -15,6 +15,10 @@
         "id": "event_01",
         "team_id": "team",
         "conversation_id": "thread",
+        "branch_id": "branch_main",
+        "logical_message_id": "event_01",
+        "version_parent_event_id": null,
+        "parent_event_id": null,
         "seq": 1,
         "created_at": "2026-06-01T10:00:00Z",
         "author_id": "human",
@@ -34,6 +38,7 @@
       {
         "team_id": "team",
         "conversation_id": "thread",
+        "branch_id": "branch_main",
         "agent_id": "agent",
         "last_delivered_seq": 1,
         "running": true,
@@ -62,7 +67,7 @@
       "completed_at": null,
       "checkpoint_id": null,
       "cursor": "event_seq:1",
-      "metadata": {"current_snapshot_seq": 1}
+      "metadata": {"branch_id": "branch_main", "current_snapshot_seq": 1}
     }
   ],
   "queue": [],
@@ -72,7 +77,7 @@
     "checkpoints": [
       {
         "id": "checkpoint_01",
-        "thread_id": "thread:mention:agent",
+        "thread_id": "thread:branch:branch_main:mention:agent",
         "checkpoint_ns": "",
         "parent_checkpoint_id": null,
         "seq": 1,

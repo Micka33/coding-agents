@@ -9,6 +9,7 @@ class ConversationDeliveryDto(ContractModel):
     id: str
     team_id: str
     conversation_id: str
+    branch_id: str = "branch_main"
     agent_id: str
     run_id: str | None = None
     snapshot_seq: int | None = None

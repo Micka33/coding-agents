@@ -191,6 +191,22 @@ export function StudioWorkspace({
     }
   }
 
+  async function handleEditMessage(messageId: string, content: string) {
+    if (!apiClient) {
+      return
+    }
+    try {
+      setOperationError(null)
+      dispatch({ type: "state.replaced", state: await apiClient.editMessage(messageId, content) })
+      await refreshAuxiliaryData()
+    } catch (error) {
+      setOperationError(
+        error instanceof Error ? error.message : "Studio API request failed."
+      )
+      throw error
+    }
+  }
+
   function handleStopAgent(agentId: string) {
     replaceStateFromLiveApi(() => apiClient!.stopAgent(agentId))
   }
@@ -368,6 +384,7 @@ export function StudioWorkspace({
               busy={isPending}
               changes={changes}
               liveApi={liveApi}
+              onEditMessage={handleEditMessage}
               onOpenInspector={handleOpenInspector}
               onSubmitDraft={handleSubmitDraft}
               session={session}
@@ -437,6 +454,7 @@ export function StudioWorkspace({
             busy={isPending}
             changes={changes}
             liveApi={liveApi}
+            onEditMessage={handleEditMessage}
             onOpenInspector={handleOpenInspector}
             onSubmitDraft={handleSubmitDraft}
             session={session}

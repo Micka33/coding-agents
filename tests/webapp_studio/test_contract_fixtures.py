@@ -15,6 +15,7 @@ from src.webapp_studio.backend.contracts.conversation_delivery_dto import Conver
 from src.webapp_studio.backend.contracts.conversation_event_dto import ConversationEventDto
 from src.webapp_studio.backend.contracts.conversation_file_ref_dto import ConversationFileRefDto
 from src.webapp_studio.backend.contracts.conversation_snapshot import ConversationSnapshot
+from src.webapp_studio.backend.contracts.edit_message_request import EditMessageRequest
 from src.webapp_studio.backend.contracts.generated_ui_spec import GeneratedUiSpec
 from src.webapp_studio.backend.contracts.health_status import HealthStatus
 from src.webapp_studio.backend.contracts.history_snapshot import HistorySnapshot
@@ -52,6 +53,7 @@ class ContractFixtureTests(unittest.TestCase):
             "conversation_event.json": ConversationEventDto,
             "conversation_file_ref.json": ConversationFileRefDto,
             "conversation_snapshot.json": ConversationSnapshot,
+            "edit_message_request.json": EditMessageRequest,
             "generated_ui_spec.json": GeneratedUiSpec,
             "health_status.json": HealthStatus,
             "history_snapshot.json": HistorySnapshot,

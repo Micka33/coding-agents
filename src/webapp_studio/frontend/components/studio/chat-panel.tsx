@@ -56,6 +56,7 @@ type ChatPanelProps = {
   changes: StudioChanges | null
   liveApi: boolean
   onOpenInspector: (view: InspectorView) => void
+  onEditMessage: (messageId: string, content: string) => Promise<void> | void
   onSubmitDraft: (
     content: string,
     files: FileUIPart[],
@@ -90,6 +91,7 @@ export function ChatPanel({
   changes,
   liveApi,
   onOpenInspector,
+  onEditMessage,
   onSubmitDraft,
   session,
   state,
@@ -267,6 +269,7 @@ export function ChatPanel({
               changes={changes}
               generatedUi={state.generated_ui}
               key={event.id}
+              onEditMessage={onEditMessage}
               onOpenInspector={onOpenInspector}
             />
           ))}
@@ -520,11 +523,13 @@ function TranscriptMessage({
   changes,
   event,
   generatedUi,
+  onEditMessage,
   onOpenInspector,
 }: {
   changes: StudioChanges | null
   event: ConversationEvent
   generatedUi: StudioState["generated_ui"]
+  onEditMessage: (messageId: string, content: string) => Promise<void> | void
   onOpenInspector: (view: InspectorView) => void
 }) {
   const from = event.author_kind === "human" ? "user" : "assistant"
@@ -557,8 +562,20 @@ function TranscriptMessage({
     setEditing(true)
   }
 
-  function saveEdit() {
-    setContent(draft)
+  async function saveEdit() {
+    const nextContent = draft.trim()
+    if (!nextContent || nextContent === content) {
+      setDraft(content)
+      setEditing(false)
+      return
+    }
+    try {
+      await onEditMessage(event.id, nextContent)
+    } catch {
+      return
+    }
+    setContent(nextContent)
+    setDraft(nextContent)
     setCopied(false)
     setEditing(false)
   }

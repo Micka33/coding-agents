@@ -13,6 +13,10 @@ class ConversationEventDto(ContractModel):
     id: str
     team_id: str
     conversation_id: str
+    branch_id: str = "branch_main"
+    logical_message_id: str | None = None
+    version_parent_event_id: str | None = None
+    parent_event_id: str | None = None
     seq: int
     created_at: str
     author_id: str

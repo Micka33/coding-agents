@@ -3,7 +3,7 @@
   "checkpoints": [
     {
       "id": "checkpoint_01",
-      "thread_id": "thread:mention:agent",
+      "thread_id": "thread:branch:branch_main:mention:agent",
       "checkpoint_ns": "",
       "parent_checkpoint_id": null,
       "seq": 1,
