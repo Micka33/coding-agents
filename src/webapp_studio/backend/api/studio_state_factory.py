@@ -17,6 +17,7 @@ from src.webapp_studio.backend.contracts.conversation_control_event_dto import C
 from src.webapp_studio.backend.contracts.conversation_delivery_dto import ConversationDeliveryDto
 from src.webapp_studio.backend.contracts.conversation_event_dto import ConversationEventDto
 from src.webapp_studio.backend.contracts.conversation_snapshot import ConversationSnapshot
+from src.webapp_studio.backend.contracts.external_side_effect_dto import ExternalSideEffectDto
 from src.webapp_studio.backend.contracts.generated_ui_spec import GeneratedUiSpec
 from src.webapp_studio.backend.contracts.history_snapshot import HistorySnapshot
 from src.webapp_studio.backend.contracts.interrupt_request import InterruptRequest
@@ -52,6 +53,7 @@ class StudioStateFactory:
             branch_threads=[ConversationBranchThreadDto.model_validate(item) for item in visible_state.get("branch_threads", [])],
             thread_frontiers=[ThreadFrontierDto.model_validate(item) for item in visible_state.get("thread_frontiers", [])],
             control_events=[ConversationControlEventDto.model_validate(item) for item in visible_state.get("control_events", [])],
+            external_side_effects=[ExternalSideEffectDto.model_validate(item) for item in visible_state.get("external_side_effects", [])],
         )
         checkpoint_list = checkpoints or []
         history = HistorySnapshot(

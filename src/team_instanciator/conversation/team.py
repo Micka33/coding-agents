@@ -301,6 +301,7 @@ class MentionAwareTeam:
         branch_threads = [thread.to_dict() for thread in self.store.list_branch_threads()]
         thread_frontiers = [frontier.to_dict() for frontier in self.store.list_thread_frontiers()]
         control_events = [event.to_dict() for event in self.store.list_control_events()]
+        external_side_effects = [side_effect.to_dict() for side_effect in self.store.list_external_side_effects()]
         activities = [state for state in agent_states if state["running"] or state["queued"]]
         return {
             "team_id": self.team.id,
@@ -317,6 +318,7 @@ class MentionAwareTeam:
             "branch_threads": branch_threads,
             "thread_frontiers": thread_frontiers,
             "control_events": control_events,
+            "external_side_effects": external_side_effects,
             "activities": activities,
             "activity": activities[0] if activities else None,
         }
@@ -351,7 +353,7 @@ class MentionAwareTeam:
         destination_dir.mkdir(parents=True, exist_ok=True)
         destination = destination_dir / file_id
         destination.write_bytes(content)
-        return ConversationFileRef(
+        file_ref = ConversationFileRef(
             id=file_id,
             filename=filename,
             uri=f"conversation://files/{file_id}",
@@ -359,6 +361,20 @@ class MentionAwareTeam:
             size_bytes=destination.stat().st_size,
             added_by=added_by,
         )
+        self.store.record_external_side_effect(
+            kind="file-write",
+            target=str(destination),
+            audit_payload={
+                "file_id": file_ref.id,
+                "filename": file_ref.filename,
+                "uri": file_ref.uri,
+                "media_type": file_ref.media_type,
+                "size_bytes": file_ref.size_bytes,
+                "added_by": file_ref.added_by,
+            },
+            agent_id=added_by if added_by != "human" else None,
+        )
+        return file_ref
 
     def _private_messages(self, thread_id: str) -> list[MessageSummaryDict]:
         connection = self.checkpointer_handle.connection

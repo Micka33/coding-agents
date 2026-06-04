@@ -334,6 +334,23 @@ export const ConversationControlEventSchema = z
   })
   .passthrough()
 
+export const ExternalSideEffectSchema = z
+  .object({
+    id: z.string(),
+    team_id: z.string(),
+    conversation_id: z.string(),
+    branch_id: z.string(),
+    run_id: z.string().nullable().default(null),
+    agent_id: z.string().nullable().default(null),
+    tool_call_id: z.string().nullable().default(null),
+    kind: z.string(),
+    target: z.string(),
+    audit_payload: z.record(z.string(), JsonValueSchema).default({}),
+    not_rewindable: z.boolean().default(true),
+    created_at: z.string(),
+  })
+  .passthrough()
+
 export const ConversationSnapshotSchema = z
   .object({
     events: z.array(ConversationEventSchema),
@@ -342,6 +359,7 @@ export const ConversationSnapshotSchema = z
     branch_threads: z.array(ConversationBranchThreadSchema).default([]),
     thread_frontiers: z.array(ThreadFrontierSchema).default([]),
     control_events: z.array(ConversationControlEventSchema).default([]),
+    external_side_effects: z.array(ExternalSideEffectSchema).default([]),
   })
   .passthrough()
 

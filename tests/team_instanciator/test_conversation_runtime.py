@@ -203,6 +203,13 @@ class ConversationRuntimeTests(unittest.TestCase):
                 kind="checkpoint-edit",
                 content="replacement",
             )
+            side_effect = store.record_external_side_effect(
+                branch_id=branch.id,
+                kind="file-write",
+                target="/tmp/report.txt",
+                audit_payload={"filename": "report.txt"},
+                agent_id="agent",
+            )
             interrupt = store.create_interrupt(
                 kind="approve",
                 payload={"action": "write_file"},
@@ -226,6 +233,9 @@ class ConversationRuntimeTests(unittest.TestCase):
             self.assertEqual(reloaded.list_branches()[0].label, "Alternative")
             self.assertEqual(reloaded.list_control_events(branch_id=branch.id)[0].id, control_event.id)
             self.assertEqual(reloaded.list_control_events(branch_id=branch.id)[0].content, "replacement")
+            self.assertEqual(reloaded.list_external_side_effects(branch_id=branch.id)[0].id, side_effect.id)
+            self.assertTrue(reloaded.list_external_side_effects(branch_id=branch.id)[0].not_rewindable)
+            self.assertEqual(reloaded.list_external_side_effects(branch_id=branch.id)[0].audit_payload["filename"], "report.txt")
             self.assertEqual(resolved.status if resolved else None, "resolved")
             self.assertEqual(reloaded.list_interrupts(), [])
             self.assertEqual(reloaded.list_interrupts(active_only=False)[0].decisions[0]["response"], "ok")
@@ -1002,6 +1012,11 @@ class ConversationRuntimeTests(unittest.TestCase):
 
             self.assertEqual(dict_ref_event.attachments[0].id, "dict-file")
             self.assertEqual(public_ref.size_bytes, 5)
+            side_effect = runtime.store.list_external_side_effects()[0]
+            self.assertEqual(side_effect.branch_id, "branch_main")
+            self.assertEqual(side_effect.kind, "file-write")
+            self.assertEqual(side_effect.audit_payload["file_id"], public_ref.id)
+            self.assertTrue(side_effect.not_rewindable)
             self.assertIn("agent-b", runtime.state()["participants"])
             self.assertEqual(runtime.activity()["conversation_id"], "thread")
             self.assertEqual(dispatch_calls, [False])

@@ -8,6 +8,7 @@ from src.webapp_studio.backend.contracts.conversation_branch_thread_dto import C
 from src.webapp_studio.backend.contracts.conversation_control_event_dto import ConversationControlEventDto
 from src.webapp_studio.backend.contracts.conversation_delivery_dto import ConversationDeliveryDto
 from src.webapp_studio.backend.contracts.conversation_event_dto import ConversationEventDto
+from src.webapp_studio.backend.contracts.external_side_effect_dto import ExternalSideEffectDto
 from src.webapp_studio.backend.contracts.thread_frontier_dto import ThreadFrontierDto
 
 
@@ -18,3 +19,4 @@ class ConversationSnapshot(ContractModel):
     branch_threads: list[ConversationBranchThreadDto] = Field(default_factory=list)
     thread_frontiers: list[ThreadFrontierDto] = Field(default_factory=list)
     control_events: list[ConversationControlEventDto] = Field(default_factory=list)
+    external_side_effects: list[ExternalSideEffectDto] = Field(default_factory=list)

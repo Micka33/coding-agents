@@ -38,6 +38,7 @@
     "branch_threads": [],
     "thread_frontiers": [],
     "control_events": [],
+    "external_side_effects": [],
     "deliveries": [],
     "agent_states": [
       {

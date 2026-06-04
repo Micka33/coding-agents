@@ -25,6 +25,7 @@ from .conversation_interrupt import (
     ConversationInterruptStatus,
 )
 from .conversation_runtime_state import ConversationRuntimeState
+from .external_side_effect import ExternalSideEffect
 from .thread_frontier import ThreadFrontier, ThreadFrontierBoundary
 
 
@@ -71,6 +72,7 @@ class ConversationStore:
         self._branch_threads: dict[tuple[str, str], ConversationBranchThread] = {}
         self._thread_frontiers: list[ThreadFrontier] = []
         self._control_events: list[ConversationControlEvent] = []
+        self._external_side_effects: list[ExternalSideEffect] = []
         self._interrupts: dict[str, ConversationInterrupt] = {}
         self._current_branch_id = "branch_main"
         self._runtime_state = ConversationRuntimeState(
@@ -989,6 +991,111 @@ class ConversationStore:
             ).fetchall()
             return [self._control_event_from_row(row) for row in rows]
 
+    def record_external_side_effect(
+        self,
+        *,
+        branch_id: str | None = None,
+        kind: str,
+        target: str,
+        audit_payload: JsonMapping | None = None,
+        run_id: str | None = None,
+        agent_id: str | None = None,
+        tool_call_id: str | None = None,
+        not_rewindable: bool = True,
+    ) -> ExternalSideEffect:
+        payload = dict(audit_payload or {})
+        if not is_json_object(payload):
+            raise ValueError("external side effect audit_payload must be JSON-serializable.")
+        side_effect = ExternalSideEffect(
+            id=f"sidefx_{uuid.uuid4().hex}",
+            team_id=self.team_id,
+            conversation_id=self.conversation_id,
+            branch_id=self._resolved_branch_id(branch_id),
+            run_id=run_id,
+            agent_id=agent_id,
+            tool_call_id=tool_call_id,
+            kind=kind,
+            target=target,
+            audit_payload=payload,
+            not_rewindable=not_rewindable,
+            created_at=self._now(),
+        )
+        with self._lock:
+            if self._connection is None:
+                self._external_side_effects.append(side_effect)
+                return side_effect
+            self._connection.execute(
+                """
+                insert into team_conversation_external_side_effects (
+                    team_id,
+                    conversation_id,
+                    id,
+                    branch_id,
+                    run_id,
+                    agent_id,
+                    tool_call_id,
+                    kind,
+                    target,
+                    audit_payload_json,
+                    not_rewindable,
+                    created_at
+                )
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    side_effect.team_id,
+                    side_effect.conversation_id,
+                    side_effect.id,
+                    side_effect.branch_id,
+                    side_effect.run_id,
+                    side_effect.agent_id,
+                    side_effect.tool_call_id,
+                    side_effect.kind,
+                    side_effect.target,
+                    json.dumps(side_effect.audit_payload, ensure_ascii=False),
+                    int(side_effect.not_rewindable),
+                    side_effect.created_at,
+                ),
+            )
+            self._connection.commit()
+            return side_effect
+
+    def list_external_side_effects(self, *, branch_id: str | None | _UnsetType = _UNSET) -> list[ExternalSideEffect]:
+        with self._lock:
+            resolved_branch_id = self.current_branch_id() if branch_id is _UNSET else branch_id
+            if self._connection is None:
+                side_effects = [
+                    side_effect
+                    for side_effect in self._external_side_effects
+                    if resolved_branch_id is None or side_effect.branch_id == resolved_branch_id
+                ]
+                return [replace(side_effect) for side_effect in sorted(side_effects, key=lambda item: (item.created_at, item.id))]
+            clauses = ["team_id = ?", "conversation_id = ?"]
+            params: list[object] = [self.team_id, self.conversation_id]
+            if resolved_branch_id is not None:
+                clauses.append("branch_id = ?")
+                params.append(resolved_branch_id)
+            rows = self._connection.execute(
+                f"""
+                select
+                    id,
+                    branch_id,
+                    run_id,
+                    agent_id,
+                    tool_call_id,
+                    kind,
+                    target,
+                    audit_payload_json,
+                    not_rewindable,
+                    created_at
+                from team_conversation_external_side_effects
+                where {" and ".join(clauses)}
+                order by created_at asc, id asc
+                """,
+                tuple(params),
+            ).fetchall()
+            return [self._external_side_effect_from_row(row) for row in rows]
+
     def latest_checkpoint_id(self, physical_thread_id: str, *, checkpoint_ns: str = "") -> str | None:
         if self._connection is None or not self._table_exists("checkpoints"):
             return None
@@ -1500,6 +1607,25 @@ class ConversationStore:
         )
         connection.execute(
             """
+            create table if not exists team_conversation_external_side_effects (
+                team_id text not null,
+                conversation_id text not null,
+                id text not null,
+                branch_id text not null,
+                run_id text,
+                agent_id text,
+                tool_call_id text,
+                kind text not null,
+                target text not null,
+                audit_payload_json text not null,
+                not_rewindable integer not null,
+                created_at text not null,
+                primary key (team_id, conversation_id, id)
+            )
+            """
+        )
+        connection.execute(
+            """
             create table if not exists team_conversation_interrupts (
                 team_id text not null,
                 conversation_id text not null,
@@ -1681,6 +1807,23 @@ class ConversationStore:
             kind=str(row[5]),
             content=str(row[6] or ""),
             created_at=str(row[7]),
+        )
+
+    def _external_side_effect_from_row(self, row: tuple[object, ...]) -> ExternalSideEffect:
+        raw_payload: object = json.loads(str(row[7] or "{}"))
+        return ExternalSideEffect(
+            id=str(row[0]),
+            team_id=self.team_id,
+            conversation_id=self.conversation_id,
+            branch_id=str(row[1]),
+            run_id=str(row[2]) if row[2] is not None else None,
+            agent_id=str(row[3]) if row[3] is not None else None,
+            tool_call_id=str(row[4]) if row[4] is not None else None,
+            kind=str(row[5]),
+            target=str(row[6]),
+            audit_payload=raw_payload if is_json_object(raw_payload) else {},
+            not_rewindable=bool(row[8]),
+            created_at=str(row[9]),
         )
 
     def _save_branch_thread(self, branch_thread: ConversationBranchThread) -> None:
@@ -1870,6 +2013,7 @@ class ConversationStore:
             "team_conversation_branch_threads",
             "team_conversation_thread_frontiers",
             "team_conversation_control_events",
+            "team_conversation_external_side_effects",
             "team_conversation_interrupts",
         )
         for table in tables:
