@@ -270,6 +270,15 @@ class MentionAwareTeam:
             parent_branch_id=self.store.current_branch_id(),
         )
         self.store.switch_branch(branch.id)
+        logical_thread_key = self.thread_id_factory.logical_thread_key(thread_id)
+        self.store.create_control_event(
+            branch_id=branch.id,
+            logical_thread_key=logical_thread_key,
+            physical_thread_id=thread_id,
+            parent_run_id=None,
+            kind=f"checkpoint-{mode}",
+            content=edited_content if mode == "edit" and edited_content is not None else "",
+        )
         event = self.store.append_event(
             author_id=agent_id,
             author_kind="agent",
@@ -291,6 +300,7 @@ class MentionAwareTeam:
         deliveries = [delivery.to_dict() for delivery in self.store.list_deliveries()]
         branch_threads = [thread.to_dict() for thread in self.store.list_branch_threads()]
         thread_frontiers = [frontier.to_dict() for frontier in self.store.list_thread_frontiers()]
+        control_events = [event.to_dict() for event in self.store.list_control_events()]
         activities = [state for state in agent_states if state["running"] or state["queued"]]
         return {
             "team_id": self.team.id,
@@ -306,6 +316,7 @@ class MentionAwareTeam:
             "deliveries": deliveries,
             "branch_threads": branch_threads,
             "thread_frontiers": thread_frontiers,
+            "control_events": control_events,
             "activities": activities,
             "activity": activities[0] if activities else None,
         }
@@ -322,6 +333,9 @@ class MentionAwareTeam:
             )
             state["private_thread_id"] = private_thread_id
             state["private_messages"] = self._private_messages(private_thread_id)
+            state["control_events"] = [
+                item for item in state["control_events"] if item["physical_thread_id"] == private_thread_id
+            ]
         return state
 
     def create_public_file_ref(

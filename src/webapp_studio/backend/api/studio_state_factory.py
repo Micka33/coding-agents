@@ -13,6 +13,7 @@ from src.webapp_studio.backend.contracts.agent_delivery_state_dto import AgentDe
 from src.webapp_studio.backend.contracts.branch_summary import BranchSummary
 from src.webapp_studio.backend.contracts.checkpoint_summary import CheckpointSummary
 from src.webapp_studio.backend.contracts.conversation_branch_thread_dto import ConversationBranchThreadDto
+from src.webapp_studio.backend.contracts.conversation_control_event_dto import ConversationControlEventDto
 from src.webapp_studio.backend.contracts.conversation_delivery_dto import ConversationDeliveryDto
 from src.webapp_studio.backend.contracts.conversation_event_dto import ConversationEventDto
 from src.webapp_studio.backend.contracts.conversation_snapshot import ConversationSnapshot
@@ -50,6 +51,7 @@ class StudioStateFactory:
             agent_states=agent_states,
             branch_threads=[ConversationBranchThreadDto.model_validate(item) for item in visible_state.get("branch_threads", [])],
             thread_frontiers=[ThreadFrontierDto.model_validate(item) for item in visible_state.get("thread_frontiers", [])],
+            control_events=[ConversationControlEventDto.model_validate(item) for item in visible_state.get("control_events", [])],
         )
         checkpoint_list = checkpoints or []
         history = HistorySnapshot(

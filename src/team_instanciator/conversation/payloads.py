@@ -6,6 +6,7 @@ from src.type_defs import JsonValue
 
 from .agent_delivery_state import AgentDeliveryStateDict
 from .conversation_branch_thread import ConversationBranchThreadDict
+from .conversation_control_event import ConversationControlEventDict
 from .conversation_delivery import ConversationDeliveryDict
 from .conversation_event import ConversationEventDict
 from .conversation_runtime_state import ConversationRuntimeStateDict
@@ -31,6 +32,7 @@ class ConversationStateDict(TypedDict):
     deliveries: list[ConversationDeliveryDict]
     branch_threads: list[ConversationBranchThreadDict]
     thread_frontiers: list[ThreadFrontierDict]
+    control_events: list[ConversationControlEventDict]
     activities: list[AgentDeliveryStateDict]
     activity: AgentDeliveryStateDict | None
     private_thread_id: NotRequired[str]

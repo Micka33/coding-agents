@@ -195,6 +195,14 @@ class ConversationRuntimeTests(unittest.TestCase):
                 origin_checkpoint_id="checkpoint_01",
                 head_checkpoint_id="checkpoint_01",
             )
+            control_event = store.create_control_event(
+                branch_id=branch.id,
+                logical_thread_key="thread:mention:agent",
+                physical_thread_id="thread:branch:branch_01:mention:agent",
+                parent_run_id="run_01",
+                kind="checkpoint-edit",
+                content="replacement",
+            )
             interrupt = store.create_interrupt(
                 kind="approve",
                 payload={"action": "write_file"},
@@ -216,6 +224,8 @@ class ConversationRuntimeTests(unittest.TestCase):
             self.assertEqual(reloaded.list_deliveries(branch_id="branch_main")[0].error, "boom")
             self.assertEqual(reloaded.list_deliveries(), [])
             self.assertEqual(reloaded.list_branches()[0].label, "Alternative")
+            self.assertEqual(reloaded.list_control_events(branch_id=branch.id)[0].id, control_event.id)
+            self.assertEqual(reloaded.list_control_events(branch_id=branch.id)[0].content, "replacement")
             self.assertEqual(resolved.status if resolved else None, "resolved")
             self.assertEqual(reloaded.list_interrupts(), [])
             self.assertEqual(reloaded.list_interrupts(active_only=False)[0].decisions[0]["response"], "ok")
@@ -417,6 +427,12 @@ class ConversationRuntimeTests(unittest.TestCase):
         self.assertEqual(graph.updates[0][1]["messages"][0].content, "replacement")
         self.assertEqual(graph.calls[0][1]["configurable"]["checkpoint_id"], "fork-1")
         self.assertEqual(result.mode, "edit")
+        self.assertEqual(runtime.store.list_control_events(branch_id=result.branch.id)[0].kind, "checkpoint-edit")
+        self.assertEqual(runtime.store.list_control_events(branch_id=result.branch.id)[0].content, "replacement")
+        self.assertEqual(
+            [event.author_kind for event in runtime.store.list_events(branch_id=result.branch.id)],
+            ["agent"],
+        )
 
         with self.assertRaisesRegex(ValueError, "edited_content"):
             runtime.runtime.resume_checkpoint(

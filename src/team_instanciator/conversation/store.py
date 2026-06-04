@@ -14,6 +14,7 @@ from src.team_instanciator.runtime.thread_forker import ThreadForker
 from .agent_delivery_state import AgentDeliveryState
 from .conversation_branch_thread import BranchThreadStatus, ConversationBranchThread
 from .conversation_branch import ConversationBranch
+from .conversation_control_event import ConversationControlEvent
 from .conversation_delivery import ConversationDelivery, DeliveryStatus
 from .conversation_event import AuthorKind, ConversationEvent
 from .conversation_file_ref import ConversationFileRef
@@ -69,6 +70,7 @@ class ConversationStore:
         self._branches: dict[str, ConversationBranch] = {}
         self._branch_threads: dict[tuple[str, str], ConversationBranchThread] = {}
         self._thread_frontiers: list[ThreadFrontier] = []
+        self._control_events: list[ConversationControlEvent] = []
         self._interrupts: dict[str, ConversationInterrupt] = {}
         self._current_branch_id = "branch_main"
         self._runtime_state = ConversationRuntimeState(
@@ -895,6 +897,98 @@ class ConversationStore:
             ).fetchall()
             return [self._thread_frontier_from_row(row) for row in rows]
 
+    def create_control_event(
+        self,
+        *,
+        branch_id: str | None,
+        logical_thread_key: str,
+        physical_thread_id: str,
+        kind: str,
+        content: str = "",
+        parent_run_id: str | None = None,
+    ) -> ConversationControlEvent:
+        event = ConversationControlEvent(
+            id=f"ctrl_{uuid.uuid4().hex}",
+            team_id=self.team_id,
+            conversation_id=self.conversation_id,
+            branch_id=self._resolved_branch_id(branch_id),
+            logical_thread_key=logical_thread_key,
+            physical_thread_id=physical_thread_id,
+            parent_run_id=parent_run_id,
+            kind=kind,
+            content=content,
+            created_at=self._now(),
+        )
+        with self._lock:
+            if self._connection is None:
+                self._control_events.append(event)
+                return event
+            self._connection.execute(
+                """
+                insert into team_conversation_control_events (
+                    team_id,
+                    conversation_id,
+                    id,
+                    branch_id,
+                    logical_thread_key,
+                    physical_thread_id,
+                    parent_run_id,
+                    kind,
+                    content,
+                    created_at
+                )
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event.team_id,
+                    event.conversation_id,
+                    event.id,
+                    event.branch_id,
+                    event.logical_thread_key,
+                    event.physical_thread_id,
+                    event.parent_run_id,
+                    event.kind,
+                    event.content,
+                    event.created_at,
+                ),
+            )
+            self._connection.commit()
+            return event
+
+    def list_control_events(self, *, branch_id: str | None | _UnsetType = _UNSET) -> list[ConversationControlEvent]:
+        with self._lock:
+            resolved_branch_id = self.current_branch_id() if branch_id is _UNSET else branch_id
+            if self._connection is None:
+                events = [
+                    event
+                    for event in self._control_events
+                    if resolved_branch_id is None or event.branch_id == resolved_branch_id
+                ]
+                return [replace(event) for event in sorted(events, key=lambda item: (item.created_at, item.id))]
+            clauses = ["team_id = ?", "conversation_id = ?"]
+            params: list[object] = [self.team_id, self.conversation_id]
+            if resolved_branch_id is not None:
+                clauses.append("branch_id = ?")
+                params.append(resolved_branch_id)
+            rows = self._connection.execute(
+                f"""
+                select
+                    id,
+                    branch_id,
+                    logical_thread_key,
+                    physical_thread_id,
+                    parent_run_id,
+                    kind,
+                    content,
+                    created_at
+                from team_conversation_control_events
+                where {" and ".join(clauses)}
+                order by created_at asc, id asc
+                """,
+                tuple(params),
+            ).fetchall()
+            return [self._control_event_from_row(row) for row in rows]
+
     def latest_checkpoint_id(self, physical_thread_id: str, *, checkpoint_ns: str = "") -> str | None:
         if self._connection is None or not self._table_exists("checkpoints"):
             return None
@@ -1389,6 +1483,23 @@ class ConversationStore:
         )
         connection.execute(
             """
+            create table if not exists team_conversation_control_events (
+                team_id text not null,
+                conversation_id text not null,
+                id text not null,
+                branch_id text not null,
+                logical_thread_key text not null,
+                physical_thread_id text not null,
+                parent_run_id text,
+                kind text not null,
+                content text not null,
+                created_at text not null,
+                primary key (team_id, conversation_id, id)
+            )
+            """
+        )
+        connection.execute(
+            """
             create table if not exists team_conversation_interrupts (
                 team_id text not null,
                 conversation_id text not null,
@@ -1556,6 +1667,20 @@ class ConversationStore:
             usable_for_fork=bool(row[8]),
             usable_for_continue=bool(row[9]),
             created_at=str(row[10]),
+        )
+
+    def _control_event_from_row(self, row: tuple[object, ...]) -> ConversationControlEvent:
+        return ConversationControlEvent(
+            id=str(row[0]),
+            team_id=self.team_id,
+            conversation_id=self.conversation_id,
+            branch_id=str(row[1]),
+            logical_thread_key=str(row[2]),
+            physical_thread_id=str(row[3]),
+            parent_run_id=str(row[4]) if row[4] is not None else None,
+            kind=str(row[5]),
+            content=str(row[6] or ""),
+            created_at=str(row[7]),
         )
 
     def _save_branch_thread(self, branch_thread: ConversationBranchThread) -> None:
@@ -1744,6 +1869,7 @@ class ConversationStore:
             "team_conversation_branches",
             "team_conversation_branch_threads",
             "team_conversation_thread_frontiers",
+            "team_conversation_control_events",
             "team_conversation_interrupts",
         )
         for table in tables:

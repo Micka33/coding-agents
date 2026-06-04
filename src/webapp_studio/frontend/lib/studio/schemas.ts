@@ -319,6 +319,21 @@ export const ThreadFrontierSchema = z
   })
   .passthrough()
 
+export const ConversationControlEventSchema = z
+  .object({
+    id: z.string(),
+    team_id: z.string(),
+    conversation_id: z.string(),
+    branch_id: z.string(),
+    logical_thread_key: z.string(),
+    physical_thread_id: z.string(),
+    parent_run_id: z.string().nullable().default(null),
+    kind: z.string(),
+    content: z.string(),
+    created_at: z.string(),
+  })
+  .passthrough()
+
 export const ConversationSnapshotSchema = z
   .object({
     events: z.array(ConversationEventSchema),
@@ -326,6 +341,7 @@ export const ConversationSnapshotSchema = z
     agent_states: z.array(AgentDeliveryStateSchema),
     branch_threads: z.array(ConversationBranchThreadSchema).default([]),
     thread_frontiers: z.array(ThreadFrontierSchema).default([]),
+    control_events: z.array(ConversationControlEventSchema).default([]),
   })
   .passthrough()
 

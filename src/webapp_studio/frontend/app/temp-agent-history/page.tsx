@@ -124,6 +124,7 @@ const studioState: StudioState = {
     ],
     branch_threads: [],
     thread_frontiers: [],
+    control_events: [],
   },
   activity: {
     active_agent_ids: [],
