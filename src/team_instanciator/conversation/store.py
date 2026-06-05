@@ -1378,6 +1378,8 @@ class ConversationStore:
         label: str | None = None,
         origin_checkpoint_id: str | None = None,
         origin_event_id: str | None = None,
+        origin_logical_message_id: str | None = None,
+        origin_previous_event_id: str | None = None,
         origin_event_seq: int | None = None,
         head_checkpoint_id: str | None = None,
         parent_branch_id: str | None = None,
@@ -1390,6 +1392,8 @@ class ConversationStore:
             parent_branch_id=parent_branch_id or self.current_branch_id(),
             origin_checkpoint_id=origin_checkpoint_id,
             origin_event_id=origin_event_id,
+            origin_logical_message_id=origin_logical_message_id,
+            origin_previous_event_id=origin_previous_event_id,
             origin_event_seq=origin_event_seq,
             created_at=self._now(),
             current=False,
@@ -1411,12 +1415,14 @@ class ConversationStore:
                     parent_branch_id,
                     origin_checkpoint_id,
                     origin_event_id,
+                    origin_logical_message_id,
+                    origin_previous_event_id,
                     origin_event_seq,
                     created_at,
                     current,
                     head_checkpoint_id
                 )
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     branch.team_id,
@@ -1426,6 +1432,8 @@ class ConversationStore:
                     branch.parent_branch_id,
                     branch.origin_checkpoint_id,
                     branch.origin_event_id,
+                    branch.origin_logical_message_id,
+                    branch.origin_previous_event_id,
                     branch.origin_event_seq,
                     branch.created_at,
                     int(branch.current),
@@ -1448,6 +1456,8 @@ class ConversationStore:
                     parent_branch_id,
                     origin_checkpoint_id,
                     origin_event_id,
+                    origin_logical_message_id,
+                    origin_previous_event_id,
                     origin_event_seq,
                     created_at,
                     current,
@@ -1850,6 +1860,8 @@ class ConversationStore:
                 parent_branch_id text,
                 origin_checkpoint_id text,
                 origin_event_id text,
+                origin_logical_message_id text,
+                origin_previous_event_id text,
                 origin_event_seq integer,
                 created_at text not null,
                 current integer not null,
@@ -1960,6 +1972,8 @@ class ConversationStore:
         self._ensure_column("team_conversation_deliveries", "branch_id", "text not null default 'branch_main'")
         self._ensure_column("team_conversation_interrupts", "branch_id", "text not null default 'branch_main'")
         self._ensure_column("team_conversation_branches", "origin_event_id", "text")
+        self._ensure_column("team_conversation_branches", "origin_logical_message_id", "text")
+        self._ensure_column("team_conversation_branches", "origin_previous_event_id", "text")
         self._ensure_column("team_conversation_branches", "origin_event_seq", "integer")
         self._ensure_branch_aware_history_schema()
         connection.commit()
@@ -2067,11 +2081,13 @@ class ConversationStore:
             parent_branch_id=str(row[2]) if row[2] is not None else None,
             origin_checkpoint_id=str(row[3]) if row[3] is not None else None,
             origin_event_id=str(row[4]) if row[4] is not None else None,
-            origin_event_seq=int(row[5]) if row[5] is not None else None,
-            created_at=str(row[6]),
-            current=bool(row[7]),
+            origin_logical_message_id=str(row[5]) if row[5] is not None else None,
+            origin_previous_event_id=str(row[6]) if row[6] is not None else None,
+            origin_event_seq=int(row[7]) if row[7] is not None else None,
+            created_at=str(row[8]),
+            current=bool(row[9]),
             status="persisted",
-            head_checkpoint_id=str(row[8]) if row[8] is not None else None,
+            head_checkpoint_id=str(row[10]) if row[10] is not None else None,
         )
 
     def _branch_thread_from_row(self, row: tuple[object, ...]) -> ConversationBranchThread:
@@ -2480,6 +2496,8 @@ class ConversationStore:
                 parent_branch_id,
                 origin_checkpoint_id,
                 origin_event_id,
+                origin_logical_message_id,
+                origin_previous_event_id,
                 origin_event_seq,
                 created_at,
                 current,

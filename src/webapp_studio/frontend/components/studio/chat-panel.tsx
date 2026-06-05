@@ -911,6 +911,7 @@ function messageVersionIndex(state: StudioState) {
       (branch) =>
         branch.id === event.branch_id ||
         branch.id === baseBranchId ||
+        branch.origin_logical_message_id === key ||
         branch.origin_event_id === event.id ||
         branch.origin_event_id === event.logical_message_id ||
         branch.origin_event_id === event.version_parent_event_id

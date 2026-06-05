@@ -444,6 +444,8 @@ const studioState: StudioState = {
         parent_branch_id: null,
         origin_checkpoint_id: null,
         origin_event_id: null,
+        origin_logical_message_id: null,
+        origin_previous_event_id: null,
         origin_event_seq: null,
         created_at: "2026-06-03T09:14:11Z",
         current: true,

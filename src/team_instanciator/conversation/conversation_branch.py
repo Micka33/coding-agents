@@ -13,6 +13,8 @@ class ConversationBranch:
     parent_branch_id: str | None
     origin_checkpoint_id: str | None
     origin_event_id: str | None
+    origin_logical_message_id: str | None
+    origin_previous_event_id: str | None
     origin_event_seq: int | None
     created_at: str
     current: bool
@@ -28,6 +30,8 @@ class ConversationBranch:
             "parent_branch_id": self.parent_branch_id,
             "origin_checkpoint_id": self.origin_checkpoint_id,
             "origin_event_id": self.origin_event_id,
+            "origin_logical_message_id": self.origin_logical_message_id,
+            "origin_previous_event_id": self.origin_previous_event_id,
             "origin_event_seq": self.origin_event_seq,
             "created_at": self.created_at,
             "current": self.current,

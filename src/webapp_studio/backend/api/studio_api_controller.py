@@ -468,10 +468,13 @@ class StudioApiController:
                 f"Branch creation is not available from checkpoint: {origin_checkpoint.id}",
             )
         origin_event_id, origin_event_seq = self._checkpoint_origin(origin_checkpoint) if origin_checkpoint is not None else (None, None)
+        origin_logical_message_id, origin_previous_event_id = self._event_origin_metadata(origin_event_id)
         created = create_branch(
             label=request.label,
             origin_checkpoint_id=origin_checkpoint.id if origin_checkpoint is not None else None,
             origin_event_id=origin_event_id,
+            origin_logical_message_id=origin_logical_message_id,
+            origin_previous_event_id=origin_previous_event_id,
             origin_event_seq=origin_event_seq,
             head_checkpoint_id=origin_checkpoint.id if origin_checkpoint is not None else None,
             parent_branch_id=self._current_branch_id(),
@@ -803,6 +806,14 @@ class StudioApiController:
             str(event_id) if event_id else None,
             int(event_seq) if isinstance(event_seq, int) else None,
         )
+
+    def _event_origin_metadata(self, event_id: str | None) -> tuple[str | None, str | None]:
+        if event_id is None:
+            return None, None
+        event = next((item for item in self.state().conversation.events if item.id == event_id), None)
+        if event is None:
+            return None, None
+        return event.logical_message_id, event.parent_event_id
 
     def _checkpoint_for_message(self, checkpoints: list[CheckpointSummary], message_id: str) -> CheckpointSummary | None:
         for checkpoint in reversed(checkpoints):

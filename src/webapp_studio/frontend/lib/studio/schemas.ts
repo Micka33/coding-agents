@@ -503,6 +503,8 @@ export const BranchSummarySchema = z
     parent_branch_id: z.string().nullable(),
     origin_checkpoint_id: z.string().nullable(),
     origin_event_id: z.string().nullable(),
+    origin_logical_message_id: z.string().nullable().default(null),
+    origin_previous_event_id: z.string().nullable().default(null),
     origin_event_seq: z.number().int().nullable(),
     created_at: z.string(),
     current: z.boolean(),

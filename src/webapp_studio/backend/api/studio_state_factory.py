@@ -282,6 +282,8 @@ class StudioStateFactory:
             parent_branch_id=branch.parent_branch_id,
             origin_checkpoint_id=branch.origin_checkpoint_id,
             origin_event_id=branch.origin_event_id,
+            origin_logical_message_id=branch.origin_logical_message_id,
+            origin_previous_event_id=branch.origin_previous_event_id,
             origin_event_seq=branch.origin_event_seq,
             created_at=branch.created_at,
             current=branch.current or branch.id == current_branch_id,

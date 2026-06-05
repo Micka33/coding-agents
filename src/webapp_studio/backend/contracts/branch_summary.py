@@ -11,6 +11,8 @@ class BranchSummary(ContractModel):
     parent_branch_id: str | None = None
     origin_checkpoint_id: str | None = None
     origin_event_id: str | None = None
+    origin_logical_message_id: str | None = None
+    origin_previous_event_id: str | None = None
     origin_event_seq: int | None = None
     created_at: str
     current: bool

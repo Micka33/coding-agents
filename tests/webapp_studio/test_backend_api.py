@@ -606,9 +606,11 @@ class BackendApiTests(unittest.TestCase):
             self.assertEqual(created["data"]["label"], "Alternative")
             self.assertEqual(created["data"]["parent_branch_id"], "branch_main")
             self.assertEqual(created["data"]["origin_checkpoint_id"], "checkpoint_01")
+            self.assertEqual(created["data"]["origin_logical_message_id"], "event_01")
             self.assertFalse(created["data"]["current"])
             self.assertEqual(current_created["data"]["origin_checkpoint_id"], "checkpoint_01")
             self.assertEqual(message_created["data"]["origin_checkpoint_id"], "checkpoint_01")
+            self.assertEqual(message_created["data"]["origin_logical_message_id"], "event_01")
             self.assertEqual(missing_message["errors"][0]["field"], "message_id")
             self.assertEqual(missing_checkpoint["errors"][0]["code"], "not_found")
             self.assertEqual(missing_branch["errors"][0]["field"], "branch_id")
@@ -834,8 +836,11 @@ class BackendApiTests(unittest.TestCase):
 
         current_branch_id = edited["data"]["history"]["current_branch_id"]
         events = edited["data"]["conversation"]["events"]
+        current_branch = next(branch for branch in edited["data"]["history"]["branches"] if branch["id"] == current_branch_id)
 
         self.assertNotEqual(current_branch_id, "branch_main")
+        self.assertEqual(current_branch["origin_logical_message_id"], "event_01")
+        self.assertIsNone(current_branch["origin_previous_event_id"])
         self.assertEqual(events[0]["content"], "@agent edited")
         self.assertEqual(events[0]["branch_id"], current_branch_id)
         self.assertEqual(events[0]["logical_message_id"], "event_01")
@@ -1798,6 +1803,8 @@ class BackendApiTests(unittest.TestCase):
                 label="Edit #1",
                 origin_checkpoint_id="frontier_event_01_before",
                 origin_event_id=event_id,
+                origin_logical_message_id="event_01",
+                origin_previous_event_id=None,
                 origin_event_seq=0,
                 parent_branch_id=branch_store.current_branch_id(),
             )
@@ -1927,6 +1934,8 @@ class BackendApiTests(unittest.TestCase):
             label=None,
             origin_checkpoint_id=None,
             origin_event_id=None,
+            origin_logical_message_id=None,
+            origin_previous_event_id=None,
             origin_event_seq=None,
             head_checkpoint_id=None,
             parent_branch_id=None,
@@ -1937,6 +1946,8 @@ class BackendApiTests(unittest.TestCase):
                 label=label,
                 origin_checkpoint_id=origin_checkpoint_id,
                 origin_event_id=origin_event_id,
+                origin_logical_message_id=origin_logical_message_id,
+                origin_previous_event_id=origin_previous_event_id,
                 origin_event_seq=origin_event_seq,
                 head_checkpoint_id=head_checkpoint_id,
                 parent_branch_id=parent_branch_id,
@@ -1973,6 +1984,8 @@ class BackendApiTests(unittest.TestCase):
                 label=f"Checkpoint {mode}",
                 origin_checkpoint_id=checkpoint_id,
                 origin_event_id=origin_event_id,
+                origin_logical_message_id=origin_event_id,
+                origin_previous_event_id=None,
                 origin_event_seq=origin_event_seq,
                 head_checkpoint_id=checkpoint_id,
                 parent_branch_id=branch_store.current_branch_id(),

@@ -160,6 +160,8 @@ class MentionAwareTeam:
             label=f"Edit #{edited_event.seq}",
             origin_checkpoint_id=edited_event.frontier_before_event_id,
             origin_event_id=edited_event.id,
+            origin_logical_message_id=edited_event.logical_message_id or edited_event.id,
+            origin_previous_event_id=previous_event.id if previous_event is not None else None,
             origin_event_seq=previous_event.seq if previous_event is not None else 0,
             parent_branch_id=current_branch_id,
         )
@@ -405,10 +407,12 @@ class MentionAwareTeam:
         reply = PublicReplyExtractor().extract(result)
         if reply is None:
             raise ValueError("Checkpoint replay returned no final textual AI reply.")
+        origin_event = self.store.get_event(origin_event_id) if origin_event_id is not None else None
         branch = self.store.create_branch(
             label=self._checkpoint_branch_label(mode),
             origin_checkpoint_id=checkpoint_id,
             origin_event_id=origin_event_id,
+            origin_logical_message_id=origin_event.logical_message_id if origin_event is not None else None,
             origin_event_seq=origin_event_seq,
             head_checkpoint_id=checkpoint_id,
             parent_branch_id=self.store.current_branch_id(),

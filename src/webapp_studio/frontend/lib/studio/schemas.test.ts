@@ -34,6 +34,7 @@ describe("studio fixture contracts", () => {
     expect(state.history.checkpoints[0]?.source).toBe("langgraph_sqlite")
     expect(state.history.checkpoints[0]?.summary.agent_id).toBe("agent")
     expect(state.history.branches[0]?.head_checkpoint_id).toBe("checkpoint_01")
+    expect(state.history.branches[1]?.origin_logical_message_id).toBe("event_01")
     expect(state.participant_aliases.agent).toEqual(["lead"])
     expect(state.conversation.events[0]?.metadata.generated_ui_ids).toEqual(["generated_ui_01"])
     expect(GeneratedUiSpecSchema.parse(readFixture("generated_ui_spec.json")).status).toBe("valid")

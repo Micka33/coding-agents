@@ -295,10 +295,10 @@ class ConversationRuntimeTests(unittest.TestCase):
             self.assertIsNone(reloaded.switch_branch("missing"))
             self.assertIsNone(reloaded.switch_branch("branch_main"))
             self.assertEqual(reloaded.current_branch_id(), "branch_main")
-            self.assertIn(
-                "origin_event_id",
-                [row[1] for row in connection.execute("pragma table_info(team_conversation_branches)").fetchall()],
-            )
+            branch_columns = [row[1] for row in connection.execute("pragma table_info(team_conversation_branches)").fetchall()]
+            self.assertIn("origin_event_id", branch_columns)
+            self.assertIn("origin_logical_message_id", branch_columns)
+            self.assertIn("origin_previous_event_id", branch_columns)
 
     def test_store_reconciles_incomplete_commits_on_startup(self) -> None:
         with sqlite3.connect(":memory:", check_same_thread=False) as connection:
@@ -645,6 +645,8 @@ class ConversationRuntimeTests(unittest.TestCase):
         self.assertEqual(graph.calls[0][1]["configurable"]["checkpoint_id"], "checkpoint_01")
         self.assertEqual(result.event.metadata["branch_id"], result.branch.id)
         self.assertEqual(result.branch.origin_event_id, origin.id)
+        self.assertEqual(result.branch.origin_logical_message_id, origin.logical_message_id)
+        self.assertIsNone(result.branch.origin_previous_event_id)
         self.assertEqual(runtime.store.current_branch_id(), result.branch.id)
 
     def test_checkpoint_edit_updates_graph_state_before_replay(self) -> None:
@@ -993,6 +995,8 @@ class ConversationRuntimeTests(unittest.TestCase):
         self.assertNotEqual(current_branch_id, "branch_main")
         self.assertEqual(original.frontier_before_event_id, first.frontier_after_event_id)
         self.assertEqual(current_branch.origin_checkpoint_id, original.frontier_before_event_id)
+        self.assertEqual(current_branch.origin_logical_message_id, original.logical_message_id)
+        self.assertEqual(current_branch.origin_previous_event_id, first.id)
         self.assertEqual(edited.event.branch_id, current_branch_id)
         self.assertEqual(edited.event.logical_message_id, original.logical_message_id)
         self.assertEqual(edited.event.version_parent_event_id, original.id)
