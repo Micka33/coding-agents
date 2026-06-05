@@ -346,6 +346,7 @@ export const ThreadFrontierSchema = z
     logical_thread_key: z.string(),
     physical_thread_id: z.string(),
     checkpoint_id: z.string().nullable().default(null),
+    run_id: z.string().nullable().default(null),
     parent_logical_thread_key: z.string().nullable().default(null),
     usable_for_fork: z.boolean().default(false),
     usable_for_continue: z.boolean().default(false),

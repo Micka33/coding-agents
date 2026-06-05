@@ -310,6 +310,7 @@ class MentionRouter:
                 logical_thread_key=logical_thread_key,
                 physical_thread_id=source_thread_id,
                 checkpoint_id=checkpoint_id,
+                run_id=run_id,
                 usable_for_fork=True,
                 usable_for_continue=True,
             )
@@ -359,6 +360,7 @@ class MentionRouter:
                 logical_thread_key=edge.child_logical_thread_key,
                 physical_thread_id=edge.child_physical_thread_id,
                 checkpoint_id=checkpoint_id,
+                run_id=run_id,
                 parent_logical_thread_key=edge.parent_logical_thread_key,
                 usable_for_fork=True,
                 usable_for_continue=True,

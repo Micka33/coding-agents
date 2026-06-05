@@ -192,6 +192,26 @@ class ConversationRuntimeTests(unittest.TestCase):
                 )
                 """
             )
+            connection.execute(
+                """
+                create table team_conversation_thread_frontiers (
+                    team_id text not null,
+                    conversation_id text not null,
+                    frontier_id text not null,
+                    branch_id text not null,
+                    event_id text not null,
+                    event_boundary text not null,
+                    logical_thread_key text not null,
+                    physical_thread_id text not null,
+                    checkpoint_id text,
+                    parent_logical_thread_key text,
+                    usable_for_fork integer not null,
+                    usable_for_continue integer not null,
+                    created_at text not null,
+                    primary key (team_id, conversation_id, frontier_id, event_boundary, logical_thread_key)
+                )
+                """
+            )
             self._create_checkpoint_tables(connection)
             store = ConversationStore(team_id="team", conversation_id="thread", connection=connection)
             file_ref = ConversationFileRef(id="file-1", filename="notes.txt", uri="conversation://files/file-1")
@@ -299,6 +319,8 @@ class ConversationRuntimeTests(unittest.TestCase):
             self.assertIn("origin_event_id", branch_columns)
             self.assertIn("origin_logical_message_id", branch_columns)
             self.assertIn("origin_previous_event_id", branch_columns)
+            frontier_columns = [row[1] for row in connection.execute("pragma table_info(team_conversation_thread_frontiers)").fetchall()]
+            self.assertIn("run_id", frontier_columns)
 
     def test_store_reconciles_incomplete_commits_on_startup(self) -> None:
         with sqlite3.connect(":memory:", check_same_thread=False) as connection:
@@ -1242,6 +1264,7 @@ class ConversationRuntimeTests(unittest.TestCase):
         self.assertEqual(frontiers[0].event_id, event.id)
         self.assertEqual(frontiers[0].event_boundary, "after")
         self.assertEqual(frontiers[0].checkpoint_id, "checkpoint-interrupted")
+        self.assertEqual(frontiers[0].run_id, "run_interrupted")
         self.assertTrue(frontiers[0].usable_for_continue)
 
     def test_public_frontier_captures_five_nested_tool_threads_for_branch_fork(self) -> None:
@@ -1317,6 +1340,7 @@ class ConversationRuntimeTests(unittest.TestCase):
         )
 
         self.assertEqual(len(first_reply_frontiers), 6)
+        self.assertEqual({frontier.run_id for frontier in first_reply_frontiers}, {graph.calls[0][1]["metadata"]["run_id"]})
         self.assertEqual(level_five_frontier.checkpoint_id, "checkpoint-level-5")
         self.assertEqual(level_five_frontier.parent_logical_thread_key, "thread:mention:agent-b:relation:rel_level_1:agent:agent-1:relation:rel_level_2:agent:agent-2:relation:rel_level_3:agent:agent-3:relation:rel_level_4:agent:agent-4")
         self.assertEqual(level_five_branch_thread.forked_from_branch_id, "branch_main")

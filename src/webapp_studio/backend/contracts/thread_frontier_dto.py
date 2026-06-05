@@ -15,6 +15,7 @@ class ThreadFrontierDto(ContractModel):
     logical_thread_key: str
     physical_thread_id: str
     checkpoint_id: str | None = None
+    run_id: str | None = None
     parent_logical_thread_key: str | None = None
     usable_for_fork: bool = False
     usable_for_continue: bool = False

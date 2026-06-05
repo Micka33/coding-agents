@@ -17,6 +17,7 @@ class ThreadFrontierDict(TypedDict):
     logical_thread_key: str
     physical_thread_id: str
     checkpoint_id: str | None
+    run_id: str | None
     parent_logical_thread_key: str | None
     usable_for_fork: bool
     usable_for_continue: bool
@@ -34,6 +35,7 @@ class ThreadFrontier:
     logical_thread_key: str
     physical_thread_id: str
     checkpoint_id: str | None
+    run_id: str | None = None
     parent_logical_thread_key: str | None = None
     usable_for_fork: bool = False
     usable_for_continue: bool = False
@@ -50,6 +52,7 @@ class ThreadFrontier:
             "logical_thread_key": self.logical_thread_key,
             "physical_thread_id": self.physical_thread_id,
             "checkpoint_id": self.checkpoint_id,
+            "run_id": self.run_id,
             "parent_logical_thread_key": self.parent_logical_thread_key,
             "usable_for_fork": self.usable_for_fork,
             "usable_for_continue": self.usable_for_continue,

@@ -867,6 +867,7 @@ class ConversationStore:
         logical_thread_key: str,
         physical_thread_id: str,
         checkpoint_id: str | None,
+        run_id: str | None = None,
         parent_logical_thread_key: str | None = None,
         usable_for_fork: bool = False,
         usable_for_continue: bool = False,
@@ -881,6 +882,7 @@ class ConversationStore:
             logical_thread_key=logical_thread_key,
             physical_thread_id=physical_thread_id,
             checkpoint_id=checkpoint_id,
+            run_id=run_id,
             parent_logical_thread_key=parent_logical_thread_key,
             usable_for_fork=usable_for_fork,
             usable_for_continue=usable_for_continue,
@@ -902,17 +904,19 @@ class ConversationStore:
                     logical_thread_key,
                     physical_thread_id,
                     checkpoint_id,
+                    run_id,
                     parent_logical_thread_key,
                     usable_for_fork,
                     usable_for_continue,
                     created_at
                 )
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 on conflict(team_id, conversation_id, frontier_id, event_boundary, logical_thread_key) do update set
                     branch_id = excluded.branch_id,
                     event_id = excluded.event_id,
                     physical_thread_id = excluded.physical_thread_id,
                     checkpoint_id = excluded.checkpoint_id,
+                    run_id = excluded.run_id,
                     parent_logical_thread_key = excluded.parent_logical_thread_key,
                     usable_for_fork = excluded.usable_for_fork,
                     usable_for_continue = excluded.usable_for_continue,
@@ -928,6 +932,7 @@ class ConversationStore:
                     frontier.logical_thread_key,
                     frontier.physical_thread_id,
                     frontier.checkpoint_id,
+                    frontier.run_id,
                     frontier.parent_logical_thread_key,
                     int(frontier.usable_for_fork),
                     int(frontier.usable_for_continue),
@@ -966,6 +971,7 @@ class ConversationStore:
                     logical_thread_key,
                     physical_thread_id,
                     checkpoint_id,
+                    run_id,
                     parent_logical_thread_key,
                     usable_for_fork,
                     usable_for_continue,
@@ -1007,6 +1013,7 @@ class ConversationStore:
                     logical_thread_key,
                     physical_thread_id,
                     checkpoint_id,
+                    run_id,
                     parent_logical_thread_key,
                     usable_for_fork,
                     usable_for_continue,
@@ -1899,6 +1906,7 @@ class ConversationStore:
                 logical_thread_key text not null,
                 physical_thread_id text not null,
                 checkpoint_id text,
+                run_id text,
                 parent_logical_thread_key text,
                 usable_for_fork integer not null,
                 usable_for_continue integer not null,
@@ -1975,6 +1983,7 @@ class ConversationStore:
         self._ensure_column("team_conversation_branches", "origin_logical_message_id", "text")
         self._ensure_column("team_conversation_branches", "origin_previous_event_id", "text")
         self._ensure_column("team_conversation_branches", "origin_event_seq", "integer")
+        self._ensure_column("team_conversation_thread_frontiers", "run_id", "text")
         self._ensure_branch_aware_history_schema()
         connection.commit()
         self.reconcile_incomplete_commits()
@@ -2115,10 +2124,11 @@ class ConversationStore:
             logical_thread_key=str(row[4]),
             physical_thread_id=str(row[5]),
             checkpoint_id=str(row[6]) if row[6] is not None else None,
-            parent_logical_thread_key=str(row[7]) if row[7] is not None else None,
-            usable_for_fork=bool(row[8]),
-            usable_for_continue=bool(row[9]),
-            created_at=str(row[10]),
+            run_id=str(row[7]) if row[7] is not None else None,
+            parent_logical_thread_key=str(row[8]) if row[8] is not None else None,
+            usable_for_fork=bool(row[9]),
+            usable_for_continue=bool(row[10]),
+            created_at=str(row[11]),
         )
 
     def _control_event_from_row(self, row: tuple[object, ...]) -> ConversationControlEvent:
@@ -2236,6 +2246,7 @@ class ConversationStore:
             logical_thread_key=run.logical_thread_key,
             physical_thread_id=run.physical_thread_id,
             checkpoint_id=checkpoint_id,
+            run_id=run.id,
             usable_for_fork=run.usable_for_fork,
             usable_for_continue=run.usable_for_continue,
         )
