@@ -9,6 +9,7 @@ from langchain.tools import ToolRuntime
 from src.team_loader.models.relation_definition import RelationDefinition
 
 from src.team_instanciator.conversation.protocols import GraphRegistry
+from src.team_instanciator.runtime.branch_thread_resolver import BranchThreadResolver
 from src.team_instanciator.runtime.runnable_config_metadata_injector import RunnableConfigMetadataInjector
 from src.team_instanciator.runtime.thread_id_factory import ThreadIdFactory
 from src.team_instanciator.runtime.tool_call_edge import ToolCallEdge
@@ -28,6 +29,7 @@ class RelationTool:
         thread_id_factory: ThreadIdFactory,
         checkpoint_metadata: Mapping[str, object],
         tool_call_edge_recorder: ToolCallEdgeRecorder | None = None,
+        branch_thread_resolver: BranchThreadResolver | None = None,
         metadata_injector: RunnableConfigMetadataInjector | None = None,
     ) -> None:
         self._relation = relation
@@ -36,6 +38,7 @@ class RelationTool:
         self._thread_id_factory = thread_id_factory
         self._checkpoint_metadata = dict(checkpoint_metadata)
         self._tool_call_edge_recorder = tool_call_edge_recorder or ToolCallEdgeRecorder()
+        self._branch_thread_resolver = branch_thread_resolver
         self._metadata_injector = metadata_injector or RunnableConfigMetadataInjector()
 
     def run(self, message: str, runtime: ToolRuntime) -> str:
@@ -50,6 +53,13 @@ class RelationTool:
         child_logical_thread_key = self._thread_id_factory.logical_thread_key(thread_id)
         edge_id = self._tool_call_id(runtime) or f"edge_{uuid.uuid4().hex}"
         commit_id = f"commit_{edge_id}"
+        thread_id = self._physical_thread_id(
+            parent_physical_thread_id=parent_thread_id,
+            branch_id=branch_id,
+            logical_thread_key=child_logical_thread_key,
+            target_physical_thread_id=thread_id,
+            created_by_commit_id=commit_id,
+        )
         metadata = {
             **self._checkpoint_metadata,
             "branch_id": branch_id,
@@ -119,6 +129,25 @@ class RelationTool:
                 lock = threading.Lock()
                 _LOGICAL_THREAD_LOCKS[key] = lock
             return lock
+
+    def _physical_thread_id(
+        self,
+        *,
+        parent_physical_thread_id: str,
+        branch_id: str,
+        logical_thread_key: str,
+        target_physical_thread_id: str,
+        created_by_commit_id: str,
+    ) -> str:
+        if self._branch_thread_resolver is None:
+            return target_physical_thread_id
+        return self._branch_thread_resolver.resolve(
+            parent_physical_thread_id=parent_physical_thread_id,
+            branch_id=branch_id,
+            logical_thread_key=logical_thread_key,
+            target_physical_thread_id=target_physical_thread_id,
+            created_by_commit_id=created_by_commit_id,
+        )
 
     def _last_message_text(self, result: object) -> str:
         messages = result.get("messages") if isinstance(result, Mapping) else None

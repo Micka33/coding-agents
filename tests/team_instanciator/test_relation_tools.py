@@ -7,8 +7,10 @@ import unittest
 from types import SimpleNamespace
 
 from src.team_instanciator.tools.relation_tool import RelationTool
+from src.team_instanciator.conversation.store import ConversationStore
 from src.team_instanciator.factories.relation_tool_factory import RelationToolFactory
 from src.team_instanciator.errors.team_instanciator_error import TeamInstanciatorError
+from src.team_instanciator.runtime.branch_thread_resolver import BranchThreadResolver
 from src.team_instanciator.runtime.thread_id_factory import ThreadIdFactory
 from src.team_instanciator.runtime.tool_call_edge_recorder import ToolCallEdgeRecorder
 from tests.support import FakeGraph, agent, relation, team
@@ -138,6 +140,44 @@ class RelationToolTests(unittest.TestCase):
                 SimpleNamespace(config={"configurable": {"thread_id": "root:branch:branch_01:mention:entry"}}, state={}, tool_call_id="call_failed"),
             )
         self.assertEqual(connection.execute("select status from tool_call_edges where id = 'call_failed'").fetchone()[0], "failed")
+
+    def test_run_continues_persisted_branch_thread_for_relation_key(self) -> None:
+        connection = sqlite3.connect(":memory:")
+        graph = FakeGraph({"messages": [SimpleNamespace(content="answer")]})
+        relation_config = relation(source="entry", target="worker", tool_name="ask_worker")
+        thread_id_factory = ThreadIdFactory()
+        store = ConversationStore(team_id="team", conversation_id="thread", connection=connection)
+        branch = store.create_branch(label="Edit", parent_branch_id="branch_main")
+        logical_thread_key = "thread:mention:entry:relation:rel_worker:agent:worker"
+        store.ensure_branch_thread(
+            branch_id=branch.id,
+            logical_thread_key=logical_thread_key,
+            physical_thread_id="persisted-worker-thread",
+        )
+        tool = RelationTool(
+            relation_config,
+            Registry(graph),
+            parent_thread_id="fallback",
+            thread_id_factory=thread_id_factory,
+            checkpoint_metadata={},
+            tool_call_edge_recorder=ToolCallEdgeRecorder(connection),
+            branch_thread_resolver=BranchThreadResolver(connection, "team"),
+        )
+
+        tool.run(
+            "question",
+            SimpleNamespace(
+                config={"configurable": {"thread_id": f"thread:branch:{branch.id}:mention:entry"}},
+                state={},
+                tool_call_id="call_persisted",
+            ),
+        )
+
+        persisted_edge = connection.execute(
+            "select child_logical_thread_key, child_physical_thread_id from tool_call_edges where id = 'call_persisted'"
+        ).fetchone()
+        self.assertEqual(graph.calls[0][1]["configurable"]["thread_id"], "persisted-worker-thread")
+        self.assertEqual(persisted_edge, (logical_thread_key, "persisted-worker-thread"))
 
     def test_run_serializes_concurrent_calls_to_same_branch_and_logical_thread(self) -> None:
         class BlockingGraph:

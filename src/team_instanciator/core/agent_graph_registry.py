@@ -12,6 +12,7 @@ from src.team_instanciator.factories.checkpoint_metadata_factory import Checkpoi
 from src.team_instanciator.factories.deep_agent_factory import DeepAgentFactory
 from src.team_instanciator.factories.relation_tool_factory import RelationToolFactory
 from src.team_instanciator.factories.subagent_factory import SubagentFactory, SubagentSpec
+from src.team_instanciator.runtime.branch_thread_resolver import BranchThreadResolver
 from src.team_instanciator.runtime.thread_id_factory import ThreadIdFactory
 from src.team_instanciator.runtime.tool_call_edge_recorder import ToolCallEdgeRecorder
 
@@ -27,6 +28,7 @@ class AgentGraphRegistry:
         thread_id_factory: ThreadIdFactory,
         checkpoint_metadata_factory: CheckpointMetadataFactory | None = None,
         tool_call_edge_recorder: ToolCallEdgeRecorder | None = None,
+        branch_thread_resolver: BranchThreadResolver | None = None,
     ) -> None:
         self._team = team
         self._checkpointer_handle = checkpointer_handle
@@ -36,6 +38,7 @@ class AgentGraphRegistry:
         self._thread_id_factory = thread_id_factory
         self._checkpoint_metadata_factory = checkpoint_metadata_factory or CheckpointMetadataFactory()
         self._tool_call_edge_recorder = tool_call_edge_recorder or ToolCallEdgeRecorder(checkpointer_handle.connection)
+        self._branch_thread_resolver = branch_thread_resolver
         self._graphs: dict[str, AgentGraph] = {}
 
     def graph(self, agent_id: str) -> AgentGraph:
@@ -68,6 +71,7 @@ class AgentGraphRegistry:
                 self._thread_id_factory,
                 self._checkpoint_metadata_factory,
                 self._tool_call_edge_recorder,
+                self._branch_thread_resolver,
             )
             for relation in self._relations_from(agent, "tool")
         ]

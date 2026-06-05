@@ -20,7 +20,7 @@ class RecordingDeepAgentFactory:
 
 class RecordingRelationToolFactory:
     def __init__(self) -> None:
-        self.calls: list[tuple[Any, Any, Any, str, Any, Any, Any]] = []
+        self.calls: list[tuple[Any, Any, Any, str, Any, Any, Any, Any]] = []
 
     def create(
         self,
@@ -31,8 +31,9 @@ class RecordingRelationToolFactory:
         thread_id_factory: Any,
         metadata_factory: Any,
         tool_call_edge_recorder: Any = None,
+        branch_thread_resolver: Any = None,
     ) -> str:
-        self.calls.append((team_config, relation_config, registry, parent_thread_id, thread_id_factory, metadata_factory, tool_call_edge_recorder))
+        self.calls.append((team_config, relation_config, registry, parent_thread_id, thread_id_factory, metadata_factory, tool_call_edge_recorder, branch_thread_resolver))
         return f"tool:{relation_config.tool_name}"
 
 

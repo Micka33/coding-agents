@@ -12,6 +12,7 @@ from src.team_instanciator.resolvers.agent_runtime_resolver import AgentRuntimeR
 from src.team_instanciator.factories.checkpoint_metadata_factory import CheckpointMetadataFactory
 from src.team_instanciator.factories.langchain_agent_factory import LangChainAgentFactory
 from src.team_instanciator.factories.relation_tool_factory import RelationToolFactory
+from src.team_instanciator.runtime.branch_thread_resolver import BranchThreadResolver
 from src.team_instanciator.runtime.runnable_config_metadata_injector import RunnableConfigMetadataInjector
 from src.team_instanciator.runtime.thread_id_factory import ThreadIdFactory
 from src.team_instanciator.runtime.tool_call_edge_recorder import ToolCallEdgeRecorder
@@ -36,6 +37,7 @@ class SubagentFactory:
         thread_id_factory: ThreadIdFactory,
         checkpoint_metadata_factory: CheckpointMetadataFactory | None = None,
         tool_call_edge_recorder: ToolCallEdgeRecorder | None = None,
+        branch_thread_resolver: BranchThreadResolver | None = None,
     ) -> None:
         self._runtime_resolver = runtime_resolver
         self._langchain_agent_factory = langchain_agent_factory
@@ -44,6 +46,7 @@ class SubagentFactory:
         self._thread_id_factory = thread_id_factory
         self._checkpoint_metadata_factory = checkpoint_metadata_factory or CheckpointMetadataFactory()
         self._tool_call_edge_recorder = tool_call_edge_recorder
+        self._branch_thread_resolver = branch_thread_resolver
         self._metadata_injector = RunnableConfigMetadataInjector()
 
     def create(self, team: TeamDefinition, registry: GraphRegistry, agent_id: str) -> SubagentSpec:
@@ -77,6 +80,7 @@ class SubagentFactory:
                 self._thread_id_factory,
                 self._checkpoint_metadata_factory,
                 self._tool_call_edge_recorder,
+                self._branch_thread_resolver,
             )
             for relation in team.relations
             if relation.source == agent_id and relation.relation == "tool"
