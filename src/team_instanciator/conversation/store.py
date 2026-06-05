@@ -46,6 +46,7 @@ _DELIVERY_STATUSES: tuple[DeliveryStatus, ...] = (
     "empty",
     "failed",
     "ignored",
+    "interrupted",
     "skipped",
     "stopped",
     "success",
@@ -2176,7 +2177,7 @@ class ConversationStore:
                 started_at=delivery.created_at,
             )
 
-        stable_terminal = delivery.status in {"empty", "skipped", "stopped", "success"}
+        stable_terminal = delivery.status in {"empty", "interrupted", "skipped", "stopped", "success"}
         latest_checkpoint_id = self.latest_checkpoint_id(run.physical_thread_id) if run.physical_thread_id else None
         stable_checkpoint_id = latest_checkpoint_id if stable_terminal and latest_checkpoint_id is not None else run.stable_checkpoint_id
         checkpoint_stability: CheckpointStability

@@ -1316,27 +1316,41 @@ class BackendApiTests(unittest.TestCase):
                 "error": "boom",
             },
             {
+                "id": "delivery_interrupted",
+                "team_id": "team",
+                "conversation_id": "thread",
+                "agent_id": "agent",
+                "run_id": "run_interrupted",
+                "snapshot_seq": 5,
+                "status": "interrupted",
+                "created_at": "2026-06-01T10:00:09Z",
+                "completed_at": "2026-06-01T10:00:10Z",
+                "error": None,
+            },
+            {
                 "id": "delivery_no_run",
                 "team_id": "team",
                 "conversation_id": "thread",
                 "agent_id": "agent",
                 "run_id": None,
-                "snapshot_seq": 5,
+                "snapshot_seq": 6,
                 "status": "success",
-                "created_at": "2026-06-01T10:00:09Z",
-                "completed_at": "2026-06-01T10:00:10Z",
+                "created_at": "2026-06-01T10:00:11Z",
+                "completed_at": "2026-06-01T10:00:12Z",
                 "error": None,
             },
         ]
 
         studio_state = StudioStateFactory().from_legacy_state(state)
 
-        self.assertEqual([run.id for run in studio_state.runs], ["run_failed", "run_stopped", "run_ignored", "run_success"])
+        self.assertEqual([run.id for run in studio_state.runs], ["run_interrupted", "run_failed", "run_stopped", "run_ignored", "run_success"])
         self.assertEqual(studio_state.runs[0].status, "failed")
-        self.assertEqual(studio_state.runs[0].metadata["delivery_id"], "delivery_failed")
-        self.assertEqual(studio_state.runs[1].status, "stopped")
-        self.assertEqual(studio_state.runs[2].status, "superseded")
-        self.assertEqual(studio_state.runs[3].status, "completed")
+        self.assertEqual(studio_state.runs[0].metadata["delivery_id"], "delivery_interrupted")
+        self.assertEqual(studio_state.runs[1].status, "failed")
+        self.assertEqual(studio_state.runs[1].metadata["delivery_id"], "delivery_failed")
+        self.assertEqual(studio_state.runs[2].status, "stopped")
+        self.assertEqual(studio_state.runs[3].status, "superseded")
+        self.assertEqual(studio_state.runs[4].status, "completed")
 
     def test_controller_direct_edges(self) -> None:
         controller = StudioApiController(self._fake_conversation())

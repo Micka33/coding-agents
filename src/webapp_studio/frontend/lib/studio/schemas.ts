@@ -100,6 +100,7 @@ export const ConversationDeliverySchema = z
       "empty",
       "failed",
       "ignored",
+      "interrupted",
       "skipped",
       "stopped",
       "success",

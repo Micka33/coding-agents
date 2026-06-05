@@ -8,6 +8,7 @@ DeliveryStatus: TypeAlias = Literal[
     "empty",
     "failed",
     "ignored",
+    "interrupted",
     "skipped",
     "stopped",
     "success",

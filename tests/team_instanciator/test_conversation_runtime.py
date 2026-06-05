@@ -1072,6 +1072,51 @@ class ConversationRuntimeTests(unittest.TestCase):
         self.assertEqual(branch_checkpoints[0], ("checkpoint-1", None))
         self.assertEqual(branch_checkpoints[1][1], "checkpoint-1")
 
+    def test_store_records_interrupted_terminal_run_frontier(self) -> None:
+        connection = sqlite3.connect(":memory:", check_same_thread=False)
+        self._create_checkpoint_tables(connection)
+        store = ConversationStore(team_id="team", conversation_id="thread", connection=connection)
+        event = store.append_event(
+            author_id="human",
+            author_kind="human",
+            content="@agent-b pause",
+            mentions=("agent-b",),
+        )
+        thread_id = "thread:branch:branch_main:mention:agent-b"
+        store.mark_run_started(
+            "agent-b",
+            run_id="run_interrupted",
+            snapshot_seq=event.seq,
+            branch_id="branch_main",
+            logical_thread_key="thread:mention:agent-b",
+            physical_thread_id=thread_id,
+        )
+        self._insert_checkpoint(
+            connection,
+            thread_id=thread_id,
+            checkpoint_id="checkpoint-interrupted",
+            parent_checkpoint_id=None,
+        )
+
+        store.record_delivery(
+            agent_id="agent-b",
+            run_id="run_interrupted",
+            snapshot_seq=event.seq,
+            status="interrupted",
+            branch_id="branch_main",
+        )
+        run = store.get_run("run_interrupted")
+        frontiers = store.list_thread_frontiers(branch_id="branch_main")
+
+        self.assertEqual(run.status if run else None, "interrupted")
+        self.assertEqual(run.stable_checkpoint_id if run else None, "checkpoint-interrupted")
+        self.assertTrue(run.usable_for_fork if run else False)
+        self.assertTrue(run.usable_for_continue if run else False)
+        self.assertEqual(frontiers[0].event_id, event.id)
+        self.assertEqual(frontiers[0].event_boundary, "after")
+        self.assertEqual(frontiers[0].checkpoint_id, "checkpoint-interrupted")
+        self.assertTrue(frontiers[0].usable_for_continue)
+
     def test_public_frontier_captures_five_nested_tool_threads_for_branch_fork(self) -> None:
         connection = sqlite3.connect(":memory:", check_same_thread=False)
         self._create_checkpoint_tables(connection)

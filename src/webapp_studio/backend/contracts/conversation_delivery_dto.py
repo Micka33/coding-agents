@@ -13,7 +13,7 @@ class ConversationDeliveryDto(ContractModel):
     agent_id: str
     run_id: str | None = None
     snapshot_seq: int | None = None
-    status: Literal["cascade-limited", "empty", "failed", "ignored", "skipped", "stopped", "success"]
+    status: Literal["cascade-limited", "empty", "failed", "ignored", "interrupted", "skipped", "stopped", "success"]
     created_at: str
     completed_at: str | None = None
     error: str | None = None

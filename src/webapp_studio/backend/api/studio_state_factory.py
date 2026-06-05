@@ -197,7 +197,7 @@ class StudioStateFactory:
         return "completed"
 
     def _run_status_from_delivery(self, status: str) -> str:
-        if status in {"failed", "empty", "cascade-limited"}:
+        if status in {"failed", "empty", "interrupted", "cascade-limited"}:
             return "failed"
         if status == "stopped":
             return "stopped"
