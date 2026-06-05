@@ -474,6 +474,22 @@ class BackendApiTests(unittest.TestCase):
                 """,
                 ("thread:mention:agent", write_type, write_blob),
             )
+            relation_thread_id = "thread:branch:branch_main:mention:agent:relation:rel_worker:agent:worker"
+            other_branch_thread_id = "thread:branch:branch_other:mention:agent:relation:rel_worker:agent:worker"
+            connection.execute(
+                """
+                insert into checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, type, checkpoint, metadata)
+                values (?, '', 'checkpoint_03', null, null, null, null)
+                """,
+                (relation_thread_id,),
+            )
+            connection.execute(
+                """
+                insert into checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, type, checkpoint, metadata)
+                values (?, '', 'checkpoint_04', null, null, null, null)
+                """,
+                (other_branch_thread_id,),
+            )
             connection.commit()
             fake = self._fake_conversation(connection=connection)
             client = TestClient(create_app(fake))
@@ -487,6 +503,22 @@ class BackendApiTests(unittest.TestCase):
                 self._fake_conversation(connection=connection, participants=[]),
                 {**fake.state(), "participants": []},
             )
+            relation_history = CheckpointHistoryReader().checkpoints(
+                fake,
+                {
+                    **fake.state(),
+                    "branch_threads": [
+                        {
+                            "branch_id": "branch_main",
+                            "physical_thread_id": relation_thread_id,
+                        },
+                        {
+                            "branch_id": "branch_other",
+                            "physical_thread_id": other_branch_thread_id,
+                        },
+                    ],
+                },
+            )
 
             self.assertEqual(state["data"]["history"]["checkpoints"][0]["created_at"], "2026-06-01T10:00:02Z")
             self.assertEqual(checkpoints["capabilities"]["checkpoints"], "available")
@@ -498,6 +530,9 @@ class BackendApiTests(unittest.TestCase):
             self.assertEqual(resumed["errors"][0]["details"]["capability"], "time_travel")
             self.assertEqual(branches["data"][0]["head_checkpoint_id"], "checkpoint_02")
             self.assertEqual(empty_participant_history, [])
+            self.assertEqual([checkpoint.id for checkpoint in relation_history], ["checkpoint_01", "checkpoint_02", "checkpoint_03"])
+            self.assertEqual(relation_history[2].thread_id, relation_thread_id)
+            self.assertEqual(relation_history[2].summary["agent_id"], "worker")
 
         with sqlite3.connect(":memory:", check_same_thread=False) as empty_connection:
             empty_client = TestClient(create_app(self._fake_conversation(connection=empty_connection)))

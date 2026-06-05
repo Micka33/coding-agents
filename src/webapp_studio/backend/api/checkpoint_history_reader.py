@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from typing import Any
+from urllib.parse import unquote
 
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
@@ -20,19 +21,11 @@ class CheckpointHistoryReader:
         connection = self._connection(conversation)
         if connection is None:
             return []
-        participants = list(state.get("participants", []))
-        if not participants:
-            return []
         conversation_id = state["conversation_id"]
         branch_id = self._current_branch_id(conversation)
-        thread_ids = [
-            thread_id
-            for participant in participants
-            for thread_id in (
-                f"{conversation_id}:branch:{branch_id}:mention:{participant}",
-                f"{conversation_id}:mention:{participant}",
-            )
-        ]
+        thread_ids = self._thread_ids(state, conversation_id=conversation_id, branch_id=branch_id)
+        if not thread_ids:
+            return []
         placeholders = ",".join("?" for _ in thread_ids)
         try:
             rows = connection.execute(
@@ -49,6 +42,26 @@ class CheckpointHistoryReader:
                 return []
             raise
         return [self._checkpoint_summary(connection, row, seq=index) for index, row in enumerate(rows, start=1)]
+
+    def _thread_ids(self, state: ConversationStateDict, *, conversation_id: str, branch_id: str) -> list[str]:
+        thread_ids: list[str] = []
+        for participant in state.get("participants", []):
+            thread_ids.extend(
+                (
+                    f"{conversation_id}:branch:{branch_id}:mention:{participant}",
+                    f"{conversation_id}:mention:{participant}",
+                )
+            )
+        for branch_thread in state.get("branch_threads", []):
+            if not isinstance(branch_thread, dict):
+                continue
+            thread_branch_id = branch_thread.get("branch_id")
+            if thread_branch_id is not None and str(thread_branch_id) != branch_id:
+                continue
+            physical_thread_id = branch_thread.get("physical_thread_id")
+            if isinstance(physical_thread_id, str) and physical_thread_id:
+                thread_ids.append(physical_thread_id)
+        return list(dict.fromkeys(thread_ids))
 
     def _connection(self, conversation: WebConversation) -> sqlite3.Connection | None:
         checkpointer_handle = getattr(conversation, "checkpointer_handle", None)
@@ -174,5 +187,8 @@ class CheckpointHistoryReader:
         return metadata
 
     def _agent_id_from_thread(self, thread_id: str) -> str | None:
-        marker = ":mention:"
-        return thread_id.rsplit(marker, maxsplit=1)[-1] if marker in thread_id else None
+        relation_marker = ":agent:"
+        if relation_marker in thread_id:
+            return unquote(thread_id.rsplit(relation_marker, maxsplit=1)[-1])
+        mention_marker = ":mention:"
+        return thread_id.rsplit(mention_marker, maxsplit=1)[-1] if mention_marker in thread_id else None
