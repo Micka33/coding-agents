@@ -797,7 +797,9 @@ class ConversationStore:
         with self._lock:
             if self._connection is None:
                 thread = self._branch_threads.get((branch_id, logical_thread_key))
-                return replace(thread) if thread is not None else None
+                if thread is None or thread.status != "active":
+                    return None
+                return replace(thread)
             row = self._connection.execute(
                 """
                 select
@@ -814,7 +816,10 @@ class ConversationStore:
                 """,
                 (self.team_id, self.conversation_id, branch_id, logical_thread_key),
             ).fetchone()
-            return self._branch_thread_from_row(row) if row is not None else None
+            if row is None:
+                return None
+            thread = self._branch_thread_from_row(row)
+            return thread if thread.status == "active" else None
 
     def list_branch_threads(self, *, branch_id: str | None | _UnsetType = _UNSET) -> list[ConversationBranchThread]:
         with self._lock:
@@ -1243,6 +1248,55 @@ class ConversationStore:
             return None
         runs.sort(key=lambda item: (item.completed_at or item.started_at, item.id))
         return runs[-1].stable_checkpoint_id
+
+    def reconcile_incomplete_commits(self) -> dict[str, int]:
+        with self._lock:
+            finalized_runs = 0
+            orphaned_runs = 0
+            orphaned_branch_threads = 0
+            failed_tool_call_edges = 0
+            pending_runs = [run for run in self.list_runs(branch_id=None) if run.commit_state == "pending"]
+            for run in pending_runs:
+                delivery = self._latest_delivery_for_run(run.id)
+                if delivery is not None:
+                    self._complete_run_record_from_delivery(delivery)
+                    finalized_runs += 1
+                    continue
+                self._orphan_run(run)
+                orphaned_runs += 1
+
+            committed_run_ids = {
+                run.id
+                for run in self.list_runs(branch_id=None)
+                if run.commit_state == "committed"
+            }
+            for branch_thread in self.list_branch_threads(branch_id=None):
+                commit_id = branch_thread.created_by_commit_id
+                if branch_thread.status != "active" or commit_id is None or commit_id in committed_run_ids:
+                    continue
+                self._save_branch_thread(replace(branch_thread, status="orphaned"))
+                orphaned_branch_threads += 1
+
+            if self._connection is not None and self._table_exists("tool_call_edges"):
+                orphaned_run_ids = [run.id for run in self.list_runs(branch_id=None) if run.commit_state == "orphaned"]
+                for run_id in orphaned_run_ids:
+                    cursor = self._connection.execute(
+                        """
+                        update tool_call_edges
+                        set status = 'failed'
+                        where run_id = ? and status = 'running'
+                        """,
+                        (run_id,),
+                    )
+                    failed_tool_call_edges += cursor.rowcount if cursor.rowcount is not None else 0
+                self._connection.commit()
+
+            return {
+                "finalized_runs": finalized_runs,
+                "orphaned_runs": orphaned_runs,
+                "orphaned_branch_threads": orphaned_branch_threads,
+                "failed_tool_call_edges": failed_tool_call_edges,
+            }
 
     def create_branch(
         self,
@@ -1812,6 +1866,7 @@ class ConversationStore:
         self._ensure_column("team_conversation_branches", "origin_event_seq", "integer")
         self._ensure_branch_aware_history_schema()
         connection.commit()
+        self.reconcile_incomplete_commits()
         self.get_runtime_state()
 
     def _next_seq(self) -> int:
@@ -2011,6 +2066,8 @@ class ConversationStore:
             return
 
         run = self.get_run(delivery.run_id)
+        if run is not None and run.commit_state == "orphaned":
+            return
         if run is None:
             run = ConversationRun(
                 id=delivery.run_id,
@@ -2047,6 +2104,87 @@ class ConversationStore:
                 usable_for_fork=usable,
                 usable_for_continue=usable,
                 commit_state="committed",
+            )
+        )
+        self._clear_run_agent_state(run, delivery)
+
+    def _latest_delivery_for_run(self, run_id: str) -> ConversationDelivery | None:
+        if self._connection is None:
+            deliveries = [delivery for delivery in self._deliveries if delivery.run_id == run_id]
+            deliveries.sort(key=lambda item: (item.completed_at or item.created_at, item.id))
+            return replace(deliveries[-1]) if deliveries else None
+        row = self._connection.execute(
+            """
+            select
+                branch_id,
+                id,
+                agent_id,
+                run_id,
+                snapshot_seq,
+                status,
+                created_at,
+                completed_at,
+                error
+            from team_conversation_deliveries
+            where team_id = ? and conversation_id = ? and run_id = ?
+            order by coalesce(completed_at, created_at) desc, id desc
+            limit 1
+            """,
+            (self.team_id, self.conversation_id, run_id),
+        ).fetchone()
+        if row is None:
+            return None
+        return ConversationDelivery(
+            id=str(row[1]),
+            team_id=self.team_id,
+            conversation_id=self.conversation_id,
+            branch_id=str(row[0]),
+            agent_id=str(row[2]),
+            run_id=str(row[3]) if row[3] is not None else None,
+            snapshot_seq=int(row[4]) if row[4] is not None else None,
+            status=self._delivery_status(row[5]),
+            created_at=str(row[6]),
+            completed_at=str(row[7]) if row[7] is not None else None,
+            error=str(row[8]) if row[8] is not None else None,
+        )
+
+    def _orphan_run(self, run: ConversationRun) -> None:
+        latest_checkpoint_id = self.latest_checkpoint_id(run.physical_thread_id) if run.physical_thread_id else run.latest_checkpoint_id
+        self._save_run(
+            replace(
+                run,
+                status="failed",
+                stop_kind="incomplete-commit",
+                completed_at=run.completed_at or self._now(),
+                latest_checkpoint_id=latest_checkpoint_id,
+                checkpoint_stability="unstable" if latest_checkpoint_id is not None else "unknown",
+                stable_checkpoint_id=None,
+                usable_for_fork=False,
+                usable_for_continue=False,
+                commit_state="orphaned",
+            )
+        )
+        state = self.get_agent_state(run.agent_id, branch_id=run.branch_id)
+        if state is not None and state.current_run_id == run.id:
+            self.save_agent_state(replace(state, running=False, current_run_id=None, current_snapshot_seq=None, stop_requested=False))
+
+    def _clear_run_agent_state(self, run: ConversationRun, delivery: ConversationDelivery) -> None:
+        state = self.get_agent_state(run.agent_id, branch_id=run.branch_id)
+        if state is None or state.current_run_id != run.id:
+            return
+        delivered_status = delivery.status in {"empty", "skipped", "success"}
+        self.save_agent_state(
+            replace(
+                state,
+                last_delivered_seq=(
+                    max(state.last_delivered_seq, delivery.snapshot_seq)
+                    if delivered_status and delivery.snapshot_seq is not None
+                    else state.last_delivered_seq
+                ),
+                running=False,
+                current_run_id=None,
+                current_snapshot_seq=None,
+                stop_requested=False,
             )
         )
 

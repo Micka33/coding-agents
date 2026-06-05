@@ -32,6 +32,8 @@ from src.team_instanciator.conversation import (
 )
 from src.team_instanciator.conversation.dispatch_context import DispatchContext
 from src.team_instanciator.runtime.thread_id_factory import ThreadIdFactory
+from src.team_instanciator.runtime.tool_call_edge import ToolCallEdge
+from src.team_instanciator.runtime.tool_call_edge_recorder import ToolCallEdgeRecorder
 from src.team_loader.models.conversation_settings import AgentConversationSettings, TeamConversationSettings
 from tests.support import agent, team
 
@@ -296,6 +298,122 @@ class ConversationRuntimeTests(unittest.TestCase):
                 "origin_event_id",
                 [row[1] for row in connection.execute("pragma table_info(team_conversation_branches)").fetchall()],
             )
+
+    def test_store_reconciles_incomplete_commits_on_startup(self) -> None:
+        with sqlite3.connect(":memory:", check_same_thread=False) as connection:
+            store = ConversationStore(team_id="team", conversation_id="thread", connection=connection)
+            event = store.append_event(author_id="human", author_kind="human", content="@agent please", mentions=("agent",))
+            delivered_thread_id = "thread:branch:branch_main:mention:delivered"
+            orphan_thread_id = "thread:branch:branch_main:mention:orphan"
+
+            store.ensure_branch_thread(
+                branch_id="branch_main",
+                logical_thread_key=delivered_thread_id,
+                physical_thread_id=delivered_thread_id,
+                created_by_commit_id="run_delivered",
+            )
+            store.mark_run_started(
+                "delivered",
+                run_id="run_delivered",
+                snapshot_seq=event.seq,
+                branch_id="branch_main",
+                logical_thread_key=delivered_thread_id,
+                physical_thread_id=delivered_thread_id,
+            )
+            connection.execute(
+                """
+                insert into team_conversation_deliveries (
+                    team_id,
+                    conversation_id,
+                    branch_id,
+                    id,
+                    agent_id,
+                    run_id,
+                    snapshot_seq,
+                    status,
+                    created_at,
+                    completed_at,
+                    error
+                )
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "team",
+                    "thread",
+                    "branch_main",
+                    "delivery_delivered",
+                    "delivered",
+                    "run_delivered",
+                    event.seq,
+                    "success",
+                    "2026-06-05T00:00:00+00:00",
+                    "2026-06-05T00:00:01+00:00",
+                    None,
+                ),
+            )
+
+            store.ensure_branch_thread(
+                branch_id="branch_main",
+                logical_thread_key=orphan_thread_id,
+                physical_thread_id=orphan_thread_id,
+                created_by_commit_id="run_orphan",
+            )
+            store.mark_run_started(
+                "orphan",
+                run_id="run_orphan",
+                snapshot_seq=event.seq,
+                branch_id="branch_main",
+                logical_thread_key=orphan_thread_id,
+                physical_thread_id=orphan_thread_id,
+            )
+            ToolCallEdgeRecorder(connection).record_started(
+                ToolCallEdge(
+                    id="edge_orphan",
+                    commit_id="commit_edge_orphan",
+                    branch_id="branch_main",
+                    parent_logical_thread_key="thread:mention:parent",
+                    parent_physical_thread_id="thread:branch:branch_main:mention:parent",
+                    relation_id="rel_orphan",
+                    target_agent_id="orphan",
+                    child_logical_thread_key=orphan_thread_id,
+                    child_physical_thread_id=orphan_thread_id,
+                    run_id="run_orphan",
+                    status="running",
+                )
+            )
+
+            reloaded = ConversationStore(team_id="team", conversation_id="thread", connection=connection)
+            delivered_run = reloaded.get_run("run_delivered")
+            orphan_run = reloaded.get_run("run_orphan")
+
+            self.assertEqual(delivered_run.commit_state if delivered_run else None, "committed")
+            self.assertEqual(delivered_run.status if delivered_run else None, "success")
+            self.assertFalse(reloaded.ensure_agent_state("delivered", branch_id="branch_main").running)
+            self.assertIsNone(reloaded.ensure_agent_state("delivered", branch_id="branch_main").current_run_id)
+            self.assertEqual(reloaded.ensure_agent_state("delivered", branch_id="branch_main").last_delivered_seq, event.seq)
+            self.assertIsNotNone(
+                reloaded.get_branch_thread(branch_id="branch_main", logical_thread_key=delivered_thread_id)
+            )
+            self.assertEqual(orphan_run.commit_state if orphan_run else None, "orphaned")
+            self.assertEqual(orphan_run.stop_kind if orphan_run else None, "incomplete-commit")
+            self.assertFalse(orphan_run.usable_for_continue if orphan_run else True)
+            self.assertIsNone(reloaded.get_branch_thread(branch_id="branch_main", logical_thread_key=orphan_thread_id))
+            self.assertEqual(
+                [thread.status for thread in reloaded.list_branch_threads(branch_id="branch_main") if thread.logical_thread_key == orphan_thread_id],
+                ["orphaned"],
+            )
+            self.assertFalse(reloaded.ensure_agent_state("orphan", branch_id="branch_main").running)
+            self.assertIsNone(reloaded.ensure_agent_state("orphan", branch_id="branch_main").current_run_id)
+            self.assertEqual(connection.execute("select status from tool_call_edges where id = 'edge_orphan'").fetchone()[0], "failed")
+
+            replacement = reloaded.ensure_branch_thread(
+                branch_id="branch_main",
+                logical_thread_key=orphan_thread_id,
+                physical_thread_id=f"{orphan_thread_id}:retry",
+                created_by_commit_id="run_retry",
+            )
+            self.assertEqual(replacement.status, "active")
+            self.assertEqual(replacement.physical_thread_id, f"{orphan_thread_id}:retry")
 
     def test_store_deletes_legacy_unversioned_conversation_history(self) -> None:
         connection = sqlite3.connect(":memory:")
