@@ -241,6 +241,103 @@ class RelationToolTests(unittest.TestCase):
             "root:mention:entry:relation:stable-reviewer:agent:worker",
         )
 
+    def test_run_keeps_same_target_histories_separate_for_different_parents(self) -> None:
+        connection = sqlite3.connect(":memory:")
+        graph = FakeGraph({"messages": [SimpleNamespace(content="answer")]})
+        tool = RelationTool(
+            relation(source="entry", target="worker", tool_name="ask_worker", relation_id="stable-worker"),
+            Registry(graph),
+            parent_thread_id="fallback",
+            thread_id_factory=ThreadIdFactory(),
+            checkpoint_metadata={},
+            branch_thread_resolver=BranchThreadResolver(connection, "team"),
+        )
+
+        tool.run(
+            "entry question",
+            SimpleNamespace(config={"configurable": {"thread_id": "root:branch:branch_01:mention:entry"}}, state={}),
+        )
+        tool.run(
+            "reviewer question",
+            SimpleNamespace(config={"configurable": {"thread_id": "root:branch:branch_01:mention:reviewer"}}, state={}),
+        )
+
+        thread_ids = [call[1]["configurable"]["thread_id"] for call in graph.calls]
+        rows = connection.execute(
+            """
+            select logical_thread_key, physical_thread_id
+            from team_conversation_branch_threads
+            where branch_id = 'branch_01'
+            order by logical_thread_key
+            """
+        ).fetchall()
+
+        self.assertNotEqual(thread_ids[0], thread_ids[1])
+        self.assertEqual(
+            rows,
+            [
+                (
+                    "root:mention:entry:relation:stable-worker:agent:worker",
+                    "root:branch:branch_01:mention:entry:relation:stable-worker:agent:worker",
+                ),
+                (
+                    "root:mention:reviewer:relation:stable-worker:agent:worker",
+                    "root:branch:branch_01:mention:reviewer:relation:stable-worker:agent:worker",
+                ),
+            ],
+        )
+
+    def test_run_keeps_same_target_histories_separate_for_different_relations(self) -> None:
+        connection = sqlite3.connect(":memory:")
+        first_graph = FakeGraph({"messages": [SimpleNamespace(content="first")]})
+        second_graph = FakeGraph({"messages": [SimpleNamespace(content="second")]})
+        first_tool = RelationTool(
+            relation(source="entry", target="worker", tool_name="ask_primary", relation_id="primary-worker"),
+            Registry(first_graph),
+            parent_thread_id="fallback",
+            thread_id_factory=ThreadIdFactory(),
+            checkpoint_metadata={},
+            branch_thread_resolver=BranchThreadResolver(connection, "team"),
+        )
+        second_tool = RelationTool(
+            relation(source="entry", target="worker", tool_name="ask_secondary", relation_id="secondary-worker"),
+            Registry(second_graph),
+            parent_thread_id="fallback",
+            thread_id_factory=ThreadIdFactory(),
+            checkpoint_metadata={},
+            branch_thread_resolver=BranchThreadResolver(connection, "team"),
+        )
+        runtime = SimpleNamespace(config={"configurable": {"thread_id": "root:branch:branch_01:mention:entry"}}, state={})
+
+        first_tool.run("primary question", runtime)
+        second_tool.run("secondary question", runtime)
+
+        first_thread_id = first_graph.calls[0][1]["configurable"]["thread_id"]
+        second_thread_id = second_graph.calls[0][1]["configurable"]["thread_id"]
+        rows = connection.execute(
+            """
+            select logical_thread_key, physical_thread_id
+            from team_conversation_branch_threads
+            where branch_id = 'branch_01'
+            order by logical_thread_key
+            """
+        ).fetchall()
+
+        self.assertNotEqual(first_thread_id, second_thread_id)
+        self.assertEqual(
+            rows,
+            [
+                (
+                    "root:mention:entry:relation:primary-worker:agent:worker",
+                    "root:branch:branch_01:mention:entry:relation:primary-worker:agent:worker",
+                ),
+                (
+                    "root:mention:entry:relation:secondary-worker:agent:worker",
+                    "root:branch:branch_01:mention:entry:relation:secondary-worker:agent:worker",
+                ),
+            ],
+        )
+
     def test_parent_thread_falls_back_and_last_message_text_handles_result_shapes(self) -> None:
         tool = RelationTool(relation(), Registry(FakeGraph()), "fallback", ThreadIdFactory(), {})
 
