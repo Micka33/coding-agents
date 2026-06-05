@@ -2091,22 +2091,47 @@ class ConversationStore:
         else:
             checkpoint_stability = "unknown"
         usable = stable_terminal and stable_checkpoint_id is not None
-        self._save_run(
-            replace(
-                run,
-                status=self._run_status_from_delivery(delivery.status),
-                stop_kind="cooperative" if delivery.status == "stopped" else run.stop_kind,
-                snapshot_seq=delivery.snapshot_seq if delivery.snapshot_seq is not None else run.snapshot_seq,
-                completed_at=delivery.completed_at or self._now(),
-                stable_checkpoint_id=stable_checkpoint_id,
-                latest_checkpoint_id=latest_checkpoint_id,
-                checkpoint_stability=checkpoint_stability,
-                usable_for_fork=usable,
-                usable_for_continue=usable,
-                commit_state="committed",
-            )
+        completed_run = replace(
+            run,
+            status=self._run_status_from_delivery(delivery.status),
+            stop_kind="cooperative" if delivery.status == "stopped" else run.stop_kind,
+            snapshot_seq=delivery.snapshot_seq if delivery.snapshot_seq is not None else run.snapshot_seq,
+            completed_at=delivery.completed_at or self._now(),
+            stable_checkpoint_id=stable_checkpoint_id,
+            latest_checkpoint_id=latest_checkpoint_id,
+            checkpoint_stability=checkpoint_stability,
+            usable_for_fork=usable,
+            usable_for_continue=usable,
+            commit_state="committed",
         )
+        self._save_run(completed_run)
+        self._record_terminal_run_frontier(completed_run, delivery)
         self._clear_run_agent_state(run, delivery)
+
+    def _record_terminal_run_frontier(self, run: ConversationRun, delivery: ConversationDelivery) -> None:
+        if delivery.status == "success" or run.logical_thread_key is None or run.physical_thread_id is None:
+            return
+        event = self._latest_visible_event_through_seq(delivery.branch_id, delivery.snapshot_seq)
+        checkpoint_id = run.stable_checkpoint_id or run.latest_checkpoint_id
+        if event is None or event.frontier_after_event_id is None or checkpoint_id is None:
+            return
+        self.record_thread_frontier(
+            frontier_id=event.frontier_after_event_id,
+            branch_id=delivery.branch_id,
+            event_id=event.id,
+            event_boundary="after",
+            logical_thread_key=run.logical_thread_key,
+            physical_thread_id=run.physical_thread_id,
+            checkpoint_id=checkpoint_id,
+            usable_for_fork=run.usable_for_fork,
+            usable_for_continue=run.usable_for_continue,
+        )
+
+    def _latest_visible_event_through_seq(self, branch_id: str, snapshot_seq: int | None) -> ConversationEvent | None:
+        if snapshot_seq is None:
+            return None
+        events = self.list_events(through_seq=snapshot_seq, branch_id=branch_id)
+        return events[-1] if events else None
 
     def _latest_delivery_for_run(self, run_id: str) -> ConversationDelivery | None:
         if self._connection is None:

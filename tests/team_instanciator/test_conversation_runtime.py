@@ -955,6 +955,65 @@ class ConversationRuntimeTests(unittest.TestCase):
         self.assertEqual(branch_writes[0], ("checkpoint-1", b"write-checkpoint-1"))
         self.assertEqual(branch_writes[1][0], branch_checkpoints[1][0])
 
+    def test_mention_aware_team_forks_from_terminal_empty_run_frontier(self) -> None:
+        connection = sqlite3.connect(":memory:", check_same_thread=False)
+        self._create_checkpoint_tables(connection)
+        checkpoint_lock = threading.Lock()
+
+        def write_checkpoint(_graph: FakeGraph, _input: Any, config: Any) -> None:
+            thread_id = config["configurable"]["thread_id"]
+            with checkpoint_lock:
+                next_index = connection.execute("select count(*) from checkpoints").fetchone()[0] + 1
+                checkpoint_id = f"checkpoint-{next_index}"
+                parent_checkpoint_id = connection.execute(
+                    """
+                    select checkpoint_id
+                    from checkpoints
+                    where thread_id = ? and checkpoint_ns = ''
+                    order by checkpoint_id desc
+                    limit 1
+                    """,
+                    (thread_id,),
+                ).fetchone()
+                self._insert_checkpoint(
+                    connection,
+                    thread_id=thread_id,
+                    checkpoint_id=checkpoint_id,
+                    parent_checkpoint_id=parent_checkpoint_id[0] if parent_checkpoint_id is not None else None,
+                )
+                self._insert_write(connection, thread_id=thread_id, checkpoint_id=checkpoint_id, value=f"write-{checkpoint_id}")
+                connection.commit()
+
+        graph = FakeGraph("", callback=write_checkpoint)
+        runtime = self._conversation_runtime({"agent-b": graph}, connection=connection)
+
+        first = runtime.append_human_message("@agent-b empty", author_id="mickael").event
+        original_second = runtime.append_human_message("@agent-b second", author_id="mickael").event
+        runtime.edit_human_message(original_second.id, "@agent-b edited", author_id="mickael")
+
+        branch_id = runtime.store.current_branch_id()
+        branch_thread_id = graph.calls[2][1]["configurable"]["thread_id"]
+        branch_thread = runtime.store.list_branch_threads(branch_id=branch_id)[0]
+        main_frontiers = runtime.store.list_thread_frontiers(branch_id="branch_main")
+        branch_checkpoints = connection.execute(
+            """
+            select checkpoint_id, parent_checkpoint_id
+            from checkpoints
+            where thread_id = ?
+            order by checkpoint_id asc
+            """,
+            (branch_thread_id,),
+        ).fetchall()
+
+        self.assertEqual(
+            [(frontier.event_id, frontier.checkpoint_id, frontier.usable_for_fork) for frontier in main_frontiers],
+            [(first.id, "checkpoint-1", True), (original_second.id, "checkpoint-2", True)],
+        )
+        self.assertEqual(branch_thread.forked_from_branch_id, "branch_main")
+        self.assertEqual(branch_thread.forked_from_checkpoint_id, "checkpoint-1")
+        self.assertEqual(branch_checkpoints[0], ("checkpoint-1", None))
+        self.assertEqual(branch_checkpoints[1][1], "checkpoint-1")
+
     def test_mention_aware_team_identity_uses_team_aliases_and_agent_descriptions(self) -> None:
         graph = FakeGraph("answer")
         team_config = team(
