@@ -1279,6 +1279,32 @@ class ConversationRuntimeTests(unittest.TestCase):
         self.assertEqual([message.content for message in second_call_messages if message.type == "human"], ["@agent-b second", "@agent-b third"])
         self.assertEqual(runtime.store.ensure_agent_state("agent-b").last_delivered_seq, 4)
 
+    def test_queued_mentions_stay_paused_when_switching_away_from_branch(self) -> None:
+        graph = FakeGraph("answer")
+        runtime = self._conversation_runtime({"agent-b": graph})
+        event = runtime.store.append_event(
+            author_id="human",
+            author_kind="human",
+            content="@agent-b queued",
+            mentions=("agent-b",),
+        )
+        runtime.router.enqueue_targets(event, ("agent-b",))
+        branch = runtime.store.create_branch(label="Alternative", parent_branch_id="branch_main")
+        runtime.store.switch_branch(branch.id)
+
+        runtime.router.drain()
+
+        self.assertEqual(graph.calls, [])
+        self.assertTrue(runtime.store.ensure_agent_state("agent-b", branch_id="branch_main").queued)
+        self.assertFalse(runtime.store.ensure_agent_state("agent-b", branch_id=branch.id).queued)
+
+        runtime.store.switch_branch("branch_main")
+        runtime.router.drain()
+
+        self.assertEqual(len(graph.calls), 1)
+        self.assertEqual(graph.calls[0][1]["metadata"]["branch_id"], "branch_main")
+        self.assertFalse(runtime.store.ensure_agent_state("agent-b", branch_id="branch_main").queued)
+
     def test_state_reports_all_running_and_queued_activities(self) -> None:
         runtime = self._conversation_runtime({"agent-b": FakeGraph("answer"), "agent-c": FakeGraph("answer")})
         state_b = runtime.store.ensure_agent_state("agent-b")
