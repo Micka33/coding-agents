@@ -667,6 +667,124 @@ class BackendApiTests(unittest.TestCase):
 
             self.assertEqual(unsupported_message["errors"][0]["details"]["capability"], "branching")
 
+    def test_checkpoint_actions_require_usable_frontier_metadata_when_present(self) -> None:
+        with sqlite3.connect(":memory:", check_same_thread=False) as connection:
+            self._create_checkpoint_tables(connection)
+            connection.execute(
+                """
+                insert into checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, type, checkpoint, metadata)
+                values ('thread:mention:agent', '', 'checkpoint_01', null, null, null, null)
+                """
+            )
+            connection.execute(
+                """
+                insert into checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, type, checkpoint, metadata)
+                values ('thread:mention:agent', '', 'checkpoint_02', 'checkpoint_01', null, null, null)
+                """
+            )
+            connection.commit()
+            runs = [
+                {
+                    "id": "run_stable",
+                    "team_id": "team",
+                    "conversation_id": "thread",
+                    "branch_id": "branch_main",
+                    "agent_id": "agent",
+                    "logical_thread_key": "mention:agent",
+                    "physical_thread_id": "thread:mention:agent",
+                    "status": "success",
+                    "stop_kind": None,
+                    "snapshot_seq": 1,
+                    "started_at": "2026-06-01T10:00:01Z",
+                    "completed_at": "2026-06-01T10:00:02Z",
+                    "stable_checkpoint_id": "checkpoint_01",
+                    "latest_checkpoint_id": "checkpoint_01",
+                    "checkpoint_stability": "stable",
+                    "usable_for_fork": True,
+                    "usable_for_continue": True,
+                    "commit_state": "committed",
+                },
+                {
+                    "id": "run_unstable",
+                    "team_id": "team",
+                    "conversation_id": "thread",
+                    "branch_id": "branch_main",
+                    "agent_id": "agent",
+                    "logical_thread_key": "mention:agent",
+                    "physical_thread_id": "thread:mention:agent",
+                    "status": "stopped",
+                    "stop_kind": "user",
+                    "snapshot_seq": 2,
+                    "started_at": "2026-06-01T10:00:03Z",
+                    "completed_at": "2026-06-01T10:00:04Z",
+                    "stable_checkpoint_id": None,
+                    "latest_checkpoint_id": "checkpoint_02",
+                    "checkpoint_stability": "unstable",
+                    "usable_for_fork": False,
+                    "usable_for_continue": False,
+                    "commit_state": "committed",
+                },
+            ]
+            thread_frontiers = [
+                {
+                    "frontier_id": "frontier_stable",
+                    "team_id": "team",
+                    "conversation_id": "thread",
+                    "branch_id": "branch_main",
+                    "event_id": "event_01",
+                    "event_boundary": "after",
+                    "logical_thread_key": "mention:agent",
+                    "physical_thread_id": "thread:mention:agent",
+                    "checkpoint_id": "checkpoint_01",
+                    "parent_logical_thread_key": None,
+                    "usable_for_fork": True,
+                    "usable_for_continue": True,
+                    "created_at": "2026-06-01T10:00:02Z",
+                },
+                {
+                    "frontier_id": "frontier_unstable",
+                    "team_id": "team",
+                    "conversation_id": "thread",
+                    "branch_id": "branch_main",
+                    "event_id": "event_01",
+                    "event_boundary": "after",
+                    "logical_thread_key": "mention:agent",
+                    "physical_thread_id": "thread:mention:agent",
+                    "checkpoint_id": "checkpoint_02",
+                    "parent_logical_thread_key": None,
+                    "usable_for_fork": False,
+                    "usable_for_continue": False,
+                    "created_at": "2026-06-01T10:00:04Z",
+                },
+            ]
+            client = TestClient(
+                create_app(
+                    self._fake_conversation(
+                        connection=connection,
+                        branching=True,
+                        runs=runs,
+                        thread_frontiers=thread_frontiers,
+                    )
+                )
+            )
+
+            checkpoints = client.get("/api/studio/v1/checkpoints").json()["data"]
+            resumed_unstable = client.post(
+                "/api/studio/v1/checkpoints/checkpoint_02/resume",
+                json={"mode": "resume"},
+            ).json()
+            branched_unstable = client.post(
+                "/api/studio/v1/branches",
+                json={"label": "Unstable", "checkpoint_id": "checkpoint_02"},
+            ).json()
+
+            self.assertEqual(checkpoints[0]["capabilities"]["resume"], "available")
+            self.assertEqual(checkpoints[0]["capabilities"]["branch_from_here"], "available")
+            self.assertEqual(checkpoints[1]["capabilities"]["resume"], "unsupported")
+            self.assertEqual(checkpoints[1]["capabilities"]["branch_from_here"], "unsupported")
+            self.assertEqual(resumed_unstable["errors"][0]["details"]["capability"], "time_travel")
+            self.assertEqual(branched_unstable["errors"][0]["details"]["capability"], "branching")
+
     def test_message_edit_creates_branch_and_versioned_human_event(self) -> None:
         fake = self._fake_conversation(branching=True)
         buffer = StreamBuffer()
@@ -1509,6 +1627,8 @@ class BackendApiTests(unittest.TestCase):
         attachments: list[dict[str, object]] | None = None,
         root_dir: Path | None = None,
         deliveries: list[dict[str, object]] | None = None,
+        runs: list[dict[str, object]] | None = None,
+        thread_frontiers: list[dict[str, object]] | None = None,
     ):
         messages = []
         stopped = []
@@ -1577,6 +1697,8 @@ class BackendApiTests(unittest.TestCase):
                 "events": [seed_event, *[event.to_dict() for event in replay_events]],
                 "agent_states": [dict(agent_state)],
                 "deliveries": list(deliveries or []),
+                "runs": list(runs or []),
+                "thread_frontiers": list(thread_frontiers or []),
                 "activities": [],
                 "activity": None,
             }

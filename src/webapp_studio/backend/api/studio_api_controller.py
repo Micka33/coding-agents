@@ -409,6 +409,8 @@ class StudioApiController:
         resume_checkpoint = self._runtime_method("resume_checkpoint")
         if resume_checkpoint is None:
             raise self._unsupported("time_travel", f"Checkpoint {request.mode} is not supported yet: {checkpoint_id}")
+        if checkpoint.capabilities.resume != "available":
+            raise self._unsupported("time_travel", f"Checkpoint {request.mode} is not available for: {checkpoint_id}")
         origin_event_id, origin_event_seq = self._checkpoint_origin(checkpoint)
         result = resume_checkpoint(
             checkpoint_id=checkpoint.id,
@@ -437,6 +439,11 @@ class StudioApiController:
             raise self._unsupported("branching", f"Branch creation is not supported yet from: {origin}")
         checkpoints = self.checkpoints()
         origin_checkpoint = self._origin_checkpoint(request, checkpoints)
+        if origin_checkpoint is not None and origin_checkpoint.capabilities.branch_from_here != "available":
+            raise self._unsupported(
+                "branching",
+                f"Branch creation is not available from checkpoint: {origin_checkpoint.id}",
+            )
         origin_event_id, origin_event_seq = self._checkpoint_origin(origin_checkpoint) if origin_checkpoint is not None else (None, None)
         created = create_branch(
             label=request.label,
@@ -637,12 +644,13 @@ class StudioApiController:
         private_activity_states: list[ConversationStateDict] | None = None,
     ) -> StudioState:
         checkpoints = self._checkpoint_history_reader.checkpoints(self._conversation, state)
+        current_branch_id = self._current_branch_id()
         return self._state_factory.from_legacy_state(
             state,
-            checkpoints=self._checkpoint_capabilities(checkpoints),
+            checkpoints=self._checkpoint_capabilities(checkpoints, state, current_branch_id=current_branch_id),
             branches=self._branches_from_runtime(),
             interrupts=self._interrupts_from_runtime(),
-            current_branch_id=self._current_branch_id(),
+            current_branch_id=current_branch_id,
             dismissed_failed_queue_delivery_ids=self._dismissed_failed_queue_delivery_ids,
             private_activity_states=private_activity_states,
         )
@@ -656,24 +664,100 @@ class StudioApiController:
             snapshots.append(self._compat.activity(urlencode({"agent_id": agent_id})))
         return snapshots
 
-    def _checkpoint_capabilities(self, checkpoints: list[CheckpointSummary]) -> list[CheckpointSummary]:
+    def _checkpoint_capabilities(
+        self,
+        checkpoints: list[CheckpointSummary],
+        state: ConversationStateDict,
+        *,
+        current_branch_id: str,
+    ) -> list[CheckpointSummary]:
         can_branch = self._runtime_method("create_branch") is not None
         can_resume = self._runtime_method("resume_checkpoint") is not None
         if not can_branch and not can_resume:
             return checkpoints
-        return [
-            checkpoint.model_copy(
-                update={
-                    "capabilities": checkpoint.capabilities.model_copy(
-                        update={
-                            "branch_from_here": "available" if can_branch else checkpoint.capabilities.branch_from_here,
-                            "resume": "available" if can_resume else checkpoint.capabilities.resume,
-                        }
-                    ),
-                }
+        forkable_keys, continuable_keys, has_usability_metadata = self._checkpoint_usability(
+            state,
+            current_branch_id=current_branch_id,
+        )
+        updated = []
+        for checkpoint in checkpoints:
+            branch_from_here = checkpoint.capabilities.branch_from_here
+            resume = checkpoint.capabilities.resume
+            if can_branch:
+                branch_from_here = (
+                    "available"
+                    if not has_usability_metadata or self._checkpoint_is_usable(checkpoint, forkable_keys)
+                    else "unsupported"
+                )
+            if can_resume:
+                resume = (
+                    "available"
+                    if not has_usability_metadata or self._checkpoint_is_usable(checkpoint, continuable_keys)
+                    else "unsupported"
+                )
+            updated.append(
+                checkpoint.model_copy(
+                    update={
+                        "capabilities": checkpoint.capabilities.model_copy(
+                            update={
+                                "branch_from_here": branch_from_here,
+                                "resume": resume,
+                            }
+                        ),
+                    }
+                )
             )
-            for checkpoint in checkpoints
-        ]
+        return updated
+
+    def _checkpoint_usability(
+        self,
+        state: ConversationStateDict,
+        *,
+        current_branch_id: str,
+    ) -> tuple[set[tuple[str | None, str]], set[tuple[str | None, str]], bool]:
+        forkable: set[tuple[str | None, str]] = set()
+        continuable: set[tuple[str | None, str]] = set()
+        has_metadata = False
+        for frontier in state.get("thread_frontiers", []):
+            if not isinstance(frontier, Mapping):
+                continue
+            if self._state_branch_id(frontier) != current_branch_id:
+                continue
+            checkpoint_id = frontier.get("checkpoint_id")
+            if checkpoint_id is None:
+                continue
+            has_metadata = True
+            key = (self._optional_str(frontier.get("physical_thread_id")), str(checkpoint_id))
+            if frontier.get("usable_for_fork"):
+                forkable.add(key)
+            if frontier.get("usable_for_continue"):
+                continuable.add(key)
+
+        for run in state.get("runs", []):
+            if not isinstance(run, Mapping):
+                continue
+            if self._state_branch_id(run) != current_branch_id:
+                continue
+            if run.get("stable_checkpoint_id") is not None or run.get("latest_checkpoint_id") is not None:
+                has_metadata = True
+            if run.get("commit_state") != "committed" or run.get("stable_checkpoint_id") is None:
+                continue
+            key = (self._optional_str(run.get("physical_thread_id")), str(run["stable_checkpoint_id"]))
+            if run.get("usable_for_fork"):
+                forkable.add(key)
+            if run.get("usable_for_continue"):
+                continuable.add(key)
+        return forkable, continuable, has_metadata
+
+    def _checkpoint_is_usable(self, checkpoint: CheckpointSummary, usable_keys: set[tuple[str | None, str]]) -> bool:
+        return (checkpoint.thread_id, checkpoint.id) in usable_keys or (None, checkpoint.id) in usable_keys
+
+    def _state_branch_id(self, item: Mapping[str, object]) -> str:
+        value = item.get("branch_id")
+        return str(value) if value is not None else "branch_main"
+
+    def _optional_str(self, value: object) -> str | None:
+        return str(value) if value is not None else None
 
     def _origin_checkpoint(self, request: BranchCreateRequest, checkpoints: list[CheckpointSummary]) -> CheckpointSummary | None:
         if request.checkpoint_id is not None:
