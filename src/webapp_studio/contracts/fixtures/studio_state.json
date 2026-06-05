@@ -117,6 +117,18 @@
         "current": true,
         "status": "derived",
         "head_checkpoint_id": "checkpoint_01"
+      },
+      {
+        "id": "branch_edit_01",
+        "label": "Edit #1",
+        "parent_branch_id": "branch_main",
+        "origin_checkpoint_id": null,
+        "origin_event_id": "event_01",
+        "origin_event_seq": 0,
+        "created_at": "2026-06-01T10:04:00Z",
+        "current": false,
+        "status": "persisted",
+        "head_checkpoint_id": null
       }
     ]
   },

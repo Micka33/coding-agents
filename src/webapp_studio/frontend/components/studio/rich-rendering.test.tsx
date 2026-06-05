@@ -515,6 +515,84 @@ describe("chat panel transcript actions", () => {
       expect(writeText).toHaveBeenLastCalledWith("Edited public prompt")
     })
   })
+
+  it("shows a message version selector and switches to the selected branch", () => {
+    const switchBranch = vi.fn()
+    const fixture = loadStudioMock()
+    const state: StudioState = {
+      ...fixture.state,
+      history: {
+        ...fixture.state.history,
+        current_branch_id: "branch_main",
+        branches: [
+          {
+            id: "branch_main",
+            label: "Main",
+            parent_branch_id: null,
+            origin_checkpoint_id: null,
+            origin_event_id: null,
+            origin_event_seq: null,
+            created_at: "2026-06-03T10:00:00Z",
+            current: true,
+            status: "derived",
+            head_checkpoint_id: null,
+          },
+          {
+            id: "branch_edit_01",
+            label: "Edit #1",
+            parent_branch_id: "branch_main",
+            origin_checkpoint_id: "frontier_event_01_before",
+            origin_event_id: "event_public_human_actions",
+            origin_event_seq: 0,
+            created_at: "2026-06-03T10:05:00Z",
+            current: false,
+            status: "persisted",
+            head_checkpoint_id: null,
+          },
+        ],
+      },
+      conversation: {
+        ...fixture.state.conversation,
+        events: [
+          {
+            ...fixture.state.conversation.events[0]!,
+            attachments: [],
+            author_id: "human",
+            author_kind: "human" as const,
+            content: "Original public prompt",
+            created_at: "2026-06-03T10:30:00Z",
+            id: "event_public_human_actions",
+            logical_message_id: "event_public_human_actions",
+            version_parent_event_id: null,
+            parent_event_id: null,
+            mentions: [],
+            metadata: {},
+          },
+        ],
+      },
+    }
+
+    renderChatPanel({
+      liveApi: true,
+      onSwitchBranch: switchBranch,
+      state,
+    })
+
+    const humanMessage = screen
+      .getByText("Original public prompt")
+      .closest("[data-transcript-message]")
+
+    expect(humanMessage).not.toBeNull()
+    expect(within(humanMessage as HTMLElement).getByText("v1/2")).toBeInTheDocument()
+
+    fireEvent.click(
+      within(humanMessage as HTMLElement).getByRole("button", {
+        name: "Next message version",
+      })
+    )
+
+    expect(switchBranch).toHaveBeenCalledWith("branch_edit_01")
+  })
 })
 
 describe("chat panel local recovery", () => {
@@ -548,6 +626,7 @@ describe("chat panel local recovery", () => {
           onSubmitDraft={async () => {
             throw new Error("offline")
           }}
+          onSwitchBranch={() => undefined}
           session={session}
           state={state}
           streamStatus="connected"
@@ -709,6 +788,7 @@ function renderChatPanel(
         onEditMessage={() => undefined}
         onOpenInspector={() => undefined}
         onSubmitDraft={() => undefined}
+        onSwitchBranch={() => undefined}
         session={null}
         streamStatus="connected"
         {...props}

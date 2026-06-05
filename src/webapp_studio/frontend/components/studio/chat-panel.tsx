@@ -7,6 +7,8 @@ import {
   ActivityIcon,
   AppWindowIcon,
   CheckIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
   CopyIcon,
   FileTextIcon,
   GitCompareIcon,
@@ -37,6 +39,10 @@ import type { InspectorView } from "@/components/studio/right-inspector"
 import { RichMarkdown } from "@/components/studio/rich-markdown"
 import { StatusPill } from "@/components/studio/status-pill"
 import { Button } from "@/components/ui/button"
+import {
+  ButtonGroup,
+  ButtonGroupText,
+} from "@/components/ui/button-group"
 import { Textarea } from "@/components/ui/textarea"
 import {
   Tooltip,
@@ -62,6 +68,7 @@ type ChatPanelProps = {
     files: FileUIPart[],
     clientMessageId: string
   ) => Promise<void> | void
+  onSwitchBranch: (branchId: string) => Promise<void> | void
   session: StudioSession | null
   state: StudioState
   streamStatus: StudioStreamStatus
@@ -86,6 +93,12 @@ type TranscriptTimestamp = {
   title: string
 }
 
+type MessageVersionOption = {
+  branchId: string
+  current: boolean
+  label: string
+}
+
 export function ChatPanel({
   busy,
   changes,
@@ -93,6 +106,7 @@ export function ChatPanel({
   onOpenInspector,
   onEditMessage,
   onSubmitDraft,
+  onSwitchBranch,
   session,
   state,
   streamStatus,
@@ -123,6 +137,7 @@ export function ChatPanel({
     mentionOptions.length === 0
       ? 0
       : Math.min(mentionIndex, mentionOptions.length - 1)
+  const messageVersions = useMemo(() => messageVersionIndex(state), [state])
 
   useEffect(() => {
     if (!draftStorageKey) {
@@ -271,6 +286,9 @@ export function ChatPanel({
               key={event.id}
               onEditMessage={onEditMessage}
               onOpenInspector={onOpenInspector}
+              onSwitchBranch={onSwitchBranch}
+              versionSwitchDisabled={!liveApi || busy}
+              versions={messageVersions.get(messageVersionKey(event)) ?? []}
             />
           ))}
         </ConversationContent>
@@ -525,12 +543,18 @@ function TranscriptMessage({
   generatedUi,
   onEditMessage,
   onOpenInspector,
+  onSwitchBranch,
+  versionSwitchDisabled,
+  versions,
 }: {
   changes: StudioChanges | null
   event: ConversationEvent
   generatedUi: StudioState["generated_ui"]
   onEditMessage: (messageId: string, content: string) => Promise<void> | void
   onOpenInspector: (view: InspectorView) => void
+  onSwitchBranch: (branchId: string) => Promise<void> | void
+  versionSwitchDisabled: boolean
+  versions: MessageVersionOption[]
 }) {
   const from = event.author_kind === "human" ? "user" : "assistant"
   const linkedGeneratedUi = generatedUiLinks(event, generatedUi)
@@ -597,6 +621,11 @@ function TranscriptMessage({
           {event.mentions.map((mention) => (
             <StatusPill key={mention} label={`@${mention}`} tone="sky" />
           ))}
+          <MessageVersionSelector
+            disabled={versionSwitchDisabled}
+            onSwitchBranch={onSwitchBranch}
+            versions={event.author_kind === "human" ? versions : []}
+          />
         </div>
         {editing ? (
           <Textarea
@@ -801,6 +830,118 @@ function TranscriptActionButton({
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>
   )
+}
+
+function MessageVersionSelector({
+  disabled,
+  onSwitchBranch,
+  versions,
+}: {
+  disabled: boolean
+  onSwitchBranch: (branchId: string) => Promise<void> | void
+  versions: MessageVersionOption[]
+}) {
+  if (versions.length <= 1) {
+    return null
+  }
+
+  const currentIndex = Math.max(
+    0,
+    versions.findIndex((version) => version.current)
+  )
+  const previous = versions[(currentIndex - 1 + versions.length) % versions.length]
+  const next = versions[(currentIndex + 1) % versions.length]
+
+  return (
+    <ButtonGroup
+      aria-label="Message versions"
+      className="ml-auto overflow-hidden rounded-md border bg-background/60"
+      orientation="horizontal"
+    >
+      <Button
+        aria-label="Previous message version"
+        disabled={disabled || previous.branchId === versions[currentIndex]?.branchId}
+        onClick={() => onSwitchBranch(previous.branchId)}
+        size="icon-xs"
+        title={previous.label}
+        type="button"
+        variant="ghost"
+      >
+        <ChevronLeftIcon className="size-3" />
+      </Button>
+      <ButtonGroupText
+        className="h-6 rounded-none border-0 bg-transparent px-2 text-[11px] text-muted-foreground"
+        title={versions[currentIndex]?.label}
+      >
+        v{currentIndex + 1}/{versions.length}
+      </ButtonGroupText>
+      <Button
+        aria-label="Next message version"
+        disabled={disabled || next.branchId === versions[currentIndex]?.branchId}
+        onClick={() => onSwitchBranch(next.branchId)}
+        size="icon-xs"
+        title={next.label}
+        type="button"
+        variant="ghost"
+      >
+        <ChevronRightIcon className="size-3" />
+      </Button>
+    </ButtonGroup>
+  )
+}
+
+function messageVersionIndex(state: StudioState) {
+  const branchById = new Map(state.history.branches.map((branch) => [branch.id, branch]))
+  const currentBranchId = state.history.current_branch_id
+  const index = new Map<string, MessageVersionOption[]>()
+
+  for (const event of state.conversation.events) {
+    if (event.author_kind !== "human") {
+      continue
+    }
+    const key = messageVersionKey(event)
+    const currentBranch = branchById.get(event.branch_id)
+    const baseBranchId =
+      event.version_parent_event_id && currentBranch?.parent_branch_id
+        ? currentBranch.parent_branch_id
+        : event.branch_id
+    const relatedBranches = state.history.branches.filter(
+      (branch) =>
+        branch.id === event.branch_id ||
+        branch.id === baseBranchId ||
+        branch.origin_event_id === event.id ||
+        branch.origin_event_id === event.logical_message_id ||
+        branch.origin_event_id === event.version_parent_event_id
+    )
+    const unique = new Map<string, MessageVersionOption>()
+    for (const branch of relatedBranches) {
+      unique.set(branch.id, {
+        branchId: branch.id,
+        current: branch.current || branch.id === currentBranchId,
+        label: branch.label,
+      })
+    }
+    const versions = [...unique.values()].sort((left, right) => {
+      if (left.branchId === baseBranchId) {
+        return -1
+      }
+      if (right.branchId === baseBranchId) {
+        return 1
+      }
+      const leftBranch = branchById.get(left.branchId)
+      const rightBranch = branchById.get(right.branchId)
+      return (leftBranch?.created_at ?? "").localeCompare(rightBranch?.created_at ?? "")
+    })
+    if (versions.length > 1) {
+      index.set(key, versions)
+    }
+  }
+
+  return index
+}
+
+function messageVersionKey(event: ConversationEvent) {
+  return event.logical_message_id ?? event.version_parent_event_id ?? event.id
 }
 
 function generatedUiLinks(event: ConversationEvent, generatedUi: StudioState["generated_ui"]) {

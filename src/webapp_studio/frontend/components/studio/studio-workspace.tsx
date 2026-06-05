@@ -387,6 +387,7 @@ export function StudioWorkspace({
               onEditMessage={handleEditMessage}
               onOpenInspector={handleOpenInspector}
               onSubmitDraft={handleSubmitDraft}
+              onSwitchBranch={handleSwitchBranch}
               session={session}
               state={state}
               streamStatus={streamStatus}
@@ -457,6 +458,7 @@ export function StudioWorkspace({
             onEditMessage={handleEditMessage}
             onOpenInspector={handleOpenInspector}
             onSubmitDraft={handleSubmitDraft}
+            onSwitchBranch={handleSwitchBranch}
             session={session}
             state={state}
             streamStatus={streamStatus}
