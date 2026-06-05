@@ -154,8 +154,8 @@ export const AppendMessageResultSchema = z
 
 export const StudioSessionSchema = z
   .object({
-    team_id: z.string(),
-    conversation_id: z.string(),
+    team_id: z.string().nullable(),
+    conversation_id: z.string().nullable(),
     team_file: z.string().nullable(),
     launcher_cwd: z.string(),
     resolved_root_dir: z.string(),
@@ -165,14 +165,46 @@ export const StudioSessionSchema = z
         sqlite_path: z.string().nullable(),
         storage_id: z.string(),
       })
-      .passthrough(),
+      .passthrough()
+      .nullable(),
     loaded_at: z.string(),
+  })
+  .passthrough()
+
+export const StudioTeamDescriptorSchema = z
+  .object({
+    team_id: z.string(),
+    description: z.string().nullable(),
+    team_file: z.string(),
+    source: z.enum(["project", "builtin", "explicit", "active"]),
+    conversation_available: z.boolean(),
+    participants: z.array(z.string()).default([]),
+    participant_aliases: z.record(z.string(), z.array(z.string())).default({}),
+  })
+  .passthrough()
+
+export const DuplicateTeamIdSchema = z
+  .object({
+    team_id: z.string(),
+    normalized_id: z.string(),
+    team_files: z.array(z.string()),
+  })
+  .passthrough()
+
+export const StudioTeamsSchema = z
+  .object({
+    status: z.enum(["ready", "blocked"]),
+    teams: z.array(StudioTeamDescriptorSchema),
+    duplicate_ids: z.array(DuplicateTeamIdSchema),
   })
   .passthrough()
 
 export const ConversationSummarySchema = z
   .object({
+    team_id: z.string().default(""),
     conversation_id: z.string(),
+    title: z.string().nullable().optional(),
+    preview: z.string().nullable().optional(),
     event_count: z.number().int(),
     last_seq: z.number().int(),
     last_event_at: z.string().nullable(),
@@ -182,8 +214,8 @@ export const ConversationSummarySchema = z
 
 export const ConversationListSchema = z
   .object({
-    team_id: z.string(),
-    current_conversation_id: z.string(),
+    team_id: z.string().nullable(),
+    current_conversation_id: z.string().nullable(),
     conversations: z.array(ConversationSummarySchema),
   })
   .passthrough()
@@ -192,6 +224,14 @@ export const ConversationSwitchResultSchema = z
   .object({
     session: StudioSessionSchema,
     state: z.lazy(() => StudioStateSchema),
+  })
+  .passthrough()
+
+export const ConversationCreateResultSchema = z
+  .object({
+    session: StudioSessionSchema,
+    state: z.lazy(() => StudioStateSchema),
+    append: AppendMessageResultSchema,
   })
   .passthrough()
 
@@ -212,6 +252,21 @@ export const StudioFileItemSchema = z
 export const StudioFilesSchema = z
   .object({
     files: z.array(StudioFileItemSchema),
+  })
+  .passthrough()
+
+export const StudioWorkspaceFileItemSchema = z
+  .object({
+    path: z.string(),
+    filename: z.string(),
+    media_type: z.string().nullable(),
+    size_bytes: z.number().int().nullable(),
+  })
+  .passthrough()
+
+export const StudioWorkspaceFilesSchema = z
+  .object({
+    files: z.array(StudioWorkspaceFileItemSchema),
   })
   .passthrough()
 
@@ -662,11 +717,17 @@ export type ConversationDelivery = z.infer<typeof ConversationDeliverySchema>
 export type ConversationRun = z.infer<typeof ConversationRunSchema>
 export type AppendMessageResult = z.infer<typeof AppendMessageResultSchema>
 export type StudioSession = z.infer<typeof StudioSessionSchema>
+export type StudioTeamDescriptor = z.infer<typeof StudioTeamDescriptorSchema>
+export type DuplicateTeamId = z.infer<typeof DuplicateTeamIdSchema>
+export type StudioTeams = z.infer<typeof StudioTeamsSchema>
 export type ConversationSummary = z.infer<typeof ConversationSummarySchema>
 export type ConversationList = z.infer<typeof ConversationListSchema>
 export type ConversationSwitchResult = z.infer<typeof ConversationSwitchResultSchema>
+export type ConversationCreateResult = z.infer<typeof ConversationCreateResultSchema>
 export type StudioFileItem = z.infer<typeof StudioFileItemSchema>
 export type StudioFiles = z.infer<typeof StudioFilesSchema>
+export type StudioWorkspaceFileItem = z.infer<typeof StudioWorkspaceFileItemSchema>
+export type StudioWorkspaceFiles = z.infer<typeof StudioWorkspaceFilesSchema>
 export type StudioChangeItem = z.infer<typeof StudioChangeItemSchema>
 export type StudioChanges = z.infer<typeof StudioChangesSchema>
 export type StudioChangeDiff = z.infer<typeof StudioChangeDiffSchema>

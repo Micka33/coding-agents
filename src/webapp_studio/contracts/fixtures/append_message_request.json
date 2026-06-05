@@ -2,5 +2,6 @@
   "content": "@agent hello",
   "author_id": "human",
   "attachments": [],
+  "workspace_paths": [],
   "wait": false
 }

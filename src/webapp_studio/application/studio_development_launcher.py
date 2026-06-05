@@ -52,7 +52,7 @@ class StudioDevelopmentLauncher:
     def launch(
         self,
         *,
-        team_file: str | Path,
+        team_file: str | Path | None = None,
         variables: JsonObject | None = None,
         config_variables: JsonObject | None = None,
         conversation_id: str | None = None,
@@ -73,7 +73,10 @@ class StudioDevelopmentLauncher:
             frontend = self._start_frontend(host, frontend_port, backend_url)
             print(f"Webapp Studio backend: {backend_url}")
             print(f"Webapp Studio frontend: {frontend_url}")
-            print(f"Webapp Studio team: {team_file}")
+            if team_file is not None:
+                print(f"Webapp Studio team: {team_file}")
+            else:
+                print("Webapp Studio teams: discovered from workspace and repository")
             self._wait_until_interrupted(backend, frontend)
         except KeyboardInterrupt:
             pass
@@ -83,7 +86,7 @@ class StudioDevelopmentLauncher:
 
     def _start_backend(
         self,
-        team_file: str | Path,
+        team_file: str | Path | None,
         variables: JsonObject | None,
         config_variables: JsonObject | None,
         conversation_id: str | None,
@@ -103,7 +106,7 @@ class StudioDevelopmentLauncher:
 
     def _backend_command(
         self,
-        team_file: str | Path,
+        team_file: str | Path | None,
         variables: JsonObject | None,
         config_variables: JsonObject | None,
         conversation_id: str | None,
@@ -115,12 +118,13 @@ class StudioDevelopmentLauncher:
             sys.executable,
             "-m",
             "src.webapp_studio.backend.server",
-            str(team_file),
             "--host",
             host,
             "--port",
             str(port),
         ]
+        if team_file is not None:
+            command.insert(3, str(team_file))
         self._append_optional(command, "--thread-id", conversation_id)
         self._append_mapping(command, "--var", variables)
         self._append_mapping(command, "--config", config_variables)

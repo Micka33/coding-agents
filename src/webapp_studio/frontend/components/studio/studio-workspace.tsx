@@ -15,6 +15,7 @@ import { CircleAlertIcon } from "lucide-react"
 import { ChatPanel } from "@/components/studio/chat-panel"
 import {
   type InspectorView,
+  type OpenInspectorView,
   RightInspector,
 } from "@/components/studio/right-inspector"
 import { StudioSidebar } from "@/components/studio/studio-sidebar"
@@ -26,6 +27,9 @@ import type {
   StudioFileItem,
   StudioSession,
   StudioState,
+  StudioTeamDescriptor,
+  StudioTeams,
+  StudioWorkspaceFileItem,
 } from "@/lib/studio/schemas"
 import { StudioApiClient } from "@/lib/studio/api-client"
 import { studioReducer } from "@/lib/studio/reducer"
@@ -35,6 +39,7 @@ type StudioWorkspaceProps = {
   initialState: StudioState
   generatedUi: GeneratedUiSpec[]
   liveApi: boolean
+  teams?: StudioTeams | null
 }
 
 const LEFT_MIN = 238
@@ -49,12 +54,15 @@ export function StudioWorkspace({
   initialState,
   generatedUi,
   liveApi,
+  teams: initialTeams = null,
 }: StudioWorkspaceProps) {
   const [state, dispatch] = useReducer(studioReducer, initialState)
+  const [teams, setTeams] = useState<StudioTeams | null>(initialTeams)
   const [changes, setChanges] = useState<StudioChanges | null>(null)
   const [conversationList, setConversationList] = useState<ConversationList | null>(null)
   const [files, setFiles] = useState<StudioFileItem[]>([])
   const [inspectorView, setInspectorView] = useState<InspectorView>({ kind: "empty" })
+  const [lastInspectorView, setLastInspectorView] = useState<OpenInspectorView | null>(null)
   const [leftCollapsed, setLeftCollapsed] = useState(false)
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [leftWidth, setLeftWidth] = usePersistentNumber(LEFT_WIDTH_KEY, 288, LEFT_MIN, LEFT_MAX)
@@ -62,6 +70,7 @@ export function StudioWorkspace({
   const [operationError, setOperationError] = useState<string | null>(null)
   const [session, setSession] = useState<StudioSession | null>(null)
   const [isPending, startTransition] = useTransition()
+  const draftMode = state.conversation_id === ""
   const visibleGeneratedUi = liveApi ? state.generated_ui : generatedUi
   const stateFiles = useMemo(
     () => filesFromState(state),
@@ -71,7 +80,7 @@ export function StudioWorkspace({
     () => (liveApi ? new StudioApiClient() : null),
     [liveApi]
   )
-  const streamStatus = useStudioStream(liveApi, dispatch, setOperationError)
+  const streamStatus = useStudioStream(liveApi && !draftMode, dispatch, setOperationError)
   const narrowLayout = useMediaQuery("(max-width: 900px)")
 
   useEffect(() => {
@@ -79,16 +88,37 @@ export function StudioWorkspace({
       return
     }
     let cancelled = false
-    Promise.all([
-      apiClient.session(),
-      apiClient.conversations(),
-      apiClient.files(),
-      apiClient.changes(),
-    ])
-      .then(([nextSession, nextConversations, nextFiles, nextChanges]) => {
+    const requests = draftMode
+      ? Promise.all([
+          apiClient.teams(),
+          apiClient.session(),
+          apiClient.conversations(),
+        ]).then(([nextTeams, nextSession, nextConversations]) => ({
+          nextTeams,
+          nextSession,
+          nextConversations,
+          nextFiles: { files: [] },
+          nextChanges: null,
+        }))
+      : Promise.all([
+          apiClient.teams(),
+          apiClient.session(),
+          apiClient.conversations(),
+          apiClient.files(),
+          apiClient.changes(),
+        ]).then(([nextTeams, nextSession, nextConversations, nextFiles, nextChanges]) => ({
+          nextTeams,
+          nextSession,
+          nextConversations,
+          nextFiles,
+          nextChanges,
+        }))
+    requests
+      .then(({ nextTeams, nextSession, nextConversations, nextFiles, nextChanges }) => {
         if (cancelled) {
           return
         }
+        setTeams(nextTeams)
         setSession(nextSession)
         setConversationList(nextConversations)
         setFiles(nextFiles.files)
@@ -102,7 +132,7 @@ export function StudioWorkspace({
     return () => {
       cancelled = true
     }
-  }, [apiClient, state.conversation_id])
+  }, [apiClient, draftMode, state.conversation_id])
 
   function replaceStateFromLiveApi(action: () => Promise<StudioState>) {
     if (!apiClient) {
@@ -127,16 +157,25 @@ export function StudioWorkspace({
     if (!apiClient) {
       return
     }
-    const [nextSession, nextConversations, nextFiles, nextChanges] = await Promise.all([
+    const [nextTeams, nextSession, nextConversations] = await Promise.all([
+      apiClient.teams(),
       apiClient.session(),
       apiClient.conversations(),
-      apiClient.files(),
-      apiClient.changes(),
     ])
+    setTeams(nextTeams)
     setSession(nextSession)
     setConversationList(nextConversations)
-    setFiles(nextFiles.files)
-    setChanges(nextChanges)
+    if (state.conversation_id) {
+      const [nextFiles, nextChanges] = await Promise.all([
+        apiClient.files(),
+        apiClient.changes(),
+      ])
+      setFiles(nextFiles.files)
+      setChanges(nextChanges)
+    } else {
+      setFiles([])
+      setChanges(null)
+    }
   }
 
   function handleRuntimeChange(mentionHookEnabled: boolean) {
@@ -166,6 +205,7 @@ export function StudioWorkspace({
   async function handleSubmitDraft(
     content: string,
     draftFiles: FileUIPart[],
+    workspacePaths: string[],
     clientMessageId: string
   ) {
     dispatch({
@@ -179,8 +219,20 @@ export function StudioWorkspace({
     }
     try {
       setOperationError(null)
-      await apiClient!.appendMessage(content, draftFiles, clientMessageId)
-      dispatch({ type: "state.replaced", state: await apiClient!.state() })
+      if (draftMode) {
+        const result = await apiClient!.createConversation(
+          state.team_id,
+          content,
+          draftFiles,
+          workspacePaths,
+          clientMessageId
+        )
+        setSession(result.session)
+        dispatch({ type: "state.replaced", state: result.state })
+      } else {
+        await apiClient!.appendMessage(content, draftFiles, workspacePaths, clientMessageId)
+        dispatch({ type: "state.replaced", state: await apiClient!.state() })
+      }
       await refreshAuxiliaryData()
     } catch (error) {
       dispatch({ type: "message.optimistic_failed", clientMessageId })
@@ -189,6 +241,14 @@ export function StudioWorkspace({
       )
       throw error
     }
+  }
+
+  async function handleSearchWorkspaceFiles(query: string): Promise<StudioWorkspaceFileItem[]> {
+    if (!apiClient) {
+      return []
+    }
+    const result = await apiClient.workspaceFiles(query)
+    return result.files
   }
 
   async function handleEditMessage(messageId: string, content: string) {
@@ -281,6 +341,43 @@ export function StudioWorkspace({
     })
   }
 
+  function handleSwitchTeamConversation(teamId: string, conversationId: string) {
+    if (!apiClient) {
+      return
+    }
+    startTransition(async () => {
+      try {
+        setOperationError(null)
+        const result = await apiClient.switchConversation(conversationId, teamId)
+        setSession(result.session)
+        dispatch({ type: "state.replaced", state: result.state })
+        await refreshAuxiliaryData()
+      } catch (error) {
+        setOperationError(error instanceof Error ? error.message : "Studio API request failed.")
+      }
+    })
+  }
+
+  function handleNewChat() {
+    const team = preferredDraftTeam(teams, state.team_id)
+    if (!team) {
+      return
+    }
+    setFiles([])
+    setChanges(null)
+    dispatch({ type: "state.replaced", state: emptyStudioState(team) })
+  }
+
+  function handleDraftTeamChange(teamId: string) {
+    if (!draftMode) {
+      return
+    }
+    const team = teams?.teams.find((item) => item.team_id === teamId)
+    if (team) {
+      dispatch({ type: "state.replaced", state: emptyStudioState(team) })
+    }
+  }
+
   function handleResumeCheckpoint(checkpointId: string) {
     replaceStateFromLiveApi(() => apiClient!.resumeCheckpoint(checkpointId))
   }
@@ -339,13 +436,24 @@ export function StudioWorkspace({
 
   function handleOpenInspector(view: InspectorView) {
     setInspectorView(view)
+    if (view.kind !== "empty") {
+      setLastInspectorView(view)
+    }
     if (narrowLayout) {
       setMobileSidebarOpen(false)
     }
   }
 
+  function handleRestoreInspector() {
+    handleOpenInspector(lastInspectorView ?? fallbackInspectorView(narrowLayout, state))
+  }
+
   const leftColumn = leftCollapsed ? SIDEBAR_RAIL : leftWidth
   const inspectorOpen = inspectorView.kind !== "empty"
+  const inspectorPlacement = narrowLayout ? "sheet" : "side"
+  const desktopGridTemplateColumns = inspectorOpen
+    ? `${leftColumn}px 6px minmax(24rem,1fr) 6px ${rightWidth}px`
+    : `${leftColumn}px 6px minmax(24rem,1fr)`
   const sidebarProps = {
     busy: isPending,
     conversationList,
@@ -362,9 +470,12 @@ export function StudioWorkspace({
     onRuntimeChange: handleRuntimeChange,
     onStopAgent: handleStopAgent,
     onSwitchBranch: handleSwitchBranch,
-    onSwitchConversation: handleSwitchConversation,
+    onSwitchConversation: handleSwitchTeamConversation,
+    onNewChat: handleNewChat,
+    onDraftTeamChange: handleDraftTeamChange,
     session,
     state,
+    teams,
   }
   const inspector = (
     <RightInspector
@@ -374,6 +485,7 @@ export function StudioWorkspace({
       generatedUi={visibleGeneratedUi}
       onClose={() => setInspectorView({ kind: "empty" })}
       onViewChange={handleOpenInspector}
+      placement={inspectorPlacement}
       session={session}
       state={state}
       view={inspectorView}
@@ -405,10 +517,14 @@ export function StudioWorkspace({
             <ChatPanel
               busy={isPending}
               changes={changes}
+              inspectorOpen={inspectorOpen}
+              inspectorPlacement={inspectorPlacement}
               liveApi={liveApi}
               onEditMessage={handleEditMessage}
               onOpenInspector={handleOpenInspector}
               onPersistUiState={handlePersistUiState}
+              onRestoreInspector={handleRestoreInspector}
+              onSearchWorkspaceFiles={handleSearchWorkspaceFiles}
               onSubmitDraft={handleSubmitDraft}
               onSwitchBranch={handleSwitchBranch}
               session={session}
@@ -456,7 +572,7 @@ export function StudioWorkspace({
       <div
         className="grid h-full min-h-0"
         style={{
-          gridTemplateColumns: `${leftColumn}px 6px minmax(24rem,1fr) 6px ${rightWidth}px`,
+          gridTemplateColumns: desktopGridTemplateColumns,
         }}
       >
         <StudioSidebar
@@ -477,10 +593,14 @@ export function StudioWorkspace({
           <ChatPanel
             busy={isPending}
             changes={changes}
+            inspectorOpen={inspectorOpen}
+            inspectorPlacement={inspectorPlacement}
             liveApi={liveApi}
             onEditMessage={handleEditMessage}
             onOpenInspector={handleOpenInspector}
             onPersistUiState={handlePersistUiState}
+            onRestoreInspector={handleRestoreInspector}
+            onSearchWorkspaceFiles={handleSearchWorkspaceFiles}
             onSubmitDraft={handleSubmitDraft}
             onSwitchBranch={handleSwitchBranch}
             session={session}
@@ -489,9 +609,12 @@ export function StudioWorkspace({
           />
         </div>
 
-        <Splitter label="Resize inspector" onMouseDown={(event) => beginResize("right", event)} />
-
-        {inspector}
+        {inspectorOpen ? (
+          <>
+            <Splitter label="Resize inspector" onMouseDown={(event) => beginResize("right", event)} />
+            {inspector}
+          </>
+        ) : null}
       </div>
     </main>
   )
@@ -583,4 +706,89 @@ function filesFromState(state: StudioState): StudioFileItem[] {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
+}
+
+function preferredDraftTeam(teams: StudioTeams | null, currentTeamId: string) {
+  if (!teams || teams.status !== "ready") {
+    return null
+  }
+  return (
+    teams.teams.find((team) => team.team_id === currentTeamId) ??
+    teams.teams[0] ??
+    null
+  )
+}
+
+function fallbackInspectorView(narrowLayout: boolean, state: StudioState): OpenInspectorView {
+  if (narrowLayout && state.activity.active_agent_ids.length === 0) {
+    return { kind: "files" }
+  }
+  return { kind: "activity" }
+}
+
+export function emptyStudioState(team: StudioTeamDescriptor): StudioState {
+  const now = new Date().toISOString()
+  return {
+    team_id: team.team_id,
+    conversation_id: "",
+    participants: team.participants,
+    participant_aliases: team.participant_aliases,
+    runtime: {
+      team_id: team.team_id,
+      conversation_id: "",
+      mention_hook_enabled: true,
+      max_cascade_turns: null,
+    },
+    conversation: {
+      events: [],
+      deliveries: [],
+      runs: [],
+      agent_states: [],
+      branch_threads: [],
+      thread_frontiers: [],
+      control_events: [],
+      external_side_effects: [],
+    },
+    activity: {
+      active_agent_ids: [],
+      private_threads: [],
+    },
+    runs: [],
+    queue: [],
+    interrupts: [],
+    history: {
+      current_branch_id: "branch_main",
+      checkpoints: [],
+      branches: [
+        {
+          id: "branch_main",
+          label: "Main",
+          parent_branch_id: null,
+          origin_checkpoint_id: null,
+          origin_event_id: null,
+          origin_logical_message_id: null,
+          origin_previous_event_id: null,
+          origin_event_seq: null,
+          created_at: now,
+          current: true,
+          status: "persisted",
+          head_checkpoint_id: null,
+          archived_at: null,
+        },
+      ],
+    },
+    ui_state: {
+      team_id: team.team_id,
+      conversation_id: "",
+      branch_id: "branch_main",
+      participant_id: "human",
+      draft_content: "",
+      outbox_state: [],
+      editing_event_id: null,
+      selected_agent_id: null,
+      scroll_anchor_event_id: null,
+      updated_at: now,
+    },
+    generated_ui: [],
+  }
 }

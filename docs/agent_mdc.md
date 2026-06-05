@@ -1,23 +1,19 @@
-# Agent `.mdc` Reference
+# Agent `.mdc`
 
-Agent files live under `coding_agents/teams/<team>/agents/*.mdc`.
+An agent `.mdc` file contains the agent's frontmatter and system prompt.
+`team.yaml` decides which agent id uses the file, whether it is an entrypoint,
+and how other agents can call it.
 
-Each `.mdc` file combines two parts:
-
-1. YAML frontmatter between the first two `---` separators.
-2. A Markdown body after the second `---`.
-
-Example:
-
-```md
+```text
 ---
 schema_version: 1
-description: Implements a bounded development task after readiness approval.
+description: Use to implement a bounded development task.
+model: inherit
+reasoning_effort: inherit
 toolsets:
   - scoped_read_tools
   - write
   - shell
-  - web
 state:
   persistence: disposable
 ---
@@ -25,111 +21,70 @@ state:
 You are a developer in a development-agent team.
 ```
 
-The frontmatter configures the agent. The Markdown body is the agent system
-prompt.
+## File Shape
 
-The canonical agent id is declared in `team.yaml` under `agents`. Runtime agent
-names, subagent names, metadata, relations, and mentions all use that id.
-Do not add a `name` key to agent frontmatter; it has no runtime effect.
+| Part | Purpose |
+| --- | --- |
+| YAML frontmatter | Agent-local options: prompt variables, model override, toolsets, memory, skills, and debug. |
+| Markdown body | The system prompt passed to the agent after includes and variables are rendered. |
+
+The file must start with `---`, contain YAML frontmatter, and close the
+frontmatter with a second `---`. The frontmatter must parse to a mapping.
+
+The canonical agent id is the key in `team.yaml` under `agents`. A frontmatter
+`name` key is ignored by the current loader; do not rely on it for ids,
+relations, mentions, or display names.
 
 ## Frontmatter Keys
 
-### `schema_version`
+| Key | Default | Behavior |
+| --- | --- | --- |
+| `schema_version` | None | Conventionally `1`. The current loader parses it but does not validate agent schema versions. |
+| `description` | None | Short role summary. Used in subagent listings and public conversation identity refreshes. If absent, subagent listings fall back to the agent id. |
+| `model` | `inherit` | `inherit` uses the team default. A model string overrides this agent only. `null` behaves like absence and inherits. |
+| `reasoning_effort` | `inherit` | `inherit` uses the team default. A non-empty string is passed as the provider reasoning effort. `null` behaves like absence and inherits. |
+| `variables` | `{}` | Values available to the Markdown body as `{{ variable }}`. |
+| `toolsets` | `[]` | Toolset names declared in `team.yaml`. |
+| `state.persistence` | `inherit` | Accepted values: `inherit`, `disposable`, `persistent`. Currently validated and stored, but not used to change runtime behavior. |
+| `skills` | `inherit` | A list resolves to skill directories. `inherit`, `none`, and non-list values pass no explicit skill list. |
+| `memory` | `inherit` | `inherit` uses team default memory files, `none` disables memory, and a list uses those files. |
+| `debug` | `inherit` | Only literal `true` enables debug in the current factories. |
 
-Integer schema version for the agent file.
+## Description
 
-```yaml
-schema_version: 1
-```
-
-An unsupported version produces a configuration error.
-
-### `description`
-
-Short description of the agent role.
-
-```yaml
-description: Validates acceptance criteria, defines and runs or recommends tests, and reports residual quality risk.
-```
-
-For subagents, this is used as the subagent description exposed to parent agents
-that declare a `relation: subagent` to this agent in `team.yaml`. Parent agents
-see the subagent id and `description` in their available subagent list, and
-use that text to decide when to delegate through the `task` tool. The full
-Markdown body remains the subagent's own system prompt; it is not copied into
-the parent agent prompt.
-
-For conversation participants, this description is included in identity refresh
-messages shown to other participants. Use it to briefly explain who the agent
-is, what role it plays, and what kind of conversation another agent should bring
-to it.
-
-Example: if `team.yaml` declares an agent id `translator` and `translator.mdc`
-declares:
+Keep `description` short and action-oriented:
 
 ```yaml
-description: Translates messages among English, German, and Japanese.
+description: Use to validate acceptance criteria and report residual quality risk.
 ```
 
-and `english-philosopher`, `german-philosopher`, and `japanese-philosopher` each
-declare `relation: subagent` to `translator`, those three agents can see
-`translator: Translates messages among English, German, and Japanese.` when
-choosing a subagent.
+For a `subagent` relation, parent agents see the target id and description when
+choosing whether to delegate.
 
-For the entrypoint, `description` is optional unless the runtime needs a display
-summary.
+For public conversation participants, identity refresh messages include the id,
+aliases, and description so other participants know whom to mention.
 
-### `model`
+## Model And Reasoning
 
-Optional model override for this agent.
+Use `inherit` unless one agent needs a different model or reasoning setting:
 
 ```yaml
-model: inherit
+model: openai:gpt-5.5
+reasoning_effort: high
 ```
 
-Supported values by convention:
+Model strings use the LangChain `provider:model` style.
 
-- `inherit`: use the run-level or team-level model.
-- a model string such as `openai:gpt-5.4`: use that model.
+Reasoning-effort values are provider-specific. Use `none` when you want the
+literal value `none` sent to the provider. Do not use `null` to disable
+reasoning for one agent; in frontmatter, `null` inherits from the team default.
 
-When an agent sets a model string, that model is used for that agent only. The
-team-level model is still used by agents that omit `model` or set
-`model: inherit`.
+If an agent inherits `model`, the team default model must resolve from runtime
+configuration or `defaults.model.default`.
 
-Model names use the LangChain `provider:model` format. The official LangChain
-documentation explains this format and where to find available model names by
-provider:
-https://docs.langchain.com/oss/python/concepts/providers-and-models
+## Variables And Includes
 
-If the key is absent, behavior is equivalent to `model: inherit`. If the
-team-level model has no default, inherited agents require the configured
-team-level model environment variable at runtime.
-
-### `reasoning_effort`
-
-Optional reasoning-effort override for this agent.
-
-```yaml
-reasoning_effort: inherit
-```
-
-Supported values by convention:
-
-- `inherit`: use the run-level or team-level reasoning effort.
-- `null`: request no explicit reasoning effort.
-- a provider-supported value, for example `none`, `low`, `medium`, or `high`.
-
-When an agent sets a provider-supported value, that reasoning effort is used for
-that agent only. When an agent sets `null`, no reasoning-effort parameter is sent
-for that agent.
-
-If the key is absent, behavior is equivalent to `reasoning_effort: inherit`. If
-the team-level reasoning effort has no default, inherited agents require the
-configured team-level reasoning-effort environment variable at runtime.
-
-### `variables`
-
-Variables available to the Markdown body.
+Frontmatter variables can reference team/run variables with single braces:
 
 ```yaml
 variables:
@@ -137,18 +92,29 @@ variables:
   artifacts_dir: "{artifacts_dir}"
 ```
 
-Values can contain template expressions. They are resolved before the prompt is
-rendered.
-
-The Markdown body can then reference these variables:
+The Markdown body uses double braces:
 
 ```md
-{{ artifacts_dir }}
+Primary workflow artifact folder:
+
+- /{{ artifacts_dir }}
 ```
 
-### `toolsets`
+Unknown body variables stay unchanged. Variables with `null` values render as an
+empty string.
 
-List of toolsets requested by the agent.
+Prompt fragments can be included from the body:
+
+```md
+{{ include:../prompts/common/clarification-rule.md }}
+```
+
+Include paths are relative to the `.mdc` file. Includes can be nested. Missing
+or recursive includes fail loading.
+
+## Toolsets
+
+`toolsets` lists capabilities declared in `team.yaml`:
 
 ```yaml
 toolsets:
@@ -158,69 +124,26 @@ toolsets:
   - web
 ```
 
-Each value must reference a toolset declared in `team.yaml`.
+Every listed toolset must exist in the team file. Toolsets describe what the
+agent can do; `team.yaml` owns the actual tool definitions and permission
+effects.
 
-`toolsets` describe the agent's technical capabilities. They do not encode
-workflow modes or permission policy. The runtime can still apply stricter
-permissions.
-
-### `state`
-
-Agent state and persistence configuration.
+## State
 
 ```yaml
 state:
   persistence: disposable
 ```
 
-The `state` key is optional.
+Accepted values are `inherit`, `disposable`, and `persistent`.
 
-Default behavior when `state` is absent:
+Current runtime note: this field is validated and kept on the loaded agent, but
+the factories do not yet use it to choose thread lifetime or checkpointer
+behavior. Invocation topology still determines how the agent is called:
+entrypoint graph, relation tool target, public mention participant, or task
+subagent.
 
-- an agent used as a `subagent` is `disposable`
-- an agent called through a `tool` relation is `persistent`
-- the `entrypoint` agent is `persistent`
-
-In practice, `state.persistence` makes explicit a behavior that should not only
-be inferred from topology.
-
-#### `state.persistence`
-
-Conversation persistence behavior.
-
-Possible values:
-
-```yaml
-persistence: disposable
-persistence: persistent
-persistence: inherit
-```
-
-`disposable` means each delegation can be treated as stateless, with no durable
-conversation history owned by the agent.
-
-`persistent` means the agent keeps stable conversation history across calls.
-
-`inherit` means the agent follows the default behavior inferred from topology
-and from the relation used to call it.
-
-If `state.persistence` is omitted, behavior is equivalent to `inherit`.
-
-### `skills`
-
-Configures the skills available to this agent.
-
-```yaml
-skills: inherit
-```
-
-Possible values:
-
-- `inherit`: use the skills active for the run.
-- `none`: disable inherited skills for this agent.
-- a list of skill names.
-
-Example with skills dedicated to one agent:
+## Skills
 
 ```yaml
 skills:
@@ -228,58 +151,19 @@ skills:
   - github:gh-fix-ci
 ```
 
-`skills` contains skill ids, not file paths.
+When `skills` is a list, each string resolves in this order:
 
-A skill is a directory that contains a `SKILL.md` file.
+1. `<root_dir>/.agents/skills/<skill-id>` if it contains `SKILL.md`
+2. `$CODEX_HOME/skills/<skill-id>` if it contains `SKILL.md`
+3. `<root_dir>/.agents/skills/<skill-id>` as a fallback path
 
-Placement convention:
+Missing fallback paths are not validated by the resolver.
 
-```text
-.agents/skills/<skill-id>/SKILL.md
-$CODEX_HOME/skills/<skill-id>/SKILL.md
-```
+Use `inherit` or omit the key when the agent does not need an explicit skill
+list. In the current instantiator, `skills: none` also passes no explicit skill
+list.
 
-Example project skill:
-
-```text
-.agents/skills/my-api-client/SKILL.md
-```
-
-Reference it like this:
-
-```yaml
-skills:
-  - my-api-client
-```
-
-Project skills make the configuration portable with the repository. Skills in
-`$CODEX_HOME/skills` are personal to the user.
-
-Recommended resolution order:
-
-1. project skills in `.agents/skills/`
-2. user skills in `$CODEX_HOME/skills/`
-3. skills provided by plugins or by the environment
-
-Use a list when an agent needs personal or more specialized skills than the run
-provides. Use `none` to isolate an agent from global skills. If the key is
-absent, behavior is equivalent to `inherit`.
-
-### `memory`
-
-Configures memory files visible to this agent.
-
-```yaml
-memory: inherit
-```
-
-Possible values:
-
-- `inherit`: use the run memory files.
-- `none`: use no memory files for this agent.
-- a list of memory file paths.
-
-Example:
+## Memory
 
 ```yaml
 memory:
@@ -287,44 +171,46 @@ memory:
   - /docs/development-agent-team-architecture.md
 ```
 
-Use a list when an agent should see specific stable context. Use `none` for an
-agent that should not receive project memory. If the key is absent, behavior is
-equivalent to `inherit`.
+Memory values are file paths under `defaults.root_dir`. A leading `/` is
+stripped before resolving the file, so `/AGENTS.md` means
+`<root_dir>/AGENTS.md`.
 
-### `debug`
+| Value | Behavior |
+| --- | --- |
+| `inherit` or absent | Use `defaults.memory.candidates` from `team.yaml`. Missing files are ignored or rejected according to `defaults.memory.error_when_missing`. |
+| `none` | Pass no memory files. |
+| list | Use the listed files. Missing files fail loading for this agent. |
 
-Configures debug behavior for this agent.
+## Debug
 
 ```yaml
-debug: inherit
+debug: true
 ```
 
-Supported values:
+Only literal `true` enables debug for this agent. `false`, `inherit`, and an
+absent key leave debug off in the current factories.
 
-- `inherit`: use the run-level debug flag.
-- `true`: enable debug for this agent.
-- `false`: disable debug for this agent.
+## Body
 
-Use `true` to diagnose one specific agent without enabling debug for the whole
-team. Use `false` to keep an agent quiet even when the run is in debug mode. If
-the key is absent, behavior is equivalent to `inherit`.
-
-## Markdown Body
-
-The Markdown body after the frontmatter is the system prompt.
-
-It can use frontmatter variables:
+The Markdown body is the system prompt. Write it as instructions to the agent,
+not as configuration reference. Prefer concrete behavior, boundaries, and output
+requirements:
 
 ```md
-Primary workflow artifact folder:
+You are a code-reviewer.
 
-- /{{ artifacts_dir }}
+Review changes as if they were a pull request. Prioritize bugs, regressions,
+missing tests, and unclear acceptance criteria.
 ```
 
-It can include shared fragments:
+Configuration such as `kind`, `entrypoint`, relation names, public aliases, and
+tool implementations belongs in `team.yaml`, not in the `.mdc` body.
 
-```md
-{{ include:../prompts/common/clarification-rule.md }}
-```
+## Common Mistakes
 
-Relative include paths are resolved from the `.mdc` file.
+- Adding `name` to frontmatter and expecting it to define the agent id.
+- Putting `kind`, `entrypoint`, relation tools, or conversation aliases in the
+  `.mdc` file instead of `team.yaml`.
+- Using `reasoning_effort: null` to disable reasoning; it inherits instead.
+- Expecting `state.persistence` to change runtime persistence today.
+- Referencing a toolset that is not declared in `team.yaml`.

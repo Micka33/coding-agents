@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
-from src.team_instanciator.conversation import ConversationEvent, ConversationStore
+from src.team_instanciator.conversation import ConversationEvent, ConversationFileRef, ConversationStore
 from src.webapp_studio.backend.api.checkpoint_history_reader import CheckpointHistoryReader
 from src.webapp_studio.backend.api.redactor import redact_sensitive_fields
 from src.webapp_studio.backend.api.studio_attachment_ref_factory import (
@@ -26,6 +26,8 @@ from src.webapp_studio.backend.api.studio_attachment_ref_factory import (
     StudioAttachmentRefFactory,
 )
 from src.webapp_studio.backend.api.studio_api_controller import StudioApiController
+from src.webapp_studio.backend.api.studio_session_controller import StudioSessionController
+from src.webapp_studio.backend.api.team_discovery_service import TeamDiscoveryService
 from src.webapp_studio.backend.api.studio_state_factory import StudioStateFactory
 from src.webapp_studio.backend.application.studio_backend_launcher import StudioBackendLauncher
 from src.webapp_studio.backend.contracts.branch_create_request import BranchCreateRequest
@@ -354,6 +356,103 @@ class BackendApiTests(unittest.TestCase):
             self.assertEqual(resized_terminal["data"]["columns"], 120)
             self.assertEqual(resized_terminal["data"]["rows"], 40)
             self.assertEqual(stopped_terminal["data"]["status"], "terminated")
+
+    def test_workspace_file_search_and_append_use_root_relative_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root_dir = Path(temp_dir)
+            source_dir = root_dir / "src"
+            source_dir.mkdir()
+            source_file = source_dir / "app.py"
+            source_file.write_text("print('hello')\n", encoding="utf-8")
+            large_file = root_dir / "large.bin"
+            large_file.write_bytes(b"x" * (MAX_ATTACHMENT_BYTES + 1))
+            (root_dir / ".coding-agents").mkdir()
+            (root_dir / ".coding-agents" / "hidden.txt").write_text("hidden\n", encoding="utf-8")
+            fake = self._fake_conversation(root_dir=root_dir)
+            client = TestClient(create_app(fake))
+
+            files = client.get("/api/studio/v1/workspace-files?query=app&limit=5").json()
+            large_files = client.get("/api/studio/v1/workspace-files?query=large&limit=5").json()
+            appended = client.post(
+                "/api/studio/v1/messages",
+                json={
+                    "content": "@agent see source",
+                    "author_id": "human",
+                    "workspace_paths": ["src/app.py"],
+                },
+            ).json()
+            traversal = client.post(
+                "/api/studio/v1/messages",
+                json={
+                    "content": "@agent bad path",
+                    "author_id": "human",
+                    "workspace_paths": ["../secret.txt"],
+                },
+            ).json()
+            absolute = client.post(
+                "/api/studio/v1/messages",
+                json={
+                    "content": "@agent absolute path",
+                    "author_id": "human",
+                    "workspace_paths": [str(source_file.resolve())],
+                },
+            ).json()
+            directory = client.post(
+                "/api/studio/v1/messages",
+                json={
+                    "content": "@agent directory path",
+                    "author_id": "human",
+                    "workspace_paths": ["src"],
+                },
+            ).json()
+            missing = client.post(
+                "/api/studio/v1/messages",
+                json={
+                    "content": "@agent missing path",
+                    "author_id": "human",
+                    "workspace_paths": ["missing.txt"],
+                },
+            ).json()
+            oversized = client.post(
+                "/api/studio/v1/messages",
+                json={
+                    "content": "@agent large file",
+                    "author_id": "human",
+                    "workspace_paths": ["large.bin"],
+                },
+            ).json()
+
+            self.assertEqual(files["data"]["files"][0]["path"], "src/app.py")
+            self.assertEqual(files["data"]["files"][0]["filename"], "app.py")
+            self.assertNotIn("hidden.txt", [item["path"] for item in files["data"]["files"]])
+            self.assertEqual(large_files["data"]["files"], [])
+            self.assertEqual(appended["data"]["event"]["attachments"][0]["filename"], "app.py")
+            self.assertEqual(fake.messages[0][2][0].filename, "app.py")
+            self.assertEqual(fake.messages[0][2][0].size_bytes, source_file.stat().st_size)
+            self.assertEqual(traversal["errors"][0]["code"], "invalid_request")
+            self.assertEqual(traversal["errors"][0]["field"], "workspace_paths")
+            self.assertEqual(absolute["errors"][0]["message"], "workspace path must be relative.")
+            self.assertEqual(directory["errors"][0]["message"], "workspace path must be a file.")
+            self.assertEqual(missing["errors"][0]["code"], "not_found")
+            self.assertEqual(oversized["errors"][0]["message"], "workspace file exceeds the 10 MiB limit.")
+
+    def test_workspace_file_search_uses_git_excludes_when_available(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root_dir = Path(temp_dir)
+            subprocess.run(["git", "-C", str(root_dir), "init"], check=True, capture_output=True)
+            (root_dir / ".gitignore").write_text("ignored.txt\n", encoding="utf-8")
+            (root_dir / "tracked.txt").write_text("tracked\n", encoding="utf-8")
+            (root_dir / "untracked.txt").write_text("untracked\n", encoding="utf-8")
+            (root_dir / "ignored.txt").write_text("ignored\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(root_dir), "add", ".gitignore", "tracked.txt"], check=True)
+            client = TestClient(create_app(self._fake_conversation(root_dir=root_dir)))
+
+            files = client.get("/api/studio/v1/workspace-files?limit=10").json()
+            paths = {item["path"] for item in files["data"]["files"]}
+
+            self.assertIn("tracked.txt", paths)
+            self.assertIn("untracked.txt", paths)
+            self.assertNotIn("ignored.txt", paths)
 
     def test_changes_contract_reports_git_status_and_diffs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1707,6 +1806,100 @@ class BackendApiTests(unittest.TestCase):
         self.assertTrue(served_team.closed)
         self.assertEqual(run.call_args.kwargs["port"], 9999)
 
+    def test_team_discovery_blocks_case_insensitive_duplicate_conversation_team_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            repository = root / "repo"
+            self._write_discovery_team(workspace / ".coding-agents" / "teams" / "local" / "team.yaml", "OpenSpec")
+            self._write_discovery_team(repository / "teams" / "builtin" / "team.yaml", "openspec")
+            self._write_discovery_team(repository / "teams" / "batch" / "team.yaml", "OpenSpec", conversation=False)
+
+            discovery = TeamDiscoveryService(repository_root=repository, workspace_dir=workspace).discover()
+
+        self.assertEqual(discovery["status"], "blocked")
+        self.assertEqual(len(discovery["duplicate_ids"]), 1)
+        duplicate = discovery["duplicate_ids"][0]
+        self.assertEqual(duplicate["normalized_id"], "openspec")
+        self.assertEqual(len(duplicate["team_files"]), 2)
+
+    def test_session_controller_starts_empty_and_creates_first_message_conversation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            repository = root / "repo"
+            source_dir = workspace / "src"
+            source_dir.mkdir(parents=True)
+            source_file = source_dir / "app.py"
+            source_file.write_text("print('draft')\n", encoding="utf-8")
+            source_file_size = source_file.stat().st_size
+            self._write_discovery_team(repository / "teams" / "alpha" / "team.yaml", "alpha")
+            self._write_conversation_history(
+                workspace / ".team-instanciator" / "checkpoints.sqlite",
+                team_id="alpha",
+                conversation_id="alpha-previous",
+                content="previous plan",
+            )
+            created_conversations: list[str | None] = []
+
+            def instanciator_factory(config_variables=None):
+                return SimpleNamespace(
+                    instantiate=lambda _team_file, _variables: SimpleNamespace(
+                        close=lambda: None,
+                        conversation_for=lambda conversation_id: self._fake_created_conversation(
+                            team_id="alpha",
+                            conversation_id=created_conversations.append(conversation_id) or str(conversation_id),
+                            root_dir=workspace,
+                        ),
+                    )
+                )
+
+            controller = StudioSessionController(
+                repository_root=repository,
+                workspace_dir=workspace,
+                instanciator_factory=instanciator_factory,
+            )
+            client = TestClient(create_app(controller))
+
+            teams = client.get("/api/studio/v1/teams").json()
+            session = client.get("/api/studio/v1/session").json()
+            history = client.get("/api/studio/v1/conversations").json()
+            draft_files = client.get("/api/studio/v1/workspace-files?query=app&limit=5").json()
+            missing_state = client.get("/api/studio/v1/state").json()
+            created = client.post(
+                "/api/studio/v1/conversations",
+                json={
+                    "team_id": "alpha",
+                    "initial_message": "shape a thing",
+                    "workspace_paths": ["src/app.py"],
+                    "client_message_id": "client_01",
+                },
+            ).json()
+            switched = client.put(
+                "/api/studio/v1/session/conversation",
+                json={"team_id": "alpha", "conversation_id": "alpha-existing"},
+            ).json()
+
+        self.assertEqual(teams["data"]["status"], "ready")
+        self.assertEqual(teams["data"]["teams"][0]["team_id"], "alpha")
+        self.assertEqual(teams["data"]["teams"][0]["participants"], ["guide", "reviewer"])
+        self.assertNotIn("helper", teams["data"]["teams"][0]["participants"])
+        self.assertEqual(teams["data"]["teams"][0]["participant_aliases"]["guide"], ["mentor"])
+        self.assertEqual(teams["data"]["teams"][0]["participant_aliases"]["reviewer"], [])
+        self.assertIsNone(session["data"]["conversation_id"])
+        self.assertEqual(history["data"]["conversations"][0]["team_id"], "alpha")
+        self.assertEqual(history["data"]["conversations"][0]["conversation_id"], "alpha-previous")
+        self.assertEqual(history["data"]["conversations"][0]["title"], "previous plan")
+        self.assertEqual(draft_files["data"]["files"][0]["path"], "src/app.py")
+        self.assertEqual(missing_state["errors"][0]["code"], "conversation_required")
+        self.assertTrue(created["data"]["session"]["conversation_id"].startswith("alpha-"))
+        self.assertEqual(created["data"]["state"]["conversation"]["events"][0]["content"], "shape a thing")
+        self.assertEqual(created["data"]["append"]["event"]["attachments"][0]["filename"], "app.py")
+        self.assertEqual(created["data"]["append"]["event"]["attachments"][0]["size_bytes"], source_file_size)
+        self.assertEqual(created["data"]["append"]["event"]["metadata"]["client_message_id"], "client_01")
+        self.assertEqual(switched["data"]["session"]["conversation_id"], "alpha-existing")
+        self.assertIn("alpha-existing", created_conversations)
+
     def _create_checkpoint_tables(self, connection: sqlite3.Connection) -> None:
         connection.execute(
             """
@@ -1737,6 +1930,144 @@ class BackendApiTests(unittest.TestCase):
             )
             """
         )
+
+    def _write_discovery_team(self, path: Path, team_id: str, *, conversation: bool = True) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        conversation_section = "conversation:\n  human_input:\n    default_targets: []" if conversation else ""
+        path.write_text(
+            "\n".join(
+                [
+                    "schema_version: 1",
+                    f"id: {team_id}",
+                    "description: Test team",
+                    "defaults:",
+                    "  checkpointer:",
+                    "    default: sqlite",
+                    "    sqlite_path:",
+                    "      default: .team-instanciator/checkpoints.sqlite",
+                    conversation_section,
+                    "agents:",
+                    "  guide:",
+                    "    kind: deepagent",
+                    "    config: ./agents/guide.mdc",
+                    "    entrypoint: true",
+                    "    conversation:",
+                    "      aliases:",
+                    "        - mentor",
+                    "  reviewer:",
+                    "    kind: deepagent",
+                    "    config: ./agents/reviewer.mdc",
+                    "    conversation: {}",
+                    "  helper:",
+                    "    kind: subagent",
+                    "    config: ./agents/helper.mdc",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+    def _fake_created_conversation(self, *, team_id: str, conversation_id: str, root_dir: Path):
+        replay_events: list[ConversationEvent] = []
+
+        def state():
+            return {
+                "team_id": team_id,
+                "conversation_id": conversation_id,
+                "participants": ["agent"],
+                "runtime": {
+                    "team_id": team_id,
+                    "conversation_id": conversation_id,
+                    "mention_hook_enabled": True,
+                    "max_cascade_turns": None,
+                },
+                "events": [event.to_dict() for event in replay_events],
+                "agent_states": [],
+                "deliveries": [],
+                "runs": [],
+                "thread_frontiers": [],
+                "control_events": [],
+                "activities": [],
+                "activity": None,
+            }
+
+        def append_human_message(content, *, author_id, files, wait, metadata=None):
+            message_files = []
+            for file in files or ():
+                if isinstance(file, Path):
+                    file_id = f"file_{len(replay_events) + len(message_files) + 1:02d}"
+                    message_files.append(
+                        ConversationFileRef(
+                            id=file_id,
+                            filename=file.name,
+                            uri=f"conversation://files/{file_id}",
+                            media_type=None,
+                            size_bytes=file.stat().st_size,
+                            added_by=author_id,
+                        )
+                    )
+                else:
+                    message_files.append(file)
+            event = ConversationEvent(
+                id=f"event_{len(replay_events) + 1:02d}",
+                team_id=team_id,
+                conversation_id=conversation_id,
+                branch_id="branch_main",
+                seq=len(replay_events) + 1,
+                created_at="2026-06-01T10:00:01Z",
+                author_id=author_id,
+                author_kind="human",
+                content=content,
+                mentions=(),
+                attachments=tuple(message_files),
+                metadata=dict(metadata or {}),
+            )
+            replay_events.append(event)
+            return SimpleNamespace(event=event, deliveries=(), failures=())
+
+        return SimpleNamespace(
+            checkpointer_handle=SimpleNamespace(connection=None),
+            root_dir=root_dir,
+            state=state,
+            activity=lambda _agent_id=None: state(),
+            append_human_message=append_human_message,
+            runtime=SimpleNamespace(),
+        )
+
+    def _write_conversation_history(self, path: Path, *, team_id: str, conversation_id: str, content: str) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        connection = sqlite3.connect(path)
+        try:
+            connection.execute(
+                """
+                create table team_conversation_events (
+                    team_id text not null,
+                    conversation_id text not null,
+                    seq integer not null,
+                    created_at text not null,
+                    author_id text not null,
+                    author_kind text not null,
+                    content text not null
+                )
+                """
+            )
+            connection.execute(
+                """
+                insert into team_conversation_events (
+                    team_id,
+                    conversation_id,
+                    seq,
+                    created_at,
+                    author_id,
+                    author_kind,
+                    content
+                ) values (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (team_id, conversation_id, 1, "2026-06-01T10:00:00Z", "human", "human", content),
+            )
+            connection.commit()
+        finally:
+            connection.close()
 
     def _fake_conversation(
         self,
@@ -1838,7 +2169,22 @@ class BackendApiTests(unittest.TestCase):
             return snapshot
 
         def append_human_message(content, *, author_id, files, wait, metadata=None):
-            message_files = list(files or ())
+            message_files = []
+            for file in files or ():
+                if isinstance(file, Path):
+                    file_id = f"file_{len(messages) + len(message_files) + 1}"
+                    message_files.append(
+                        ConversationFileRef(
+                            id=file_id,
+                            filename=file.name,
+                            uri=f"conversation://files/{file_id}",
+                            media_type=None,
+                            size_bytes=file.stat().st_size,
+                            added_by=author_id,
+                        )
+                    )
+                else:
+                    message_files.append(file)
             messages.append((content, author_id, message_files, wait, metadata))
             event = ConversationEvent(
                 id=f"event_{len(replay_events) + 2:02d}",

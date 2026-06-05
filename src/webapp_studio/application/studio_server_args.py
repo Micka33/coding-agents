@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class StudioServerArgs:
-    team_file: str
+    team_file: str | None
     thread_id: str | None
     host: str
     port: int

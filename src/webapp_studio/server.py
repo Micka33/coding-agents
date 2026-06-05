@@ -8,7 +8,7 @@ from src.webapp_studio.application.studio_server_args import StudioServerArgs
 
 def parse_args(argv: list[str] | None = None) -> StudioServerArgs:
     parser = argparse.ArgumentParser(description="Serve Webapp Studio with backend and frontend processes.")
-    parser.add_argument("team_file", help="Path to team.yaml.")
+    parser.add_argument("team_file", nargs="?", help="Path to team.yaml.")
     parser.add_argument("--thread-id", help="Conversation id. Defaults to the team id.")
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind.")
     parser.add_argument("--port", type=int, default=8765, help="Backend port to bind.")

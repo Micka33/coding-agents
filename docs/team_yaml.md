@@ -1,201 +1,40 @@
-# `team.yaml` Reference
+# `team.yaml`
 
-This document describes the YAML keys used by
-`coding_agents/teams/software/team.yaml`.
+`team.yaml` describes one runnable team: shared defaults, tool capability
+groups, agents, directed relations, and optional public conversation routing.
 
-`team.yaml` describes the team topology and shared loading rules.
+Agent prompts live in `.mdc` files referenced from `team.yaml`. See
+[`agent_mdc.md`](agent_mdc.md) for that file format.
 
-## Top-Level Keys
-
-### `schema_version`
-
-Integer schema version for the team file.
+## Quick Example
 
 ```yaml
 schema_version: 1
-```
-
-An unsupported version produces a configuration error.
-
-### `id`
-
-Stable team identifier.
-
-```yaml
 id: software
-```
+description: A software development team.
 
-This value identifies the team configuration. It is not a runtime thread and not
-an agent.
+defaults:
+  root_dir: "."
+  model:
+    env: CODING_AGENTS_MODEL
+    default: openai:gpt-5.5
+  reasoning_effort:
+    env: CODING_AGENTS_REASONING_EFFORT
+    default: xhigh
+  checkpointer:
+    env: CODING_AGENTS_CHECKPOINTER
+    default: sqlite
+    sqlite_path:
+      env: CODING_AGENTS_SQLITE_CHECKPOINT_PATH
+      default: .coding-agents/checkpoints.sqlite
+  execution_backend:
+    env: CODING_AGENTS_EXECUTION
+    default: local
+  memory:
+    error_when_missing: false
+    candidates:
+      - /AGENTS.md
 
-### `description`
-
-Human-readable description.
-
-```yaml
-description: Current software development-agent team topology.
-```
-
-### `defaults`
-
-Global default values.
-
-#### `defaults.root_dir`
-
-Repository root used for relative paths.
-
-```yaml
-root_dir: "."
-```
-
-#### `defaults.model`
-
-Default model configuration.
-
-```yaml
-model:
-  env: CODING_AGENTS_MODEL
-  default: null
-```
-
-`env` is the environment variable read first.
-
-`default` is used when the environment variable is absent. `default: null`
-makes `CODING_AGENTS_MODEL` required at runtime for agents that inherit the
-team-level model.
-
-Model names use the `provider:model` format, for example `openai:gpt-5.4`.
-LangGraph uses LangChain chat models for model integration. The official
-LangChain documentation explains this format and where to find available model
-names by provider:
-https://docs.langchain.com/oss/python/concepts/providers-and-models
-
-#### `defaults.reasoning_effort`
-
-Default reasoning effort configuration.
-
-```yaml
-reasoning_effort:
-  env: CODING_AGENTS_REASONING_EFFORT
-  default: null
-```
-
-`default: null` makes `CODING_AGENTS_REASONING_EFFORT` required at runtime for
-agents that inherit the team-level reasoning effort.
-
-For OpenAI reasoning models, the common values exposed by LangChain are:
-
-```yaml
-reasoning_effort:
-  default: minimal
-```
-
-```yaml
-reasoning_effort:
-  default: low
-```
-
-```yaml
-reasoning_effort:
-  default: medium
-```
-
-```yaml
-reasoning_effort:
-  default: high
-```
-
-Some LangChain/OpenAI surfaces also document `none` and `xhigh`, depending on
-the model and API surface. To verify available values, consult the official
-LangChain documentation:
-
-- Python `langchain-openai` reference for `reasoning_effort`:
-  https://reference.langchain.com/python/langchain-openai/chat_models/base/BaseChatOpenAI/reasoning_effort
-- LangChain/LangSmith model provider and model parameter page:
-  https://docs.langchain.com/langsmith/playground-model-providers
-
-#### `defaults.checkpointer`
-
-Default persistence configuration.
-
-```yaml
-checkpointer:
-  env: CODING_AGENTS_CHECKPOINTER
-  default: sqlite
-  sqlite_path:
-    env: CODING_AGENTS_SQLITE_CHECKPOINT_PATH
-    default: .coding-agents/checkpoints.sqlite
-  postgres_url:
-    env:
-      - CODING_AGENTS_POSTGRES_URL
-      - DATABASE_URL
-    default: null
-```
-
-`env` is the environment variable that selects the checkpointer backend.
-
-`default` is the backend used when no environment variable is set.
-
-`sqlite_path.env` is the environment variable for the SQLite path.
-
-`sqlite_path.default` is the default SQLite path, relative to the repository.
-
-`postgres_url.env` is the ordered list of environment variables checked for a
-Postgres URL.
-
-`postgres_url.default` is used when none of the listed variables exists.
-
-#### `defaults.execution_backend`
-
-Global command-execution backend selector.
-
-```yaml
-execution_backend:
-  env: CODING_AGENTS_EXECUTION
-  default: local
-```
-
-This is a run-level setting. Agents express capabilities through `toolsets`;
-backend needs are derived from those toolsets.
-
-Possible values:
-
-- `local`: enables a local backend for filesystem tools and, for agents with the
-  `shell` toolset, command execution through `execute`.
-- `none`: disables local command execution. Tools that require `shell` must not
-  expose `execute`.
-
-Official Deep Agents backend documentation, including `FilesystemBackend`,
-`LocalShellBackend`, sandbox backends, and the `execute` tool:
-https://docs.langchain.com/oss/python/deepagents/backends
-
-#### `defaults.memory`
-
-Memory-file discovery configuration.
-
-```yaml
-memory:
-  error_when_missing: false
-  candidates:
-    - /AGENTS.md
-    - /docs/development-agent-team-architecture.md
-```
-
-`error_when_missing` controls what happens when a file listed in `candidates`
-does not exist.
-
-`false` is the default: missing files are ignored.
-
-`true` makes every listed file required. If a file is missing, the configuration
-is invalid.
-
-`candidates` is the ordered list of virtual or repository-rooted memory files.
-
-### `custom_tools`
-
-Declares custom tool factories that `toolsets` can reference.
-
-```yaml
 custom_tools:
   scoped_read_tools:
     factory: src.team_instanciator.tools.scoped_read_tools_factory:create_scoped_read_tools
@@ -204,149 +43,7 @@ custom_tools:
       - read_file
       - glob
       - grep
-```
 
-Each key under `custom_tools` is a custom tool id.
-
-`factory` is an import path in `module:function` format. This function is called
-to create the tools. The function must use the standard custom-tool factory
-signature:
-
-```python
-from collections.abc import Mapping, Sequence
-
-from langchain_core.tools import BaseTool
-
-from src.team_instanciator.tools.custom_tool_context import CustomToolContext
-
-
-def create_tools(
-    context: CustomToolContext,
-    args: Mapping[str, object],
-) -> Sequence[BaseTool]:
-    ...
-```
-
-The factory receives two inputs:
-
-- `context`: runtime values provided by the team instantiator.
-- `args`: the user-defined mapping from `custom_tools.<id>.args` after variable
-  substitution.
-
-Every custom factory receives the same `CustomToolContext`:
-
-- `context.root_dir`: resolved repository root for this team.
-- `context.env`: read-only environment view. Use `context.env.get("NAME")` for
-  optional values and `context.env.require("NAME")` for required values.
-- `context.runtime_config`: runtime configuration values passed to the
-  instantiator, including values loaded from `.env` or CLI `--config`.
-- `context.agent_config`: the agent definition that requested this tool through
-  one of its `toolsets`.
-- `context.team_config`: the full loaded team definition.
-- `context.history`: high-level conversation-history helpers for the current
-  tool call.
-- `context.checkpointer`: the underlying LangGraph checkpointer when direct
-  checkpoint access is necessary.
-
-Tool functions should expose only task-specific parameters to the model. Do not
-add `root_dir`, environment values, agent config, team config, or checkpointer
-parameters to the tool input schema; they are already available through
-`context`.
-
-`args` is a mapping of named arguments passed to the factory after variable
-substitution. Use it for user-visible configuration such as limits, labels,
-allowed paths, or feature toggles.
-
-For example, the scoped read tools use `context.root_dir` by default. Do not set
-`args.root_dir` unless this tool must deliberately read from another root or a
-subdirectory:
-
-```yaml
-custom_tools:
-  docs_read_tools:
-    factory: src.team_instanciator.tools.scoped_read_tools_factory:create_scoped_read_tools
-    args:
-      root_dir: "{root_dir}/docs"
-    exposes:
-      - ls
-      - read_file
-      - glob
-      - grep
-```
-
-Configuration strings support single-brace substitutions. These substitutions
-are resolved before factories are called.
-
-| Substitution | Source | Effect |
-| --- | --- | --- |
-| `{root_dir}` | `defaults.root_dir` | Inserts the team root exactly as configured in `team.yaml`. Use it only when a config value must explicitly contain that path; custom factories already receive the resolved root as `context.root_dir`. |
-| `{name}` | A template variable passed to `TeamInstanciator.instantiate(..., variables={...})` or the instantiator CLI `--var name=value` | Inserts that user-provided value wherever the placeholder appears. Use this for team-file parameters that should vary between runs, such as labels, tool limits, or path suffixes. |
-| Unknown placeholders | No matching built-in or user-provided variable | Remain unchanged in the loaded configuration, for example `{missing}` stays `{missing}`. |
-
-`exposes` is the whitelist of tools the factory must expose. Every listed tool
-must be returned by the factory, otherwise the configuration is invalid. Any tool
-returned by the factory but absent from `exposes` also makes the configuration
-invalid.
-
-Factories should return tools whose result is immediately useful to the calling
-agent. Prefer dictionaries or concise strings that say what happened and include
-the values the agent needs for its next step.
-
-Example custom factory:
-
-```python
-from collections.abc import Mapping, Sequence
-
-from langchain.tools import ToolRuntime
-from langchain_core.tools import BaseTool, StructuredTool
-
-from src.team_instanciator.tools.custom_tool_context import CustomToolContext
-
-
-def create_tools(
-    context: CustomToolContext,
-    args: Mapping[str, object],
-) -> Sequence[BaseTool]:
-    label = str(args.get("label", context.agent_config.id))
-    keep_last = int(args.get("keep_last", 20))
-
-    def conversation_stats(runtime: ToolRuntime) -> dict[str, object]:
-        """Return visible conversation statistics for the current thread."""
-
-        messages = context.history.current_messages(runtime)
-        return {
-            "label": label,
-            "thread_id": context.history.thread_id(runtime),
-            "message_counts": context.history.count_messages(messages),
-        }
-
-    def compact_context(summary: str, runtime: ToolRuntime):
-        """Replace old context with a summary and keep recent messages."""
-
-        return context.history.compact_messages_command(
-            runtime,
-            summary=summary,
-            keep_last=keep_last,
-            visible_result=f"Context compacted for {label}; kept the last {keep_last} messages.",
-        )
-
-    return [
-        StructuredTool.from_function(conversation_stats, name="conversation_stats"),
-        StructuredTool.from_function(compact_context, name="compact_context"),
-    ]
-```
-
-When a tool changes conversation history, use `context.history` helpers and
-return a LangGraph `Command` with a visible `ToolMessage`. The helper
-`compact_messages_command` already does this. Avoid writing directly to the
-checkpointer for normal state updates; direct checkpointer writes are reserved
-for advanced recovery or inspection tools.
-
-### `toolsets`
-
-Declares tool groups that agents can request from their `.mdc` frontmatter.
-
-```yaml
 toolsets:
   web:
     - web_search
@@ -358,202 +55,281 @@ toolsets:
     - edit_file
   shell:
     - execute
-```
 
-Each key under `toolsets` is a toolset name.
-
-An item can be a built-in tool name:
-
-```yaml
-- fetch_url
-```
-
-Or a custom tool reference:
-
-```yaml
-- custom: scoped_read_tools
-```
-
-Toolset names should describe capabilities, not the consuming agent.
-
-### `agents`
-
-Declares the team agents and each agent `.mdc` file.
-
-```yaml
 agents:
+  engineering-manager:
+    kind: deepagent
+    config: ./agents/engineering-manager.mdc
+    entrypoint: true
+
   developer:
     kind: subagent
     config: ./agents/developer.mdc
+
+relations:
+  - id: implement
+    from: engineering-manager
+    to: developer
+    relation: subagent
 ```
 
-Each key under `agents` is the canonical agent id used by relations. Agent ids
-must be unique after case-insensitive normalization. References to agent ids in
-relations, conversation defaults, and mentions are resolved case-insensitively
-and then stored with the canonical casing declared under `agents`.
+## File Shape
 
-#### `agents.<agent_id>.kind`
+| Key | Required | Purpose |
+| --- | --- | --- |
+| `schema_version` | Yes | Must be `1`. |
+| `id` | Yes | Stable team id. It is also the default root thread id. |
+| `description` | No | Display summary for people and tooling. |
+| `defaults` | No | Shared runtime defaults for models, storage, execution, and memory. |
+| `custom_tools` | No | Tool factories that can be reused from toolsets. |
+| `toolsets` | No | Named groups of tools that agents request from `.mdc` frontmatter. |
+| `agents` | Yes | Canonical agent ids and paths to their `.mdc` files. |
+| `relations` | No | Directed links that expose agents as tools or subagents. |
+| `conversation` | No | Public mention-router conversation settings. |
 
-Topological agent type.
+The loader accepts a small YAML subset: mappings, lists, comments, strings,
+integers, booleans, `null`, quoted strings, `[]`, `{}`, folded scalars (`>`),
+and literal scalars (`|`). Keep configuration in simple block-style YAML.
 
-Current values:
+## Names And Paths
+
+Agent ids are the keys under `agents`. References in `relations`,
+`conversation.human_input.default_targets`, and mentions are matched
+case-insensitively and then stored with the canonical casing from `agents`.
+
+`agents.<id>.config` is resolved relative to the directory containing
+`team.yaml`.
+
+`defaults.root_dir` is the runtime workspace root used for filesystem tools,
+memory files, and project skills. Relative values are resolved from the current
+working directory of the process, not from the `team.yaml` file.
+
+Configuration strings can use single-brace substitutions:
+
+| Placeholder | Source | Behavior |
+| --- | --- | --- |
+| `{root_dir}` | `defaults.root_dir` | Inserts the configured root string. |
+| `{name}` | `--var name=value` or `TeamInstanciator.instantiate(..., variables={...})` | Inserts the run variable. |
+| Unknown placeholders | None | Left unchanged. |
+
+## Defaults
+
+`defaults` controls values inherited by agents and runtime components.
+
+| Key | When omitted | Behavior |
+| --- | --- | --- |
+| `root_dir` | `"."` | Workspace root for runtime file access. |
+| `model.env` | None | Runtime config key or environment variable to read first. |
+| `model.default` | None | Fallback model for agents with `model: inherit`. Inherited agents must resolve a model from `env` or `default`. |
+| `reasoning_effort.env` | None | Runtime config key or environment variable to read first. |
+| `reasoning_effort.default` | None | Fallback reasoning effort. If both `env` and `default` are absent, no reasoning-effort parameter is sent. If `env` is set with no default, inherited agents require that runtime value. |
+| `checkpointer.env` | None | Runtime config key or environment variable selecting the checkpointer backend. |
+| `checkpointer.default` | `memory` | Supported backends are `memory` and `sqlite`. `postgres` is parsed but currently raises at instantiation. |
+| `checkpointer.sqlite_path.env` | None | Runtime config key or environment variable for the SQLite file. |
+| `checkpointer.sqlite_path.default` | `.team-instanciator/checkpoints.sqlite` | SQLite path when the backend is `sqlite`. Relative paths are under `root_dir`. |
+| `execution_backend.env` | None | Runtime config key or environment variable selecting command execution. |
+| `execution_backend.default` | `none` | Use `local` to enable a local shell backend for agents with the `shell` toolset. |
+| `memory.error_when_missing` | `false` | If `true`, missing inherited memory files fail instantiation. |
+| `memory.candidates` | `[]` | Files offered as inherited Deep Agents memory. A leading `/` is treated as relative to `root_dir`. |
+
+Runtime config values can come from process environment, `.env`, CLI
+`--config key=value`, or `config_variables`.
+
+## Toolsets
+
+Toolsets are named capability groups. Agents request them from their `.mdc`
+frontmatter:
 
 ```yaml
-kind: deepagent
-kind: subagent
+toolsets:
+  web:
+    - web_search
+    - fetch_url
+  shell:
+    - execute
 ```
 
-`deepagent` is a full agent with its own conversation cycle. Use it for agents
-that can act as persistent collaborators or serve as the entrypoint.
+Built-in tool names:
 
-`subagent` is a delegation agent. Another agent uses it through a `subagent`
-relation or indirectly exposes it through a `tool` relation. By default, a
-`subagent` is disposable unless its `.mdc` file declares a different persistence
-behavior.
+| Tool | Visible behavior |
+| --- | --- |
+| `web_search` | Searches with Tavily when `TAVILY_API_KEY` is configured; otherwise returns an empty result with a note. |
+| `fetch_url` | Fetches textual URL content. |
+| `write_file` | Writes a file under `root_dir`. |
+| `edit_file` | Replaces the first matching text occurrence in a file under `root_dir`. |
+| `execute` | Runs a local shell command from `root_dir`. |
 
-`kind` belongs in `team.yaml`, not in the agent `.mdc` file.
+The current runtime also gives special meaning to these toolset names:
 
-`kind`, relations, state, and toolsets determine the agent runtime shape.
+| Toolset name | Runtime effect |
+| --- | --- |
+| `scoped_read_tools` | Allows read access for Deep Agents. Read-only LangChain subagents receive the custom read tools declared by the team. |
+| `write` | Allows write access for Deep Agents. |
+| `shell` | Enables a local shell backend only when `defaults.execution_backend` resolves to `local`. |
 
-#### `agents.<agent_id>.config`
+Other toolset names are valid as ordinary groups, but they do not change
+filesystem permissions or shell backend selection unless the runtime is changed.
 
-Path to the agent `.mdc` file, relative to `team.yaml`.
+## Custom Tools
+
+`custom_tools` registers factories that `toolsets` can reference.
 
 ```yaml
-config: ./agents/developer.mdc
+custom_tools:
+  scoped_read_tools:
+    factory: src.team_instanciator.tools.scoped_read_tools_factory:create_scoped_read_tools
+    args:
+      label: docs
+    exposes:
+      - ls
+      - read_file
+      - glob
+      - grep
+
+toolsets:
+  scoped_read_tools:
+    - custom: scoped_read_tools
 ```
 
-#### `agents.<agent_id>.entrypoint`
+`factory` must use `module:function` format. The function is called as:
 
-Marks the human-facing entrypoint agent.
+```python
+def create_tools(context, args):
+    ...
+```
+
+`args` is the rendered mapping from `custom_tools.<id>.args`. Use it for
+user-facing options such as labels, limits, allowed paths, or feature toggles.
+
+`exposes` must exactly match the names returned by the factory. Missing or extra
+tools fail instantiation.
+
+## Agents
+
+Each entry under `agents` declares one canonical agent id.
 
 ```yaml
-entrypoint: true
+agents:
+  engineering-manager:
+    kind: deepagent
+    config: ./agents/engineering-manager.mdc
+    entrypoint: true
+    conversation:
+      aliases:
+        - manager
 ```
 
-There must be exactly one entrypoint. `thread_id` values are managed
-automatically and must not be written in `team.yaml`.
+| Key | Required | Behavior |
+| --- | --- | --- |
+| `kind` | Yes | `deepagent` or `subagent`. |
+| `config` | Yes | Path to the agent `.mdc` file, relative to `team.yaml`. |
+| `entrypoint` | No | Exactly one agent must have `entrypoint: true`. |
+| `conversation` | No | Makes a `deepagent` available on the public mention bus. |
 
-### `conversation`
+Use `deepagent` for agents that can run as first-class collaborators or
+relation-tool targets. Use `subagent` for agents meant to be delegated to from a
+parent agent.
+
+Public conversation participants must be `kind: deepagent`.
+
+## Relations
+
+Relations connect a source agent to a target agent.
+
+```yaml
+relations:
+  - id: qa-review
+    from: developer
+    to: qa-engineer
+    relation: tool
+    tool_name: ask_qa_engineer
+    input_schema:
+      message: string
+    description: Ask QA to run checks and report the result.
+```
+
+| Key | Required | Behavior |
+| --- | --- | --- |
+| `id` | No | Stable relation id. Recommended when persisted history matters. |
+| `from` | Yes | Source agent id. |
+| `to` | Yes | Target agent id. |
+| `relation` | Yes | `tool` or `subagent`. |
+| `tool_name` | For `tool` only | Name of the generated tool on the source agent. Must be omitted for `subagent`. |
+| `input_schema` | No | Current relation tools accept `message: string`. Keep this shape for generated relation tools. |
+| `description` | No | Description shown on generated `tool` relations. |
+
+`relation: tool` adds a named tool to the source agent. Calling that tool sends
+the `message` to the target agent and returns the target's final text.
+
+`relation: subagent` makes the target available through the source agent's
+delegation mechanism.
+
+When `id` is omitted, the loader assigns an order-based id such as
+`relation_001`. Use explicit ids before reordering or renaming relations if you
+want persisted relation history to remain stable.
+
+## Conversation
 
 Top-level `conversation` opts the team into the public mention-router
-conversation bus. If this key is absent, no public conversation is created.
+conversation bus. If it is absent, the team still has an entrypoint graph, but
+no public mention routing is created.
 
 ```yaml
 conversation:
   mentions:
     max_parallel_agents: 2
     max_cascade_turns: null
+    max_agent_failures: 2
   identity_refresh_after_tokens: 10000
   human_input:
     default_targets:
       - engineering-manager
 ```
 
-`conversation.mentions.max_parallel_agents` defaults to `2`.
-`conversation.mentions.max_cascade_turns` defaults to `null`, which means
-unlimited. `identity_refresh_after_tokens` defaults to `10000`.
-
-`human_input.default_targets` defaults to `[]`. Use it when an unmentioned
-human message should wake one or more public participants.
-
-An agent becomes mentionable only when its agent reference contains an
-`agents.<agent_id>.conversation` block. Participants must be `kind: deepagent`.
+An agent becomes mentionable only when its agent reference has a
+`conversation` block:
 
 ```yaml
 agents:
-  product-analyst:
+  software-architect:
     kind: deepagent
-    config: ./agents/product-analyst.mdc
+    config: ./agents/software-architect.mdc
     conversation:
       aliases:
-        - product
-        - product-analyst
+        - architect
+        - architecture
 ```
 
-Aliases live in `team.yaml` and resolve to canonical agent ids. Unknown mentions
-and mentions of non-participants remain visible text and do not wake agents.
+Mention behavior:
 
-### `relations`
+| Setting | Default | Behavior |
+| --- | --- | --- |
+| `mentions.max_parallel_agents` | `2` | Maximum agents running from the public queue at once. Must be positive. |
+| `mentions.max_cascade_turns` | `null` | Maximum mention-triggered reply cascades. `null` means unlimited. |
+| `mentions.max_agent_failures` | `2` | Positive failure limit stored with mention settings. |
+| `identity_refresh_after_tokens` | `10000` | Token estimate after which participant identity context is refreshed. Must be positive. |
+| `human_input.default_targets` | `[]` | Participants to wake for non-empty human messages that contain no mentions. |
 
-Declares directed links between agents.
+Mentions use `@name` or `@alias`, outside inline code and fenced code blocks.
+Unknown mentions remain visible text and do not wake agents. Self-mentions and
+duplicate mentions in one message are ignored.
 
-```yaml
-relations:
-  - from: developer
-    to: qa-engineer
-    id: qa-review
-    relation: tool
-    tool_name: ask_qa_engineer
-    input_schema:
-      message: string
-    description: >
-      Ask the qa-engineer to run tests, linters, build commands and report the results.
-```
+Aliases are case-insensitive. An alias cannot duplicate another alias or
+conflict with another participant id.
 
-#### `relations[].from`
+## Validation Checklist
 
-Source agent id. It must reference an agent declared under `agents`.
+Before a team can instantiate:
 
-#### `relations[].to`
-
-Target agent id. It must reference an agent declared under `agents`.
-
-#### `relations[].id`
-
-Stable relation identity used to preserve persisted agent history when a tool
-name or label changes.
-
-```yaml
-id: qa-review
-```
-
-This key is optional for existing teams. If omitted, the loader assigns a
-position-based id such as `relation_001`, which is less resilient to relation
-reordering.
-
-#### `relations[].relation`
-
-Relation type.
-
-Current values:
-
-```yaml
-relation: tool
-relation: subagent
-```
-
-`tool` adds a concrete tool to the source agent. That tool calls the target
-agent.
-
-`subagent` means the source agent can delegate to the target agent as a
-subagent.
-
-#### `relations[].tool_name`
-
-Name of the tool injected for `relation: tool`.
-
-```yaml
-tool_name: ask_qa_engineer
-```
-
-This key is required for `relation: tool` and must be omitted for
-`relation: subagent`.
-
-#### `relations[].input_schema`
-
-Input schema for the generated tool.
-
-Current shape:
-
-```yaml
-input_schema:
-  message: string
-```
-
-This schema is valid and exposed through the generated tool.
-
-#### `relations[].description`
-
-Human-readable description. For `relation: tool`, it becomes the generated tool
-description.
+- `schema_version` must be `1`.
+- `id` must be non-empty.
+- Agent ids must be unique after case-insensitive normalization.
+- There must be exactly one entrypoint.
+- Every agent `kind` must be `deepagent` or `subagent`.
+- Every referenced toolset and custom tool must exist.
+- Custom tool `exposes` must exactly match returned tool names.
+- Relation endpoints must reference declared agents.
+- `tool` relations require `tool_name`; `subagent` relations must not set it.
+- Conversation participants must be `deepagent`.
+- Conversation defaults and aliases must point to valid, non-conflicting
+  participants.

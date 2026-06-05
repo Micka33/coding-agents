@@ -19,6 +19,10 @@ describe("studio Next config", () => {
           key: "Content-Security-Policy",
           value: expect.stringContaining("object-src 'none'"),
         },
+        {
+          key: "Content-Security-Policy",
+          value: expect.stringContaining("connect-src 'self' blob:"),
+        },
       ]),
     })
   })

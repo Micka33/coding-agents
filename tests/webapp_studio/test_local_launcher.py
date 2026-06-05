@@ -118,6 +118,40 @@ class LocalLauncherTests(unittest.TestCase):
         self.assertTrue(records[0]["terminated"])
         self.assertTrue(records[1]["terminated"])
 
+    def test_launch_without_team_file_starts_discovery_backend(self) -> None:
+        records = []
+
+        def process_factory(command, cwd=None, env=None):
+            record = {"command": command, "cwd": cwd, "env": env, "terminated": False}
+            records.append(record)
+            process = SimpleNamespace(returncode=None)
+            process.poll = lambda: process.returncode
+            process.terminate = lambda: record.update({"terminated": True})
+            process.kill = lambda: None
+            process.wait = lambda timeout=None: 0
+            return process
+
+        launcher = StudioDevelopmentLauncher(
+            root_dir=Path("/repo"),
+            workspace_dir=Path("/workspace"),
+            process_factory=process_factory,
+            socket_factory=lambda _address, timeout=None: (_ for _ in ()).throw(OSError("available")),
+            urlopen=lambda _url, timeout=None: SimpleNamespace(status=200),
+            sleep=lambda _seconds: (_ for _ in ()).throw(KeyboardInterrupt()),
+        )
+
+        with patch("sys.executable", "/python"):
+            with patch("sys.stdout", io.StringIO()):
+                launcher.launch(backend_port=9999, frontend_port=3000)
+
+        self.assertEqual(
+            records[0]["command"],
+            ["/python", "-m", "src.webapp_studio.backend.server", "--host", "127.0.0.1", "--port", "9999"],
+        )
+        self.assertEqual(records[0]["cwd"], Path("/workspace"))
+        self.assertTrue(records[0]["terminated"])
+        self.assertTrue(records[1]["terminated"])
+
     def test_launch_accepts_required_philosophers_team_file(self) -> None:
         records = []
 

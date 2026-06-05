@@ -14,6 +14,7 @@ import {
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
   PencilIcon,
+  PlusIcon,
   RefreshCwIcon,
   RotateCcwIcon,
   SendIcon,
@@ -35,6 +36,7 @@ import type {
   InterruptRequest,
   StudioSession,
   StudioState,
+  StudioTeams,
 } from "@/lib/studio/schemas"
 import { cn } from "@/lib/utils"
 
@@ -64,10 +66,13 @@ type StudioSidebarProps = {
   onRuntimeChange: (mentionHookEnabled: boolean) => void
   onStopAgent: (agentId: string) => void
   onSwitchBranch: (branchId: string) => void
-  onSwitchConversation: (conversationId: string) => void
+  onSwitchConversation: (teamId: string, conversationId: string) => void
+  onNewChat: () => void
+  onDraftTeamChange: (teamId: string) => void
   onToggleCollapsed: () => void
   session: StudioSession | null
   state: StudioState
+  teams: StudioTeams | null
 }
 
 export function StudioSidebar({
@@ -88,21 +93,17 @@ export function StudioSidebar({
   onStopAgent,
   onSwitchBranch,
   onSwitchConversation,
+  onNewChat,
+  onDraftTeamChange,
   onToggleCollapsed,
   session,
   state,
+  teams,
 }: StudioSidebarProps) {
-  const [threadDraftState, setThreadDraftState] = useState({
-    conversationId: state.conversation_id,
-    value: state.conversation_id,
-  })
   const [interruptDrafts, setInterruptDrafts] = useState<Record<string, string>>({})
   const [editingCheckpointId, setEditingCheckpointId] = useState<string | null>(null)
   const [checkpointEditDrafts, setCheckpointEditDrafts] = useState<Record<string, string>>({})
-  const threadDraft =
-    threadDraftState.conversationId === state.conversation_id
-      ? threadDraftState.value
-      : state.conversation_id
+  const draftMode = state.conversation_id === ""
   const cascadeLimitValue = state.runtime.max_cascade_turns === null ? "" : String(state.runtime.max_cascade_turns)
   const hasFailedQueueItems = state.queue.some((item) => item.status === "failed")
   const hasPendingQueueItems = state.queue.some((item) => item.status === "pending")
@@ -135,27 +136,13 @@ export function StudioSidebar({
     onCascadeLimitChange(parsed)
   }
 
-  function switchThread(value: string) {
-    const trimmed = value.trim()
-    if (!trimmed || trimmed === state.conversation_id) {
-      return
-    }
-    onSwitchConversation(trimmed)
-  }
-
-  function updateThreadDraft(value: string) {
-    setThreadDraftState({
-      conversationId: state.conversation_id,
-      value,
-    })
-  }
-
   if (collapsed) {
     return (
       <aside className="flex h-full flex-col items-center gap-2 border-r bg-background px-2 py-3">
         <Button aria-label="Expand sidebar" onClick={onToggleCollapsed} size="icon-sm" variant="ghost">
           <PanelLeftOpenIcon className="size-4" />
         </Button>
+        <RailButton icon={<PlusIcon className="size-4" />} label="New chat" onClick={onNewChat} />
         <RailButton icon={<FolderIcon className="size-4" />} label="Files" onClick={() => onOpenInspector({ kind: "files" })} />
         <RailButton icon={<ActivityIcon className="size-4" />} label="Activity" onClick={() => onOpenInspector({ kind: "activity" })} />
         <RailButton icon={<GitCompareIcon className="size-4" />} label="Changes" onClick={() => onOpenInspector({ kind: "changes" })} />
@@ -171,7 +158,9 @@ export function StudioSidebar({
         <div className="flex min-w-0 items-center gap-2">
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-base font-semibold">Webapp Studio</h1>
-            <p className="truncate text-xs text-muted-foreground">{state.team_id}</p>
+            <p className="truncate text-xs text-muted-foreground">
+              {draftMode ? `New chat · ${state.team_id}` : state.team_id}
+            </p>
           </div>
           <Button aria-label="Collapse sidebar" onClick={onToggleCollapsed} size="icon-sm" variant="ghost">
             <PanelLeftCloseIcon className="size-4" />
@@ -187,51 +176,51 @@ export function StudioSidebar({
       <div className="min-h-0 overflow-auto px-3 py-3">
         <section className="grid gap-3">
           <div className="grid gap-2">
-            <label className="text-xs font-medium text-muted-foreground" htmlFor="studio-thread-id">
-              Thread
-            </label>
-            <div className="flex gap-1">
-              <Input
-                className="h-8 text-sm"
-                id="studio-thread-id"
-                onChange={(event) => updateThreadDraft(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    switchThread(event.currentTarget.value)
-                  }
-                }}
-                value={threadDraft}
-              />
-              <Button
-                aria-label="Switch thread"
-                disabled={!liveApi || busy || !threadDraft.trim()}
-                onClick={() => switchThread(threadDraft)}
-                size="icon-sm"
-                variant="outline"
-              >
-                <GitBranchIcon className="size-4" />
-              </Button>
-            </div>
+            <Button
+              className="w-full justify-start"
+              disabled={!liveApi || busy || !teams || teams.status === "blocked" || teams.teams.length === 0}
+              onClick={onNewChat}
+              type="button"
+              variant={draftMode ? "secondary" : "outline"}
+            >
+              <PlusIcon className="size-4" />
+              New chat
+            </Button>
+            {draftMode && teams?.status === "ready" ? (
+              <label className="grid gap-1 text-xs font-medium text-muted-foreground">
+                Team
+                <select
+                  className="h-8 rounded-md border bg-background px-2 text-sm text-foreground"
+                  onChange={(event) => onDraftTeamChange(event.currentTarget.value)}
+                  value={state.team_id}
+                >
+                  {teams.teams.map((team) => (
+                    <option key={team.team_id} value={team.team_id}>
+                      {team.team_id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
             {conversationList?.conversations.length ? (
               <div className="grid gap-1">
-                {conversationList.conversations.slice(0, 4).map((conversation) => (
+                {conversationList.conversations.slice(0, 12).map((conversation) => (
                   <button
                     aria-label={`Switch to thread ${conversation.conversation_id}`}
                     className={cn(
                       "min-w-0 rounded-md border px-2 py-1 text-left text-xs hover:bg-muted",
-                      conversation.conversation_id === state.conversation_id ? "bg-muted" : null
+                      conversation.conversation_id === state.conversation_id && conversation.team_id === state.team_id ? "bg-muted" : null
                     )}
-                    key={conversation.conversation_id}
-                    onClick={() => {
-                      updateThreadDraft(conversation.conversation_id)
-                      switchThread(conversation.conversation_id)
-                    }}
-                    title={`Switch to thread ${conversation.conversation_id}`}
+                    key={`${conversation.team_id}:${conversation.conversation_id}`}
+                    onClick={() => onSwitchConversation(conversation.team_id, conversation.conversation_id)}
+                    title={`Switch to ${conversation.team_id} conversation ${conversation.conversation_id}`}
                     type="button"
                   >
-                    <span className="block truncate font-medium">{conversation.conversation_id}</span>
+                    <span className="block truncate font-medium">
+                      {conversation.title || conversation.conversation_id}
+                    </span>
                     <span className="block truncate text-muted-foreground">
-                      {conversation.event_count} events
+                      {conversation.team_id} · {conversation.event_count} events
                     </span>
                   </button>
                 ))}
@@ -247,8 +236,8 @@ export function StudioSidebar({
             <div className="mt-2 grid gap-1 text-muted-foreground">
               <p className="break-all">cwd: {session?.launcher_cwd ?? "unknown"}</p>
               <p className="break-all">root: {session?.resolved_root_dir ?? "unknown"}</p>
-              <p className="break-all">backend: {session?.checkpointer.backend ?? "unknown"}</p>
-              <p className="break-all">db: {session?.checkpointer.sqlite_path ?? "n/a"}</p>
+              <p className="break-all">backend: {session?.checkpointer?.backend ?? "unknown"}</p>
+              <p className="break-all">db: {session?.checkpointer?.sqlite_path ?? "n/a"}</p>
             </div>
           </details>
         </section>

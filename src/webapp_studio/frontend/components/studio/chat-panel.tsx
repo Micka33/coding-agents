@@ -13,6 +13,8 @@ import {
   FileTextIcon,
   GitCompareIcon,
   PaperclipIcon,
+  PanelBottomOpenIcon,
+  PanelRightOpenIcon,
   PencilIcon,
   SendIcon,
   XIcon,
@@ -34,6 +36,7 @@ import {
   PromptInputSubmit,
   PromptInputTextarea,
   PromptInputTools,
+  usePromptInputAttachments,
 } from "@/components/ai-elements/prompt-input"
 import type { InspectorView } from "@/components/studio/right-inspector"
 import { RichMarkdown } from "@/components/studio/rich-markdown"
@@ -55,6 +58,7 @@ import type {
   StudioChanges,
   StudioSession,
   StudioState,
+  StudioWorkspaceFileItem,
 } from "@/lib/studio/schemas"
 
 type LocalOutboxItem = {
@@ -63,11 +67,14 @@ type LocalOutboxItem = {
   createdAt: string
   fileNames: string[]
   status: "sending" | "failed"
+  workspaceFiles: StudioWorkspaceFileItem[]
 }
 
 type ChatPanelProps = {
   busy: boolean
   changes: StudioChanges | null
+  inspectorOpen?: boolean
+  inspectorPlacement?: "sheet" | "side"
   liveApi: boolean
   onOpenInspector: (view: InspectorView) => void
   onEditMessage: (messageId: string, content: string) => Promise<void> | void
@@ -80,18 +87,29 @@ type ChatPanelProps = {
   onSubmitDraft: (
     content: string,
     files: FileUIPart[],
+    workspacePaths: string[],
     clientMessageId: string
   ) => Promise<void> | void
+  onRestoreInspector?: () => void
+  onSearchWorkspaceFiles?: (query: string) => Promise<StudioWorkspaceFileItem[]> | StudioWorkspaceFileItem[]
   onSwitchBranch: (branchId: string) => Promise<void> | void
   session: StudioSession | null
   state: StudioState
   streamStatus: StudioStreamStatus
 }
 
-type MentionOption = {
+type AgentReferenceOption = {
   aliases: string[]
+  kind: "agent"
   participant: string
 }
+
+type FileReferenceOption = {
+  file: StudioWorkspaceFileItem
+  kind: "file"
+}
+
+type ReferenceOption = AgentReferenceOption | FileReferenceOption
 
 type TranscriptTimestamp = {
   dateTime: string
@@ -108,10 +126,14 @@ type MessageVersionOption = {
 export function ChatPanel({
   busy,
   changes,
+  inspectorOpen = false,
+  inspectorPlacement = "side",
   liveApi,
   onOpenInspector,
   onEditMessage,
   onPersistUiState,
+  onRestoreInspector,
+  onSearchWorkspaceFiles,
   onSubmitDraft,
   onSwitchBranch,
   session,
@@ -120,6 +142,7 @@ export function ChatPanel({
 }: ChatPanelProps) {
   const draftStorageKey = draftKey(session, state)
   const outboxStorageKey = outboxKey(session, state)
+  const draftMode = state.conversation_id === ""
   const branchUiState = uiStateForCurrentBranch(state)
   const uiStateHydrationKey = branchUiState
     ? `${branchUiState.conversation_id}:${branchUiState.branch_id}:${branchUiState.participant_id}`
@@ -131,27 +154,82 @@ export function ChatPanel({
   const [editingEventId, setEditingEventId] = useState<string | null>(null)
   const [loadedUiStateKey, setLoadedUiStateKey] = useState<string | null>(null)
   const [selectionEnd, setSelectionEnd] = useState(0)
-  const [mentionIndex, setMentionIndex] = useState(0)
-  const [dismissedMentionKey, setDismissedMentionKey] = useState<string | null>(null)
+  const [referenceIndex, setReferenceIndex] = useState(0)
+  const [dismissedReferenceKey, setDismissedReferenceKey] = useState<string | null>(null)
+  const [workspaceFileOptions, setWorkspaceFileOptions] = useState<StudioWorkspaceFileItem[]>([])
+  const [workspaceFileOptionsQuery, setWorkspaceFileOptionsQuery] = useState<string | null>(null)
+  const [workspaceFileError, setWorkspaceFileError] = useState<{ message: string; query: string } | null>(null)
+  const [selectedWorkspaceFiles, setSelectedWorkspaceFiles] = useState<StudioWorkspaceFileItem[]>([])
   const [activityExpanded, setActivityExpanded] = useState(false)
-  const mentionListId = useId()
+  const referenceListId = useId()
   const activeAgents = useMemo(
     () => state.conversation.agent_states.filter((agent) => agent.running || agent.queued),
     [state.conversation.agent_states]
   )
-  const mentionQuery = activeMentionQuery(draft, selectionEnd)
-  const mentionOptions = useMemo(() => {
-    if (!mentionQuery || dismissedMentionKey === mentionQuery.key) {
-      return []
-    }
-    const query = mentionQuery.query.toLowerCase()
-    return mentionOptionsForState(state, query).slice(0, 8)
-  }, [dismissedMentionKey, mentionQuery, state])
-  const activeMentionIndex =
-    mentionOptions.length === 0
+  const referenceQuery = activeReferenceQuery(draft, selectionEnd)
+  const referenceQueryKey = referenceQuery?.key ?? null
+  const referenceQueryText = referenceQuery?.query ?? ""
+  const visibleWorkspaceFileOptions =
+    workspaceFileOptionsQuery === referenceQueryText ? workspaceFileOptions : []
+  const visibleWorkspaceFileError =
+    workspaceFileError?.query === referenceQueryText ? workspaceFileError.message : null
+  const agentOptions =
+    referenceQueryKey && dismissedReferenceKey !== referenceQueryKey
+      ? agentOptionsForState(state, referenceQueryText.toLowerCase()).slice(0, 8)
+      : []
+  const referenceOptions: ReferenceOption[] = [
+    ...agentOptions,
+    ...visibleWorkspaceFileOptions
+      .filter((file) => !selectedWorkspaceFiles.some((selected) => selected.path === file.path))
+      .slice(0, 8)
+      .map((file): FileReferenceOption => ({ file, kind: "file" })),
+  ]
+  const activeReferenceIndex =
+    referenceOptions.length === 0
       ? 0
-      : Math.min(mentionIndex, mentionOptions.length - 1)
+      : Math.min(referenceIndex, referenceOptions.length - 1)
+  const referenceListOpen =
+    !!referenceQueryKey &&
+    dismissedReferenceKey !== referenceQueryKey &&
+    (referenceOptions.length > 0 || visibleWorkspaceFileError !== null)
   const messageVersions = useMemo(() => messageVersionIndex(state), [state])
+
+  useEffect(() => {
+    if (!referenceListOpen || referenceOptions.length === 0) {
+      return
+    }
+    document
+      .getElementById(`${referenceListId}-${activeReferenceIndex}`)
+      ?.scrollIntoView?.({ block: "nearest" })
+  }, [activeReferenceIndex, referenceListId, referenceListOpen, referenceOptions.length])
+
+  useEffect(() => {
+    if (!referenceQueryKey || dismissedReferenceKey === referenceQueryKey || !onSearchWorkspaceFiles) {
+      return
+    }
+    let cancelled = false
+    Promise.resolve(onSearchWorkspaceFiles(referenceQueryText))
+      .then((files) => {
+        if (!cancelled) {
+          setWorkspaceFileOptions(files)
+          setWorkspaceFileOptionsQuery(referenceQueryText)
+          setWorkspaceFileError(null)
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setWorkspaceFileOptions([])
+          setWorkspaceFileOptionsQuery(referenceQueryText)
+          setWorkspaceFileError({
+            message: error instanceof Error ? error.message : "Workspace file search failed.",
+            query: referenceQueryText,
+          })
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [dismissedReferenceKey, onSearchWorkspaceFiles, referenceQueryKey, referenceQueryText])
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- Hydrates a per-branch browser draft after the client storage key is known.
@@ -196,7 +274,7 @@ export function ChatPanel({
   }, [loadedOutboxKey, outbox, outboxStorageKey])
 
   useEffect(() => {
-    if (!liveApi || !uiStateHydrationKey || loadedUiStateKey !== uiStateHydrationKey) {
+    if (draftMode || !liveApi || !uiStateHydrationKey || loadedUiStateKey !== uiStateHydrationKey) {
       return
     }
     if (draftStorageKey !== loadedDraftKey || outboxStorageKey !== loadedOutboxKey) {
@@ -214,6 +292,7 @@ export function ChatPanel({
   }, [
     draft,
     draftStorageKey,
+    draftMode,
     editingEventId,
     liveApi,
     loadedDraftKey,
@@ -226,8 +305,8 @@ export function ChatPanel({
     uiStateHydrationKey,
   ])
 
-  function insertMention(participant: string) {
-    if (!mentionQuery) {
+  function insertAgentReference(participant: string) {
+    if (!referenceQuery) {
       const cursor = Math.max(0, Math.min(selectionEnd, draft.length))
       const prefix = draft.slice(0, cursor)
       const suffix = draft.slice(cursor)
@@ -236,46 +315,80 @@ export function ChatPanel({
       const insertion = `${leadingSpace}@${participant}${trailingSpace}`
       setDraft(`${prefix}${insertion}${suffix}`)
       setSelectionEnd(cursor + insertion.length)
-      setDismissedMentionKey(null)
+      setDismissedReferenceKey(null)
       return
     }
-    const suffix = draft.slice(mentionQuery.end)
+    const suffix = draft.slice(referenceQuery.end)
     const trailingSpace = suffix.startsWith(" ") ? "" : " "
     const insertion = `@${participant}${trailingSpace}`
-    setDraft(`${draft.slice(0, mentionQuery.start)}${insertion}${suffix}`)
-    setSelectionEnd(mentionQuery.start + insertion.length)
-    setDismissedMentionKey(null)
+    setDraft(`${draft.slice(0, referenceQuery.start)}${insertion}${suffix}`)
+    setSelectionEnd(referenceQuery.start + insertion.length)
+    setDismissedReferenceKey(null)
   }
 
-  function handleMentionKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+  function insertWorkspaceFileReference(file: StudioWorkspaceFileItem) {
+    const nextWorkspaceFiles = selectedWorkspaceFiles.some((selected) => selected.path === file.path)
+      ? selectedWorkspaceFiles
+      : [...selectedWorkspaceFiles, file]
+    setSelectedWorkspaceFiles(nextWorkspaceFiles)
+    const marker = `@{${file.path}}`
+    if (!referenceQuery) {
+      const cursor = Math.max(0, Math.min(selectionEnd, draft.length))
+      const prefix = draft.slice(0, cursor)
+      const suffix = draft.slice(cursor)
+      const leadingSpace = prefix && !/\s$/.test(prefix) ? " " : ""
+      const trailingSpace = suffix.startsWith(" ") ? "" : " "
+      const insertion = `${leadingSpace}${marker}${trailingSpace}`
+      setDraft(`${prefix}${insertion}${suffix}`)
+      setSelectionEnd(cursor + insertion.length)
+      setDismissedReferenceKey(null)
+      return
+    }
+    const suffix = draft.slice(referenceQuery.end)
+    const trailingSpace = suffix.startsWith(" ") ? "" : " "
+    const insertion = `${marker}${trailingSpace}`
+    setDraft(`${draft.slice(0, referenceQuery.start)}${insertion}${suffix}`)
+    setSelectionEnd(referenceQuery.start + insertion.length)
+    setDismissedReferenceKey(null)
+  }
+
+  function insertReference(option: ReferenceOption) {
+    if (option.kind === "agent") {
+      insertAgentReference(option.participant)
+    } else {
+      insertWorkspaceFileReference(option.file)
+    }
+  }
+
+  function handleReferenceKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.nativeEvent.isComposing) {
       return
     }
-    if (!mentionOptions.length) {
+    if (!referenceOptions.length) {
       return
     }
     if (event.key === "ArrowDown") {
       event.preventDefault()
-      setMentionIndex((index) => (index + 1) % mentionOptions.length)
+      setReferenceIndex((index) => (index + 1) % referenceOptions.length)
     } else if (event.key === "ArrowUp") {
       event.preventDefault()
-      setMentionIndex((index) => (index - 1 + mentionOptions.length) % mentionOptions.length)
+      setReferenceIndex((index) => (index - 1 + referenceOptions.length) % referenceOptions.length)
     } else if (event.key === "Enter" || event.key === "Tab") {
       event.preventDefault()
-      insertMention(
-        (mentionOptions[activeMentionIndex] ?? mentionOptions[0]).participant
-      )
+      insertReference(referenceOptions[activeReferenceIndex] ?? referenceOptions[0]!)
     } else if (event.key === "Escape") {
       event.preventDefault()
-      setDismissedMentionKey(mentionQuery?.key ?? null)
+      setDismissedReferenceKey(referenceQuery?.key ?? null)
     }
   }
 
   async function submit(
     content: string,
     files: FileUIPart[],
+    workspaceFiles = selectedWorkspaceFiles,
     clientMessageId = `client_${Date.now()}_${Math.random().toString(36).slice(2)}`
   ) {
+    const workspacePaths = workspaceFiles.map((file) => file.path)
     const item: LocalOutboxItem = {
       clientMessageId,
       content,
@@ -284,17 +397,21 @@ export function ChatPanel({
         .map((file) => file.filename)
         .filter((name): name is string => typeof name === "string" && name.length > 0),
       status: "sending",
+      workspaceFiles,
     }
     if (outboxStorageKey) {
       setOutbox((items) => upsertOutboxItem(items, item))
     }
     setDraft("")
+    setSelectedWorkspaceFiles([])
     try {
-      await onSubmitDraft(content, files, clientMessageId)
+      await onSubmitDraft(content, files, workspacePaths, clientMessageId)
       if (outboxStorageKey) {
         setOutbox((items) => removeOutboxItem(items, clientMessageId))
       }
     } catch {
+      setDraft(content)
+      setSelectedWorkspaceFiles(workspaceFiles)
       if (outboxStorageKey) {
         setOutbox((items) =>
           updateOutboxItem(items, clientMessageId, { status: "failed" })
@@ -303,24 +420,46 @@ export function ChatPanel({
     }
   }
 
+  const fileReferenceOptions = referenceOptions.filter(
+    (option): option is FileReferenceOption => option.kind === "file"
+  )
+  const RestoreInspectorIcon =
+    inspectorPlacement === "sheet" ? PanelBottomOpenIcon : PanelRightOpenIcon
+
   return (
     <section className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden bg-background">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
         <div className="min-w-0">
           <h2 className="text-base font-medium">Public Transcript</h2>
           <p className="text-sm text-muted-foreground">
-            {state.conversation.events.length} events in {state.conversation_id}
+            {draftMode
+              ? `New chat with ${state.team_id}`
+              : `${state.conversation.events.length} events in ${state.conversation_id}`}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <StatusPill label={liveApi ? "Live backend" : "Fixture snapshot"} tone={liveApi ? "emerald" : "amber"} />
-          {liveApi ? (
+          <StatusPill label={state.team_id} tone="sky" />
+          <StatusPill
+            label={liveApi ? "Live backend" : "Fixture snapshot"}
+            tone={liveApi ? "emerald" : "amber"}
+          />
+          {liveApi && !draftMode ? (
             <StatusPill
               label={`Stream ${streamStatus}`}
               tone={streamStatus === "connected" ? "emerald" : "amber"}
             />
           ) : null}
           {busy ? <StatusPill label="Syncing" tone="sky" /> : null}
+          {onRestoreInspector && !inspectorOpen ? (
+            <Button
+              aria-label="Open inspector"
+              onClick={onRestoreInspector}
+              size="icon-sm"
+              variant="ghost"
+            >
+              <RestoreInspectorIcon className="size-4" />
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -356,11 +495,11 @@ export function ChatPanel({
           onDismiss={(clientMessageId) =>
             setOutbox((items) => removeOutboxItem(items, clientMessageId))
           }
-          onRetry={(item) => submit(item.content, [], item.clientMessageId)}
+          onRetry={(item) => submit(item.content, [], item.workspaceFiles, item.clientMessageId)}
         />
         <PromptInput
-          accept="*"
           className="rounded-md border bg-background"
+          inputGroupClassName="overflow-visible"
           maxFileSize={10 * 1024 * 1024}
           multiple
           onSubmit={(message) => {
@@ -372,38 +511,78 @@ export function ChatPanel({
           }}
         >
           <PromptInputBody>
-            <div className="relative">
-              {mentionOptions.length > 0 ? (
+            <div className="relative w-full">
+              {referenceListOpen ? (
                 <div
-                  className="absolute bottom-full left-2 z-20 mb-2 w-64 overflow-hidden rounded-md border bg-popover shadow-md"
-                  id={mentionListId}
+                  className="absolute bottom-full left-0 right-0 z-20 mb-2 overflow-hidden rounded-md border bg-popover shadow-md"
+                  id={referenceListId}
                   role="listbox"
                 >
-                  <div className="max-h-56 overflow-auto p-1">
-                    {mentionOptions.map((option, index) => (
+                  <div className="max-h-56 overflow-auto p-0.5">
+                    {agentOptions.length > 0 ? (
+                      <div className="px-2 py-0.5 text-xs font-medium leading-4 text-muted-foreground">
+                        Agents
+                      </div>
+                    ) : null}
+                    {agentOptions.map((option, index) => (
                       <button
-                        aria-selected={index === activeMentionIndex}
-                        className={`grid w-full gap-0.5 rounded-sm px-2 py-1.5 text-left text-sm ${
-                          index === activeMentionIndex ? "bg-muted" : ""
+                        aria-selected={index === activeReferenceIndex}
+                        className={`flex w-full items-center rounded-sm px-2 py-1 text-left text-sm leading-5 ${
+                          index === activeReferenceIndex ? "bg-muted" : ""
                         }`}
-                        id={`${mentionListId}-${index}`}
+                        id={`${referenceListId}-${index}`}
                         key={option.participant}
                         onMouseDown={(event) => {
                           event.preventDefault()
-                          insertMention(option.participant)
+                          insertReference(option)
                         }}
                         role="option"
                         title={`Mention ${option.participant}`}
                         type="button"
                       >
                         <span>@{option.participant}</span>
-                        {option.aliases.length > 0 ? (
-                          <span className="truncate text-xs text-muted-foreground">
-                            aliases: {option.aliases.map((alias) => `@${alias}`).join(", ")}
-                          </span>
-                        ) : null}
                       </button>
                     ))}
+                    {fileReferenceOptions.length > 0 || onSearchWorkspaceFiles ? (
+                      <div className="border-t px-2 py-0.5 text-xs font-medium leading-4 text-muted-foreground">
+                        Files
+                      </div>
+                    ) : null}
+                    {fileReferenceOptions.map((option, fileIndex) => {
+                      const index = agentOptions.length + fileIndex
+                      return (
+                        <button
+                          aria-selected={index === activeReferenceIndex}
+                          className={`flex w-full items-center rounded-sm px-2 py-1 text-left text-sm leading-5 ${
+                            index === activeReferenceIndex ? "bg-muted" : ""
+                          }`}
+                          id={`${referenceListId}-${index}`}
+                          key={option.file.path}
+                          onMouseDown={(event) => {
+                            event.preventDefault()
+                            insertReference(option)
+                          }}
+                          role="option"
+                          title={`Include file ${option.file.path}`}
+                          type="button"
+                        >
+                          <span className="flex min-w-0 items-center gap-2">
+                            <FileTextIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                            <span className="truncate">{option.file.path}</span>
+                          </span>
+                        </button>
+                      )
+                    })}
+                    {visibleWorkspaceFileError ? (
+                      <div className="px-2 py-1 text-xs text-muted-foreground">
+                        {visibleWorkspaceFileError}
+                      </div>
+                    ) : null}
+                    {onSearchWorkspaceFiles && !visibleWorkspaceFileError && fileReferenceOptions.length === 0 ? (
+                      <div className="px-2 py-1 text-xs text-muted-foreground">
+                        No matching files
+                      </div>
+                    ) : null}
                   </div>
                   {!state.runtime.mention_hook_enabled ? (
                     <div className="border-t px-2 py-1 text-xs text-muted-foreground">
@@ -415,38 +594,58 @@ export function ChatPanel({
               <PromptInputTextarea
                 aria-label="Message"
                 aria-activedescendant={
-                  mentionOptions.length > 0 ? `${mentionListId}-${activeMentionIndex}` : undefined
+                  referenceOptions.length > 0 ? `${referenceListId}-${activeReferenceIndex}` : undefined
                 }
                 aria-autocomplete="list"
-                aria-controls={mentionOptions.length > 0 ? mentionListId : undefined}
-                aria-expanded={mentionOptions.length > 0}
+                aria-controls={referenceListOpen ? referenceListId : undefined}
+                aria-expanded={referenceListOpen}
                 className="min-h-24"
                 onChange={(event) => {
                   setDraft(event.target.value)
                   setSelectionEnd(event.currentTarget.selectionEnd)
-                  setMentionIndex(0)
-                  setDismissedMentionKey(null)
+                  setReferenceIndex(0)
+                  setDismissedReferenceKey(null)
                 }}
-                onKeyDown={handleMentionKeyDown}
+                onKeyDown={handleReferenceKeyDown}
                 onSelect={(event) => setSelectionEnd(event.currentTarget.selectionEnd)}
                 placeholder="@agent"
                 role="combobox"
                 value={draft}
               />
+              {selectedWorkspaceFiles.length > 0 ? (
+                <div className="flex flex-wrap gap-1 border-t px-2 py-2">
+                  {selectedWorkspaceFiles.map((file) => (
+                    <button
+                      aria-label={`Remove workspace file ${file.path}`}
+                      className="inline-flex max-w-full items-center gap-1 rounded-md border bg-background px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
+                      key={file.path}
+                      onClick={() =>
+                        setSelectedWorkspaceFiles((files) =>
+                          files.filter((selected) => selected.path !== file.path)
+                        )
+                      }
+                      title={file.path}
+                      type="button"
+                    >
+                      <FileTextIcon className="size-3.5 shrink-0" />
+                      <span className="truncate">{file.path}</span>
+                      <XIcon className="size-3 shrink-0" />
+                    </button>
+                  ))}
+                </div>
+              ) : null}
             </div>
           </PromptInputBody>
           <PromptInputFooter>
             <PromptInputTools>
-              <PromptInputButton aria-label="Attach file" type="button">
-                <PaperclipIcon className="size-4" />
-              </PromptInputButton>
+              <AttachFileButton />
               <div className="hidden min-w-0 gap-1 sm:flex">
                 {state.participants.map((participant) => (
                   <button
                     aria-label={`Mention ${participant}`}
                     className="rounded-md border px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
                     key={participant}
-                    onClick={() => insertMention(participant)}
+                    onClick={() => insertAgentReference(participant)}
                     title={`Mention ${participant}`}
                     type="button"
                   >
@@ -462,6 +661,20 @@ export function ChatPanel({
         </PromptInput>
       </div>
     </section>
+  )
+}
+
+function AttachFileButton() {
+  const attachments = usePromptInputAttachments()
+
+  return (
+    <PromptInputButton
+      aria-label="Attach file"
+      onClick={() => attachments.openFileDialog()}
+      type="button"
+    >
+      <PaperclipIcon className="size-4" />
+    </PromptInputButton>
   )
 }
 
@@ -562,6 +775,11 @@ function OutboxRecovery({
               Reattach files before retrying: {item.fileNames.join(", ")}
             </p>
           ) : null}
+          {item.workspaceFiles.length > 0 ? (
+            <p className="text-xs opacity-80">
+              Workspace files: {item.workspaceFiles.map((file) => file.path).join(", ")}
+            </p>
+          ) : null}
           <div className="flex justify-end gap-1">
             <Button
               disabled={item.status !== "failed" || item.fileNames.length > 0}
@@ -623,6 +841,7 @@ function TranscriptMessage({
 
   useEffect(() => {
     if (persistedEditing && event.author_kind === "human") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Syncs the local editor draft when persisted editing is restored.
       setDraft(content)
       setEditing(true)
     } else if (!persistedEditing && editing) {
@@ -1085,25 +1304,26 @@ function padDatePart(value: number) {
   return String(value).padStart(2, "0")
 }
 
-function activeMentionQuery(value: string, cursorPosition: number) {
+function activeReferenceQuery(value: string, cursorPosition: number) {
   const cursor = Math.max(0, Math.min(cursorPosition, value.length))
   if (isInsideMarkdownCode(value, cursor)) {
     return null
   }
   const beforeCursor = value.slice(0, cursor)
-  const match = /(^|[\s([{])@([A-Za-z0-9_-]*)$/.exec(beforeCursor)
+  const match = /(^|[\s([{])@([A-Za-z0-9_./-]*)$/.exec(beforeCursor)
   if (!match) {
     return null
   }
-  const start = beforeCursor.length - match[2].length - 1
+  const query = match[2] ?? ""
+  const start = beforeCursor.length - query.length - 1
   let end = cursor
-  while (end < value.length && /[A-Za-z0-9_-]/.test(value[end] ?? "")) {
+  while (end < value.length && /[A-Za-z0-9_./-]/.test(value[end] ?? "")) {
     end += 1
   }
   return {
     end,
-    key: `${start}:${end}:${match[2]}`,
-    query: match[2],
+    key: `${start}:${end}:${query}`,
+    query,
     start,
   }
 }
@@ -1120,7 +1340,7 @@ function isInsideMarkdownCode(value: string, cursor: number) {
   return inlineTickCount % 2 === 1
 }
 
-function mentionOptionsForState(state: StudioState, query: string): MentionOption[] {
+function agentOptionsForState(state: StudioState, query: string): AgentReferenceOption[] {
   return state.participants.flatMap((participant) => {
     const aliases = state.participant_aliases[participant] ?? []
     const matchesParticipant = participant.toLowerCase().includes(query)
@@ -1128,12 +1348,12 @@ function mentionOptionsForState(state: StudioState, query: string): MentionOptio
     if (!matchesParticipant && !matchesAlias) {
       return []
     }
-    return [{ aliases, participant }]
+    return [{ aliases, kind: "agent", participant }]
   })
 }
 
 function draftKey(session: StudioSession | null, state: StudioState) {
-  const storageId = session?.checkpointer.storage_id
+  const storageId = session?.checkpointer?.storage_id
   if (!storageId) {
     return null
   }
@@ -1141,7 +1361,7 @@ function draftKey(session: StudioSession | null, state: StudioState) {
 }
 
 function outboxKey(session: StudioSession | null, state: StudioState) {
-  const storageId = session?.checkpointer.storage_id
+  const storageId = session?.checkpointer?.storage_id
   if (!storageId) {
     return null
   }
@@ -1169,7 +1389,17 @@ function outboxItemsFromValue(value: unknown): LocalOutboxItem[] {
   if (!Array.isArray(value)) {
     return []
   }
-  return value.filter(isLocalOutboxItem)
+  return value.flatMap((item) => {
+    if (!isLocalOutboxItem(item)) {
+      return []
+    }
+    return [
+      {
+        ...item,
+        workspaceFiles: workspaceFilesFromValue((item as Partial<LocalOutboxItem>).workspaceFiles),
+      },
+    ]
+  })
 }
 
 function isLocalOutboxItem(value: unknown): value is LocalOutboxItem {
@@ -1183,8 +1413,32 @@ function isLocalOutboxItem(value: unknown): value is LocalOutboxItem {
     typeof item.createdAt === "string" &&
     Array.isArray(item.fileNames) &&
     item.fileNames.every((name) => typeof name === "string") &&
+    (item.workspaceFiles === undefined || Array.isArray(item.workspaceFiles)) &&
     (item.status === "sending" || item.status === "failed")
   )
+}
+
+function workspaceFilesFromValue(value: unknown): StudioWorkspaceFileItem[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") {
+      return []
+    }
+    const file = item as Partial<StudioWorkspaceFileItem>
+    if (typeof file.path !== "string" || typeof file.filename !== "string") {
+      return []
+    }
+    return [
+      {
+        filename: file.filename,
+        media_type: typeof file.media_type === "string" ? file.media_type : null,
+        path: file.path,
+        size_bytes: typeof file.size_bytes === "number" ? file.size_bytes : null,
+      },
+    ]
+  })
 }
 
 function upsertOutboxItem(items: LocalOutboxItem[], item: LocalOutboxItem) {

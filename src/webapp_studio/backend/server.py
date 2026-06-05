@@ -16,10 +16,12 @@ from src.team_instanciator.interfaces.cli_support import build_config_variables,
 from src.webapp.api.conversation_protocol import WebConversation
 from src.webapp_studio.backend.api.studio_api_controller import StudioApiController
 from src.webapp_studio.backend.api.studio_api_error import StudioApiError
+from src.webapp_studio.backend.api.studio_session_controller import StudioSessionController
 from src.webapp_studio.backend.contracts.agent_prompt_inject_request import AgentPromptInjectRequest
 from src.webapp_studio.backend.contracts.append_message_request import AppendMessageRequest
 from src.webapp_studio.backend.contracts.branch_create_request import BranchCreateRequest
 from src.webapp_studio.backend.contracts.checkpoint_resume_request import CheckpointResumeRequest
+from src.webapp_studio.backend.contracts.conversation_create_request import ConversationCreateRequest
 from src.webapp_studio.backend.contracts.edit_message_request import EditMessageRequest
 from src.webapp_studio.backend.contracts.interrupt_resume_request import InterruptResumeRequest
 from src.webapp_studio.backend.contracts.queue_clear_request import QueueClearRequest
@@ -33,7 +35,7 @@ from src.webapp_studio.backend.streaming.stream_client_queue import StreamClient
 
 CONTENT_SECURITY_POLICY = (
     "default-src 'self'; "
-    "connect-src 'self' http://127.0.0.1:* http://localhost:*; "
+    "connect-src 'self' blob: http://127.0.0.1:* http://localhost:*; "
     "img-src 'self' data: blob:; "
     "style-src 'self' 'unsafe-inline'; "
     "script-src 'self'; "
@@ -43,9 +45,13 @@ CONTENT_SECURITY_POLICY = (
 )
 
 
-def create_app(conversation: WebConversation, *, stream_buffer: StreamBuffer | None = None) -> FastAPI:
+def create_app(conversation: WebConversation | StudioSessionController, *, stream_buffer: StreamBuffer | None = None) -> FastAPI:
     app = FastAPI(title="Webapp Studio Backend", version="studio.v1")
-    controller = StudioApiController(conversation, stream_buffer=stream_buffer)
+    controller = (
+        conversation
+        if isinstance(conversation, StudioSessionController)
+        else StudioApiController(conversation, stream_buffer=stream_buffer)
+    )
 
     def ok(data: Any) -> JSONResponse:
         return _ok(data, capabilities=controller.capabilities())
@@ -118,13 +124,22 @@ def create_app(conversation: WebConversation, *, stream_buffer: StreamBuffer | N
     async def session() -> JSONResponse:
         return ok(controller.session())
 
+    @app.get("/api/studio/v1/teams")
+    async def teams() -> JSONResponse:
+        return ok(controller.teams())
+
     @app.get("/api/studio/v1/conversations")
     async def conversations(limit: int = 20) -> JSONResponse:
         return ok(controller.conversations(limit))
 
+    @app.post("/api/studio/v1/conversations")
+    async def create_conversation(request: ConversationCreateRequest) -> JSONResponse:
+        return ok(controller.create_conversation(request))
+
     @app.put("/api/studio/v1/session/conversation")
     async def switch_conversation(body: dict[str, Any]) -> JSONResponse:
-        return ok(controller.switch_conversation(str(body.get("conversation_id") or "")))
+        team_id = body.get("team_id")
+        return ok(controller.switch_conversation(str(body.get("conversation_id") or ""), str(team_id) if team_id is not None else None))
 
     @app.get("/api/studio/v1/activity")
     async def activity(agent_id: str | None = None) -> JSONResponse:
@@ -226,6 +241,10 @@ def create_app(conversation: WebConversation, *, stream_buffer: StreamBuffer | N
     @app.get("/api/studio/v1/files")
     async def files() -> JSONResponse:
         return ok(controller.files())
+
+    @app.get("/api/studio/v1/workspace-files")
+    async def workspace_files(query: str = "", limit: int = 20) -> JSONResponse:
+        return ok(controller.workspace_files(query=query, limit=limit))
 
     @app.get("/api/studio/v1/files/{file_id}/preview")
     async def file_preview(file_id: str) -> FileResponse:
@@ -433,7 +452,7 @@ def _error_response(status_code: int, error: StudioError, *, capabilities: Studi
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Serve the Webapp Studio FastAPI backend.")
-    parser.add_argument("team_file", help="Path to team.yaml.")
+    parser.add_argument("team_file", nargs="?", help="Path to team.yaml.")
     parser.add_argument("--thread-id", help="Conversation id. Defaults to the team id.")
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind.")
     parser.add_argument("--port", type=int, default=8765, help="Port to bind.")

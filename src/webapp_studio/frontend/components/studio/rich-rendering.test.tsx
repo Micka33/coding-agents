@@ -18,10 +18,11 @@ import {
 import { GeneratedUiPanel } from "@/components/studio/generated-ui-panel"
 import { RichMarkdown } from "@/components/studio/rich-markdown"
 import { StudioSidebar } from "@/components/studio/studio-sidebar"
+import { emptyStudioState } from "@/components/studio/studio-workspace"
 import { ToolCallList } from "@/components/studio/tool-call-list"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { loadStudioMock } from "@/lib/studio/fixtures"
-import type { StudioState } from "@/lib/studio/schemas"
+import type { StudioState, StudioTeamDescriptor } from "@/lib/studio/schemas"
 import { studioToolCallsFromValue } from "@/lib/studio/tool-calls"
 
 afterEach(() => {
@@ -892,6 +893,132 @@ describe("chat panel transcript affordances", () => {
 })
 
 describe("chat panel mention autocomplete", () => {
+  it("suggests selected team agents before the first message creates a conversation", () => {
+    const team: StudioTeamDescriptor = {
+      team_id: "openspec",
+      description: "OpenSpec team",
+      team_file: "/repo/teams/openspec/team.yaml",
+      source: "builtin",
+      conversation_available: true,
+      participants: ["openspec-guide", "product-strategist"],
+      participant_aliases: {
+        "openspec-guide": ["guide"],
+        "product-strategist": ["product"],
+      },
+    }
+    localStorage.clear()
+
+    renderChatPanel({ state: emptyStudioState(team) })
+
+    const textarea = screen.getByLabelText("Message") as HTMLTextAreaElement
+    fireEvent.change(textarea, {
+      target: {
+        selectionEnd: 5,
+        selectionStart: 5,
+        value: "@prod",
+      },
+    })
+
+    expect(screen.getByRole("option", { name: "@product-strategist" })).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: "@openspec-guide" })).not.toBeInTheDocument()
+  })
+
+  it("opens the hidden file input from the attach file button", () => {
+    const fixture = loadStudioMock()
+    const clickDescriptor = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "click"
+    )
+    const inputClick = vi.fn()
+    localStorage.clear()
+
+    try {
+      Object.defineProperty(HTMLInputElement.prototype, "click", {
+        configurable: true,
+        value: inputClick,
+      })
+
+      renderChatPanel({ state: fixture.state })
+      fireEvent.click(screen.getByRole("button", { name: "Attach file" }))
+
+      expect(inputClick).toHaveBeenCalledOnce()
+    } finally {
+      if (clickDescriptor) {
+        Object.defineProperty(HTMLInputElement.prototype, "click", clickDescriptor)
+      } else {
+        delete (HTMLInputElement.prototype as Partial<HTMLInputElement>).click
+      }
+    }
+  })
+
+  it("submits selected local attachments with the draft", async () => {
+    const fixture = loadStudioMock()
+    const createObjectUrlDescriptor = Object.getOwnPropertyDescriptor(
+      URL,
+      "createObjectURL"
+    )
+    const revokeObjectUrlDescriptor = Object.getOwnPropertyDescriptor(
+      URL,
+      "revokeObjectURL"
+    )
+    const onSubmitDraft = vi.fn()
+    localStorage.clear()
+
+    try {
+      Object.defineProperty(URL, "createObjectURL", {
+        configurable: true,
+        value: vi.fn(() => "data:text/plain;base64,aGVsbG8="),
+      })
+      Object.defineProperty(URL, "revokeObjectURL", {
+        configurable: true,
+        value: vi.fn(),
+      })
+
+      renderChatPanel({ onSubmitDraft, state: fixture.state })
+
+      fireEvent.change(screen.getByLabelText("Upload files"), {
+        target: {
+          files: [new File(["hello"], "hello.txt", { type: "text/plain" })],
+        },
+      })
+      fireEvent.change(screen.getByLabelText("Message"), {
+        target: {
+          selectionEnd: 15,
+          selectionStart: 15,
+          value: "with attachment",
+        },
+      })
+      fireEvent.click(screen.getByRole("button", { name: "Send message" }))
+
+      await waitFor(() =>
+        expect(onSubmitDraft).toHaveBeenCalledWith(
+          "with attachment",
+          [
+            expect.objectContaining({
+              filename: "hello.txt",
+              mediaType: "text/plain",
+              type: "file",
+              url: "data:text/plain;base64,aGVsbG8=",
+            }),
+          ],
+          [],
+          expect.any(String)
+        )
+      )
+    } finally {
+      if (createObjectUrlDescriptor) {
+        Object.defineProperty(URL, "createObjectURL", createObjectUrlDescriptor)
+      } else {
+        delete (URL as Partial<typeof URL>).createObjectURL
+      }
+      if (revokeObjectUrlDescriptor) {
+        Object.defineProperty(URL, "revokeObjectURL", revokeObjectUrlDescriptor)
+      } else {
+        delete (URL as Partial<typeof URL>).revokeObjectURL
+      }
+    }
+  })
+
   it("replaces the active mention range at the cursor and preserves suffix text", async () => {
     const fixture = loadStudioMock()
     localStorage.clear()
@@ -934,10 +1061,65 @@ describe("chat panel mention autocomplete", () => {
         value: "@le",
       },
     })
-    const option = await screen.findByRole("option", { name: /aliases: @lead/ })
+    const option = await screen.findByRole("option", { name: /@agent/ })
     fireEvent.mouseDown(option)
 
     expect(textarea).toHaveValue("@agent ")
+  })
+
+  it("keeps the active autocomplete option visible during keyboard navigation", async () => {
+    const fixture = loadStudioMock()
+    const scrollIntoViewDescriptor = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "scrollIntoView"
+    )
+    const scrollIntoView = vi.fn()
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    })
+    localStorage.clear()
+
+    try {
+      renderChatPanel({
+        state: {
+          ...fixture.state,
+          participant_aliases: {},
+          participants: Array.from({ length: 12 }, (_, index) => `agent-${index}`),
+        },
+      })
+
+      const textarea = screen.getByLabelText("Message") as HTMLTextAreaElement
+      fireEvent.change(textarea, {
+        target: {
+          selectionEnd: 1,
+          selectionStart: 1,
+          value: "@",
+        },
+      })
+      await screen.findByRole("option", { name: "@agent-0" })
+
+      scrollIntoView.mockClear()
+      fireEvent.keyDown(textarea, { key: "ArrowDown" })
+
+      await waitFor(() =>
+        expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" })
+      )
+      expect(screen.getByRole("option", { name: "@agent-1" })).toHaveAttribute(
+        "aria-selected",
+        "true"
+      )
+    } finally {
+      if (scrollIntoViewDescriptor) {
+        Object.defineProperty(
+          HTMLElement.prototype,
+          "scrollIntoView",
+          scrollIntoViewDescriptor
+        )
+      } else {
+        delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView
+      }
+    }
   })
 
   it("does not trigger mentions inside emails or markdown code", () => {
@@ -964,6 +1146,91 @@ describe("chat panel mention autocomplete", () => {
       },
     })
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument()
+  })
+
+  it("selects workspace files from the reference autocomplete and submits their paths", async () => {
+    const fixture = loadStudioMock()
+    const onSearchWorkspaceFiles = vi.fn().mockResolvedValue([
+      {
+        filename: "app.ts",
+        media_type: "text/plain",
+        path: "src/app.ts",
+        size_bytes: 12,
+      },
+    ])
+    const onSubmitDraft = vi.fn()
+    localStorage.clear()
+
+    renderChatPanel({
+      onSearchWorkspaceFiles,
+      onSubmitDraft,
+      state: fixture.state,
+    })
+
+    const textarea = screen.getByLabelText("Message") as HTMLTextAreaElement
+    fireEvent.change(textarea, {
+      target: {
+        selectionEnd: 4,
+        selectionStart: 4,
+        value: "@src",
+      },
+    })
+    const option = await screen.findByRole("option", { name: /src\/app\.ts/ })
+    fireEvent.mouseDown(option)
+
+    await waitFor(() => {
+      expect(textarea).toHaveValue("@{src/app.ts} ")
+      expect(screen.getByRole("button", { name: "Remove workspace file src/app.ts" })).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }))
+
+    await waitFor(() => {
+      expect(onSearchWorkspaceFiles).toHaveBeenCalledWith("src")
+      expect(onSubmitDraft).toHaveBeenCalledWith(
+        "@{src/app.ts}",
+        [],
+        ["src/app.ts"],
+        expect.stringMatching(/^client_/)
+      )
+    })
+  })
+
+  it("preserves selected workspace files when submit fails", async () => {
+    const fixture = loadStudioMock()
+    const onSearchWorkspaceFiles = vi.fn().mockResolvedValue([
+      {
+        filename: "notes.md",
+        media_type: "text/markdown",
+        path: "docs/notes.md",
+        size_bytes: 20,
+      },
+    ])
+    localStorage.clear()
+
+    renderChatPanel({
+      onSearchWorkspaceFiles,
+      onSubmitDraft: async () => {
+        throw new Error("offline")
+      },
+      state: fixture.state,
+    })
+
+    const textarea = screen.getByLabelText("Message") as HTMLTextAreaElement
+    fireEvent.change(textarea, {
+      target: {
+        selectionEnd: 5,
+        selectionStart: 5,
+        value: "@docs",
+      },
+    })
+    fireEvent.mouseDown(await screen.findByRole("option", { name: /docs\/notes\.md/ }))
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }))
+
+    await waitFor(() => {
+      expect(textarea).toHaveValue("@{docs/notes.md} ")
+      expect(screen.getByRole("button", { name: "Remove workspace file docs/notes.md" })).toBeInTheDocument()
+    })
   })
 })
 
@@ -1013,8 +1280,11 @@ function renderSidebar(
       onStopAgent={() => undefined}
       onSwitchBranch={() => undefined}
       onSwitchConversation={() => undefined}
+      onNewChat={() => undefined}
+      onDraftTeamChange={() => undefined}
       onToggleCollapsed={() => undefined}
       session={null}
+      teams={null}
       {...props}
     />
   )

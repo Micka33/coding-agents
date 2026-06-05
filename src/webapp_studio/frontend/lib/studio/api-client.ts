@@ -1,6 +1,7 @@
 import {
   AppendMessageResultSchema,
   BranchSummarySchema,
+  ConversationCreateResultSchema,
   ConversationListSchema,
   ConversationSwitchResultSchema,
   QueueItemSchema,
@@ -12,10 +13,13 @@ import {
   StudioFilesSchema,
   StudioSessionSchema,
   StudioStateSchema,
+  StudioTeamsSchema,
   StudioTerminalOutputSchema,
   StudioTerminalSessionSchema,
+  StudioWorkspaceFilesSchema,
   type AppendMessageResult,
   type BranchSummary,
+  type ConversationCreateResult,
   type ConversationList,
   type ConversationSwitchResult,
   type QueueItem,
@@ -27,8 +31,10 @@ import {
   type StudioFiles,
   type StudioSession,
   type StudioState,
+  type StudioTeams,
   type StudioTerminalOutput,
   type StudioTerminalSession,
+  type StudioWorkspaceFiles,
   type InterruptRequest,
 } from "@/lib/studio/schemas"
 import type { FileUIPart } from "ai"
@@ -60,14 +66,43 @@ export class StudioApiClient {
     return this.request("/session", StudioSessionSchema)
   }
 
+  async teams(): Promise<StudioTeams> {
+    return this.request("/teams", StudioTeamsSchema)
+  }
+
   async conversations(limit = 20): Promise<ConversationList> {
     return this.request(`/conversations?limit=${encodeURIComponent(limit)}`, ConversationListSchema)
   }
 
-  async switchConversation(conversationId: string): Promise<ConversationSwitchResult> {
+  async createConversation(
+    teamId: string,
+    content: string,
+    files: FileUIPart[] = [],
+    workspacePaths: string[] = [],
+    clientMessageId?: string
+  ): Promise<ConversationCreateResult> {
+    const attachments = attachmentsFromFileParts(files)
+    return this.request("/conversations", ConversationCreateResultSchema, {
+      method: "POST",
+      body: JSON.stringify({
+        team_id: teamId,
+        initial_message: content,
+        author_id: "human",
+        attachments,
+        workspace_paths: workspacePaths,
+        wait: false,
+        client_message_id: clientMessageId,
+      }),
+      headers: {
+        "Content-Type": "application/json",
+      },
+    })
+  }
+
+  async switchConversation(conversationId: string, teamId?: string): Promise<ConversationSwitchResult> {
     return this.request("/session/conversation", ConversationSwitchResultSchema, {
       method: "PUT",
-      body: JSON.stringify({ conversation_id: conversationId }),
+      body: JSON.stringify({ conversation_id: conversationId, team_id: teamId }),
       headers: {
         "Content-Type": "application/json",
       },
@@ -76,6 +111,14 @@ export class StudioApiClient {
 
   async files(): Promise<StudioFiles> {
     return this.request("/files", StudioFilesSchema)
+  }
+
+  async workspaceFiles(query: string, limit = 20): Promise<StudioWorkspaceFiles> {
+    const params = new URLSearchParams({
+      limit: String(limit),
+      query,
+    })
+    return this.request(`/workspace-files?${params.toString()}`, StudioWorkspaceFilesSchema)
   }
 
   async changes(): Promise<StudioChanges> {
@@ -150,6 +193,7 @@ export class StudioApiClient {
   async appendMessage(
     content: string,
     files: FileUIPart[] = [],
+    workspacePaths: string[] = [],
     clientMessageId?: string
   ): Promise<AppendMessageResult> {
     const attachments = attachmentsFromFileParts(files)
@@ -159,6 +203,7 @@ export class StudioApiClient {
         content,
         author_id: "human",
         attachments,
+        workspace_paths: workspacePaths,
         wait: false,
         client_message_id: clientMessageId,
       }),

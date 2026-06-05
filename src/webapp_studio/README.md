@@ -15,19 +15,28 @@ Next.js studio frontend, and a local two-process development launcher.
 One-command local studio launch:
 
 ```bash
-uv run webapp-studio team.yaml --port 8765 --frontend-port 3765
+uv run webapp-studio --port 8765 --frontend-port 3765
 ```
 
-The launcher starts the FastAPI backend first, waits for `/health`, then starts
-the Next.js frontend with `STUDIO_API_BASE_URL` pointed at the backend. It
-preserves the current webapp CLI arguments: `team.yaml`, `--thread-id`,
-`--host`, `--port`, `--var`, `--config`, API-key overrides, and env-file
-controls.
+The launcher discovers Studio conversation teams from the current working
+directory and the built-in repository teams, starts the FastAPI backend first,
+waits for `/health`, then starts the Next.js frontend with
+`STUDIO_API_BASE_URL` pointed at the backend.
+
+The explicit team launch remains available for compatibility and debugging:
+
+```bash
+uv run webapp-studio team.yaml --thread-id existing-thread --port 8765 --frontend-port 3765
+```
+
+The launcher preserves the current webapp CLI arguments: optional `team.yaml`,
+`--thread-id`, `--host`, `--port`, `--var`, `--config`, API-key overrides, and
+env-file controls.
 
 Current backend command shape:
 
 ```bash
-uv run python -m src.webapp_studio.backend.server team.yaml --port 8765
+uv run python -m src.webapp_studio.backend.server --port 8765
 ```
 
 Start with [PROJECT_PLAN.md](PROJECT_PLAN.md).

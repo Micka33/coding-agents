@@ -5,13 +5,21 @@ test("studio workspace keeps chat primary with inspector side surfaces", async (
 
   await expect(page.getByText("Public Transcript")).toBeVisible()
 
-  await openWorkspaceView(page, "Generated UI")
+  await openWorkspaceView(page, "Generated UI", "UI")
   await expect(page.getByRole("heading", { name: "Generated UI", exact: true }).first()).toBeVisible()
 
   await openWorkspaceView(page, "Activity")
   await expect(page.getByRole("heading", { name: "Activity", exact: true }).first()).toBeVisible()
 
   await openWorkspaceView(page, "Changes")
+  await expect(page.getByRole("heading", { name: "Changes", exact: true }).first()).toBeVisible()
+
+  await page.getByRole("button", { name: "Close inspector" }).click()
+  await expect(page.getByRole("button", { name: "Close inspector" })).toHaveCount(0)
+  await expect(page.getByText("Select a workspace view.")).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Open inspector" })).toHaveCount(1)
+
+  await page.getByRole("button", { name: "Open inspector" }).click()
   await expect(page.getByRole("heading", { name: "Changes", exact: true }).first()).toBeVisible()
 
   const viewport = page.viewportSize()
@@ -37,12 +45,14 @@ test("mobile layout exposes sidebar as a drawer", async ({ page }, testInfo) => 
   ).toBe(false)
 })
 
-async function openWorkspaceView(page: import("@playwright/test").Page, label: string) {
-  if (await clickFirstVisible(page.getByRole("button", { name: `Open ${label}`, exact: true }))) {
-    return
-  }
-  if (await clickFirstVisible(page.getByRole("button", { name: label, exact: true }))) {
-    return
+async function openWorkspaceView(page: import("@playwright/test").Page, label: string, ...fallbackLabels: string[]) {
+  for (const candidateLabel of [label, ...fallbackLabels]) {
+    if (await clickFirstVisible(page.getByRole("button", { name: `Open ${candidateLabel}`, exact: true }))) {
+      return
+    }
+    if (await clickFirstVisible(page.getByRole("button", { name: candidateLabel, exact: true }))) {
+      return
+    }
   }
   throw new Error(`No visible workspace view button found for ${label}.`)
 }

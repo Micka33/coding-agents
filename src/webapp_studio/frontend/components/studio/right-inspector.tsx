@@ -13,6 +13,7 @@ import {
   PanelRightCloseIcon,
   SquareIcon,
   TerminalIcon,
+  XIcon,
 } from "lucide-react"
 
 import { ActivityPanel } from "@/components/studio/activity-panel"
@@ -37,6 +38,7 @@ export type InspectorView =
   | { kind: "changes"; selectedChangeId?: string }
   | { kind: "terminal"; sessionId?: string }
   | { kind: "generated-ui"; specId?: string }
+export type OpenInspectorView = Exclude<InspectorView, { kind: "empty" }>
 
 type RightInspectorProps = {
   apiClient: StudioApiClient | null
@@ -45,6 +47,7 @@ type RightInspectorProps = {
   generatedUi: GeneratedUiSpec[]
   onClose: () => void
   onViewChange: (view: InspectorView) => void
+  placement: "sheet" | "side"
   session: StudioSession | null
   state: StudioState
   view: InspectorView
@@ -69,17 +72,26 @@ export function RightInspector({
   generatedUi,
   onClose,
   onViewChange,
+  placement,
   session,
   state,
   view,
 }: RightInspectorProps) {
   const option = inspectorOptions.find((item) => item.kind === view.kind)
   const Icon = option?.icon ?? PanelRightCloseIcon
+  const CloseIcon = placement === "sheet" ? XIcon : PanelRightCloseIcon
   const title = option?.label ?? "Inspector"
 
   return (
-    <section className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden border-l bg-background">
+    <section
+      className={`grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-background ${
+        placement === "sheet" ? "border-t" : "border-l"
+      }`}
+    >
       <div className="border-b px-3 py-2">
+        {placement === "sheet" ? (
+          <div aria-hidden className="mx-auto mb-2 h-1 w-10 rounded-full bg-muted-foreground/30" />
+        ) : null}
         <div className="flex min-w-0 items-center gap-2">
           <Icon className="size-4 shrink-0 text-emerald-600" />
           <h2 className="min-w-0 flex-1 truncate text-sm font-medium">{title}</h2>
@@ -87,7 +99,7 @@ export function RightInspector({
             <StatusPill label={`${state.activity.active_agent_ids.length} active`} tone="amber" />
           ) : null}
           <Button aria-label="Close inspector" onClick={onClose} size="icon-sm" variant="ghost">
-            <PanelRightCloseIcon className="size-4" />
+            <CloseIcon className="size-4" />
           </Button>
         </div>
         <div className="mt-2 flex min-w-0 gap-1 overflow-x-auto">

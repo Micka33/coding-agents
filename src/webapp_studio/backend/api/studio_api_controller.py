@@ -19,6 +19,7 @@ from src.webapp_studio.backend.api.studio_file_resource import StudioFileResourc
 from src.webapp_studio.backend.api.studio_api_error import StudioApiError
 from src.webapp_studio.backend.api.studio_state_factory import StudioStateFactory
 from src.webapp_studio.backend.api.studio_terminal_session import StudioTerminalSession
+from src.webapp_studio.backend.api.studio_workspace_file_browser import StudioWorkspaceFileBrowser
 from src.webapp_studio.backend.api.time_utils import utc_now_iso
 from src.webapp_studio.backend.contracts.agent_prompt_inject_request import AgentPromptInjectRequest
 from src.webapp_studio.backend.contracts.append_message_request import AppendMessageRequest
@@ -28,6 +29,7 @@ from src.webapp_studio.backend.contracts.branch_summary import BranchSummary
 from src.webapp_studio.backend.contracts.checkpoint_resume_request import CheckpointResumeRequest
 from src.webapp_studio.backend.contracts.checkpoint_summary import CheckpointSummary
 from src.webapp_studio.backend.contracts.conversation_delivery_dto import ConversationDeliveryDto
+from src.webapp_studio.backend.contracts.conversation_create_request import ConversationCreateRequest
 from src.webapp_studio.backend.contracts.edit_message_request import EditMessageRequest
 from src.webapp_studio.backend.contracts.health_status import HealthStatus
 from src.webapp_studio.backend.contracts.interrupt_request import InterruptRequest
@@ -91,6 +93,24 @@ class StudioApiController:
             private_activity_states=self._private_activity_states(state),
         )
 
+    def teams(self) -> dict[str, Any]:
+        state = self._compat.state()
+        return {
+            "status": "ready",
+            "teams": [
+                {
+                    "team_id": str(state["team_id"]),
+                    "description": None,
+                    "team_file": self._team_file(),
+                    "source": "active",
+                    "conversation_available": True,
+                    "participants": list(state.get("participants", [])),
+                    "participant_aliases": dict(state.get("participant_aliases", {})),
+                }
+            ],
+            "duplicate_ids": [],
+        }
+
     def activity(self, agent_id: str | None = None) -> StudioState:
         query = "" if agent_id is None else urlencode({"agent_id": agent_id})
         return self._studio_state_from_legacy(self._compat.activity(query))
@@ -101,7 +121,13 @@ class StudioApiController:
             if duplicate is not None:
                 return AppendMessageResult(event=duplicate, deliveries=[], failures=[])
 
-        files = self._attachment_factory.refs(request.attachments, author_id=request.author_id)
+        files = [
+            *self._attachment_factory.refs(request.attachments, author_id=request.author_id),
+            *[
+                self._workspace_file_path(path, field="workspace_paths")
+                for path in request.workspace_paths
+            ],
+        ]
         metadata = {"client_message_id": request.client_message_id} if request.client_message_id else None
         try:
             appended = self._conversation.append_human_message(
@@ -128,6 +154,9 @@ class StudioApiController:
             self._publish_delivery_state(delivery)
         self._publish_queue_state(self.state())
         return result
+
+    def create_conversation(self, _request: ConversationCreateRequest) -> dict[str, Any]:
+        raise self._unsupported("conversation_creation", "Conversation creation is not supported by this runtime.")
 
     def edit_message(self, message_id: str, request: EditMessageRequest) -> StudioState:
         edit_message = self._runtime_method("edit_human_message")
@@ -181,7 +210,10 @@ class StudioApiController:
                 "current_conversation_id": current_conversation_id,
                 "conversations": [
                     {
+                        "team_id": team_id,
                         "conversation_id": current_conversation_id,
+                        "title": self._conversation_title(state.get("events", [])),
+                        "preview": self._conversation_title(state.get("events", [])),
                         "event_count": len(state.get("events", [])),
                         "last_seq": max((int(event.get("seq") or 0) for event in state.get("events", [])), default=0),
                         "last_event_at": max((str(event.get("created_at") or "") for event in state.get("events", [])), default=None),
@@ -215,9 +247,23 @@ class StudioApiController:
                 """,
                 (team_id, conversation_id, last_seq),
             ).fetchone()
+            first_human = connection.execute(
+                """
+                select content
+                from team_conversation_events
+                where team_id = ? and conversation_id = ? and author_kind = 'human'
+                order by seq asc
+                limit 1
+                """,
+                (team_id, conversation_id),
+            ).fetchone()
+            title = self._summary_text(str(first_human[0])) if first_human is not None else str(conversation_id)
             conversations.append(
                 {
+                    "team_id": team_id,
                     "conversation_id": str(conversation_id),
+                    "title": title,
+                    "preview": title,
                     "event_count": int(event_count),
                     "last_seq": int(last_seq or 0),
                     "last_event_at": str(last_event_at) if last_event_at is not None else None,
@@ -230,9 +276,11 @@ class StudioApiController:
             "conversations": conversations,
         }
 
-    def switch_conversation(self, conversation_id: str) -> dict[str, Any]:
+    def switch_conversation(self, conversation_id: str, team_id: str | None = None) -> dict[str, Any]:
         if not conversation_id.strip():
             raise StudioApiError(status_code=400, code="invalid_request", message="conversation_id is required", field="conversation_id")
+        if team_id and team_id.casefold() != str(self._compat.state()["team_id"]).casefold():
+            raise StudioApiError(status_code=404, code="not_found", message="team not found", field="team_id")
         switch = getattr(self._conversation, "with_conversation_id", None)
         if not callable(switch):
             raise self._unsupported("conversation_switching", "Conversation switching is not supported by this runtime.")
@@ -275,6 +323,9 @@ class StudioApiController:
                     }
                 )
         return {"files": file_items}
+
+    def workspace_files(self, *, query: str = "", limit: int = 20) -> dict[str, Any]:
+        return StudioWorkspaceFileBrowser(self._resolved_root_dir()).files(query=query, limit=limit)
 
     def changes(self) -> dict[str, Any]:
         root_dir = self._resolved_root_dir()
@@ -1038,6 +1089,9 @@ class StudioApiController:
             return False
         return True
 
+    def _workspace_file_path(self, relative_path: str, *, field: str) -> Path:
+        return StudioWorkspaceFileBrowser(self._resolved_root_dir()).file_path(relative_path, field=field)
+
     def _terminal_session(self, session_id: str) -> StudioTerminalSession:
         session = self._terminal_sessions.get(session_id)
         if session is None:
@@ -1054,6 +1108,21 @@ class StudioApiController:
             if metadata.get("client_message_id") == client_message_id and event.get("author_id") == author_id:
                 return event
         return None
+
+    def _conversation_title(self, events: object) -> str:
+        if isinstance(events, list):
+            for event in events:
+                if isinstance(event, dict) and event.get("author_kind") == "human":
+                    return self._summary_text(str(event.get("content") or ""))
+        return str(self._compat.state()["conversation_id"])
+
+    def _summary_text(self, content: str) -> str:
+        compact = " ".join(content.split())
+        if not compact:
+            return "Untitled conversation"
+        if len(compact) <= 80:
+            return compact
+        return f"{compact[:77]}..."
 
     def _team_file(self) -> str | None:
         team = getattr(self._conversation, "team", None)
