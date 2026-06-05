@@ -612,7 +612,7 @@ describe("chat panel local recovery", () => {
       },
       loaded_at: "2026-06-02T10:17:06Z",
     }
-    const outboxKey = `webapp-studio:v1:${session.checkpointer.storage_id}:${state.team_id}:${state.conversation_id}:outbox`
+    const outboxKey = `webapp-studio:v1:${session.checkpointer.storage_id}:${state.team_id}:${state.conversation_id}:${state.history.current_branch_id}:human:outbox`
     localStorage.clear()
 
     render(
@@ -646,6 +646,87 @@ describe("chat panel local recovery", () => {
         content: "@agent recover me",
         status: "failed",
       })
+    })
+  })
+
+  it("keeps drafts isolated by active branch", async () => {
+    const fixture = loadStudioMock()
+    const state = fixture.state
+    const session = {
+      team_id: state.team_id,
+      conversation_id: state.conversation_id,
+      team_file: "/tmp/team.yaml",
+      launcher_cwd: "/tmp/project",
+      resolved_root_dir: "/tmp/project",
+      checkpointer: {
+        backend: "memory",
+        sqlite_path: null,
+        storage_id: "memory:test-store",
+      },
+      loaded_at: "2026-06-02T10:17:06Z",
+    }
+    const mainDraftKey = `webapp-studio:v1:${session.checkpointer.storage_id}:${state.team_id}:${state.conversation_id}:branch_main:human:draft`
+    const branchDraftKey = `webapp-studio:v1:${session.checkpointer.storage_id}:${state.team_id}:${state.conversation_id}:branch_edit_01:human:draft`
+    const branchState: StudioState = {
+      ...state,
+      history: {
+        ...state.history,
+        current_branch_id: "branch_edit_01",
+        branches: state.history.branches.map((branch) => ({
+          ...branch,
+          current: branch.id === "branch_edit_01",
+        })),
+      },
+    }
+    localStorage.clear()
+    localStorage.setItem(branchDraftKey, "branch draft")
+
+    const { rerender } = render(
+      <TooltipProvider>
+        <ChatPanel
+          busy={false}
+          changes={null}
+          liveApi
+          onEditMessage={() => undefined}
+          onOpenInspector={() => undefined}
+          onSubmitDraft={() => undefined}
+          onSwitchBranch={() => undefined}
+          session={session}
+          state={state}
+          streamStatus="connected"
+        />
+      </TooltipProvider>
+    )
+
+    const textarea = screen.getByLabelText("Message") as HTMLTextAreaElement
+    fireEvent.change(textarea, {
+      target: { value: "main draft" },
+    })
+
+    await waitFor(() => {
+      expect(localStorage.getItem(mainDraftKey)).toBe("main draft")
+    })
+
+    rerender(
+      <TooltipProvider>
+        <ChatPanel
+          busy={false}
+          changes={null}
+          liveApi
+          onEditMessage={() => undefined}
+          onOpenInspector={() => undefined}
+          onSubmitDraft={() => undefined}
+          onSwitchBranch={() => undefined}
+          session={session}
+          state={branchState}
+          streamStatus="connected"
+        />
+      </TooltipProvider>
+    )
+
+    await waitFor(() => {
+      expect(textarea).toHaveValue("branch draft")
+      expect(localStorage.getItem(mainDraftKey)).toBe("main draft")
     })
   })
 })

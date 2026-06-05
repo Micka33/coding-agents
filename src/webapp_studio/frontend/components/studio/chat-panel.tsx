@@ -114,6 +114,7 @@ export function ChatPanel({
   const draftStorageKey = draftKey(session, state)
   const outboxStorageKey = outboxKey(session, state)
   const [draft, setDraft] = useState("")
+  const [loadedDraftKey, setLoadedDraftKey] = useState<string | null>(null)
   const [outbox, setOutbox] = useState<LocalOutboxItem[]>([])
   const [loadedOutboxKey, setLoadedOutboxKey] = useState<string | null>(null)
   const [selectionEnd, setSelectionEnd] = useState(0)
@@ -140,14 +141,15 @@ export function ChatPanel({
   const messageVersions = useMemo(() => messageVersionIndex(state), [state])
 
   useEffect(() => {
-    if (!draftStorageKey) {
-      return
-    }
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- Hydrates a per-thread browser draft after the client storage key is known.
-    setDraft(localStorage.getItem(draftStorageKey) ?? "")
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Hydrates a per-branch browser draft after the client storage key is known.
+    setDraft(draftStorageKey ? localStorage.getItem(draftStorageKey) ?? "" : "")
+    setLoadedDraftKey(draftStorageKey)
   }, [draftStorageKey])
 
   useEffect(() => {
+    if (draftStorageKey !== loadedDraftKey) {
+      return
+    }
     if (!draftStorageKey) {
       return
     }
@@ -156,10 +158,10 @@ export function ChatPanel({
     } else {
       localStorage.removeItem(draftStorageKey)
     }
-  }, [draft, draftStorageKey])
+  }, [draft, draftStorageKey, loadedDraftKey])
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- Hydrates a per-thread browser outbox after the client storage key is known.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Hydrates a per-branch browser outbox after the client storage key is known.
     setOutbox(outboxStorageKey ? readOutbox(outboxStorageKey) : [])
     setLoadedOutboxKey(outboxStorageKey)
   }, [outboxStorageKey])
@@ -1068,7 +1070,7 @@ function draftKey(session: StudioSession | null, state: StudioState) {
   if (!storageId) {
     return null
   }
-  return `webapp-studio:v1:${storageId}:${state.team_id}:${state.conversation_id}:draft`
+  return `webapp-studio:v1:${storageId}:${state.team_id}:${state.conversation_id}:${state.history.current_branch_id}:human:draft`
 }
 
 function outboxKey(session: StudioSession | null, state: StudioState) {
@@ -1076,7 +1078,7 @@ function outboxKey(session: StudioSession | null, state: StudioState) {
   if (!storageId) {
     return null
   }
-  return `webapp-studio:v1:${storageId}:${state.team_id}:${state.conversation_id}:outbox`
+  return `webapp-studio:v1:${storageId}:${state.team_id}:${state.conversation_id}:${state.history.current_branch_id}:human:outbox`
 }
 
 function readOutbox(key: string): LocalOutboxItem[] {
