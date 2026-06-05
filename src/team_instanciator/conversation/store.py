@@ -1326,9 +1326,10 @@ class ConversationStore:
                 for run in self.list_runs(branch_id=None)
                 if run.commit_state == "committed"
             }
+            committed_causal_commit_ids = self._committed_causal_commit_ids(committed_run_ids)
             for branch_thread in self.list_branch_threads(branch_id=None):
                 commit_id = branch_thread.created_by_commit_id
-                if branch_thread.status != "active" or commit_id is None or commit_id in committed_run_ids:
+                if branch_thread.status != "active" or commit_id is None or commit_id in committed_causal_commit_ids:
                     continue
                 self._save_branch_thread(replace(branch_thread, status="orphaned"))
                 orphaned_branch_threads += 1
@@ -1353,6 +1354,22 @@ class ConversationStore:
                 "orphaned_branch_threads": orphaned_branch_threads,
                 "failed_tool_call_edges": failed_tool_call_edges,
             }
+
+    def _committed_causal_commit_ids(self, committed_run_ids: set[str]) -> set[str]:
+        committed_commit_ids = set(committed_run_ids)
+        if self._connection is None or not self._table_exists("tool_call_edges"):
+            return committed_commit_ids
+        rows = self._connection.execute(
+            """
+            select commit_id, run_id
+            from tool_call_edges
+            where status = 'success'
+            """
+        ).fetchall()
+        for commit_id, run_id in rows:
+            if run_id is None or str(run_id) in committed_run_ids:
+                committed_commit_ids.add(str(commit_id))
+        return committed_commit_ids
 
     def create_branch(
         self,

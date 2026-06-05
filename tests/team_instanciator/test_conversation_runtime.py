@@ -321,6 +321,29 @@ class ConversationRuntimeTests(unittest.TestCase):
                 logical_thread_key=delivered_thread_id,
                 physical_thread_id=delivered_thread_id,
             )
+            delivered_child_thread_id = f"{delivered_thread_id}:relation:rel_child:agent:child"
+            store.ensure_branch_thread(
+                branch_id="branch_main",
+                logical_thread_key=delivered_child_thread_id,
+                physical_thread_id=delivered_child_thread_id,
+                created_by_commit_id="commit_edge_delivered",
+            )
+            ToolCallEdgeRecorder(connection).record_started(
+                ToolCallEdge(
+                    id="edge_delivered",
+                    commit_id="commit_edge_delivered",
+                    branch_id="branch_main",
+                    parent_logical_thread_key=delivered_thread_id,
+                    parent_physical_thread_id=delivered_thread_id,
+                    relation_id="rel_child",
+                    target_agent_id="child",
+                    child_logical_thread_key=delivered_child_thread_id,
+                    child_physical_thread_id=delivered_child_thread_id,
+                    run_id="run_delivered",
+                    status="running",
+                )
+            )
+            ToolCallEdgeRecorder(connection).record_finished("edge_delivered", "success")
             connection.execute(
                 """
                 insert into team_conversation_deliveries (
@@ -394,6 +417,9 @@ class ConversationRuntimeTests(unittest.TestCase):
             self.assertEqual(reloaded.ensure_agent_state("delivered", branch_id="branch_main").last_delivered_seq, event.seq)
             self.assertIsNotNone(
                 reloaded.get_branch_thread(branch_id="branch_main", logical_thread_key=delivered_thread_id)
+            )
+            self.assertIsNotNone(
+                reloaded.get_branch_thread(branch_id="branch_main", logical_thread_key=delivered_child_thread_id)
             )
             self.assertEqual(orphan_run.commit_state if orphan_run else None, "orphaned")
             self.assertEqual(orphan_run.stop_kind if orphan_run else None, "incomplete-commit")
