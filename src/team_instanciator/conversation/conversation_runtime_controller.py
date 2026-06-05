@@ -28,6 +28,9 @@ class ConversationRuntimeController:
     def stop_agent(self, agent_id: str) -> None:
         self._team.router.stop(agent_id)
 
+    def inject_agent_prompt(self, agent_id: str, content: str, *, wait: bool = True):
+        return self._team.inject_agent_prompt(agent_id, content, wait=wait)
+
     def edit_human_message(
         self,
         event_id: str,

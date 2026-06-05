@@ -785,6 +785,28 @@ class BackendApiTests(unittest.TestCase):
             self.assertEqual(resumed_unstable["errors"][0]["details"]["capability"], "time_travel")
             self.assertEqual(branched_unstable["errors"][0]["details"]["capability"], "branching")
 
+    def test_agent_prompt_injection_records_control_event_and_public_reply(self) -> None:
+        fake = self._fake_conversation()
+        buffer = StreamBuffer()
+        client = TestClient(create_app(fake, stream_buffer=buffer))
+
+        injected = client.post(
+            "/api/studio/v1/agents/agent/prompt",
+            json={"content": "continue privately", "wait": True},
+        ).json()
+
+        events = injected["data"]["conversation"]["events"]
+        control_events = injected["data"]["conversation"]["control_events"]
+        stream_events = [frame.event for frame in buffer.replay_after(None) or []]
+
+        self.assertEqual(fake.injected_prompts, [("agent", "continue privately", True)])
+        self.assertEqual(events[-1]["author_kind"], "agent")
+        self.assertEqual(events[-1]["content"], "injected reply")
+        self.assertEqual(control_events[0]["kind"], "prompt-injection")
+        self.assertEqual(control_events[0]["content"], "continue privately")
+        self.assertIn("conversation.event.appended", stream_events)
+        self.assertIn("snapshot.replace", stream_events)
+
     def test_message_edit_creates_branch_and_versioned_human_event(self) -> None:
         fake = self._fake_conversation(branching=True)
         buffer = StreamBuffer()
@@ -903,6 +925,7 @@ class BackendApiTests(unittest.TestCase):
             "/api/studio/v1/messages/{message_id}/edit",
             "/api/studio/v1/runtime",
             "/api/studio/v1/agents/{agent_id}/stop",
+            "/api/studio/v1/agents/{agent_id}/prompt",
             "/api/studio/v1/stream",
             "/api/studio/v1/runs",
             "/api/studio/v1/runs/{run_id}/join",
@@ -1631,9 +1654,11 @@ class BackendApiTests(unittest.TestCase):
         thread_frontiers: list[dict[str, object]] | None = None,
     ):
         messages = []
+        injected_prompts = []
         stopped = []
         cancelled = []
         cleared = []
+        control_events: list[dict[str, object]] = []
         runtime_calls = []
         branch_store = ConversationStore(team_id="team", conversation_id="thread") if branching else None
         interrupt_store = ConversationStore(team_id="team", conversation_id="thread") if interrupts else None
@@ -1699,6 +1724,7 @@ class BackendApiTests(unittest.TestCase):
                 "deliveries": list(deliveries or []),
                 "runs": list(runs or []),
                 "thread_frontiers": list(thread_frontiers or []),
+                "control_events": list(control_events),
                 "activities": [],
                 "activity": None,
             }
@@ -1816,6 +1842,61 @@ class BackendApiTests(unittest.TestCase):
         def stop_agent(agent_id):
             stopped.append(agent_id)
 
+        def inject_agent_prompt(agent_id, content, *, wait=False):
+            injected_prompts.append((agent_id, content, wait))
+            branch_id = branch_store.current_branch_id() if branch_store is not None else "branch_main"
+            control_events.append(
+                {
+                    "id": f"ctrl_{len(control_events) + 1:02d}",
+                    "team_id": "team",
+                    "conversation_id": "thread",
+                    "branch_id": branch_id,
+                    "logical_thread_key": f"thread:mention:{agent_id}",
+                    "physical_thread_id": f"thread:branch:{branch_id}:mention:{agent_id}",
+                    "parent_run_id": "run_01",
+                    "kind": "prompt-injection",
+                    "content": content,
+                    "created_at": "2026-06-01T10:00:06Z",
+                }
+            )
+            event = ConversationEvent(
+                id=f"event_injected_{len(replay_events) + 1}",
+                team_id="team",
+                conversation_id="thread",
+                branch_id=branch_id,
+                seq=len(replay_events) + 2,
+                created_at="2026-06-01T10:00:07Z",
+                author_id=agent_id,
+                author_kind="agent",
+                content="injected reply",
+                mentions=(),
+                source_thread_id=f"thread:branch:{branch_id}:mention:{agent_id}",
+                source_message_id="message_injected",
+                metadata={"control_event": "prompt-injection"},
+            )
+            replay_events.append(event)
+            return SimpleNamespace(
+                event=event,
+                deliveries=(
+                    SimpleNamespace(
+                        to_dict=lambda: {
+                            "id": "delivery_injected",
+                            "team_id": "team",
+                            "conversation_id": "thread",
+                            "branch_id": branch_id,
+                            "agent_id": agent_id,
+                            "run_id": "run_injected",
+                            "snapshot_seq": event.seq,
+                            "status": "success",
+                            "created_at": "2026-06-01T10:00:07Z",
+                            "completed_at": "2026-06-01T10:00:08Z",
+                            "error": None,
+                        }
+                    ),
+                ),
+                failures=(),
+            )
+
         def cancel_queued_agent(agent_id, *, branch_id=None):
             cancelled.append((agent_id, branch_id or "branch_main"))
             agent_state["queued"] = False
@@ -1922,6 +2003,7 @@ class BackendApiTests(unittest.TestCase):
             "set_mention_hook_enabled": set_mention_hook_enabled,
             "set_max_cascade_turns": set_max_cascade_turns,
             "stop_agent": stop_agent,
+            "inject_agent_prompt": inject_agent_prompt,
             "cancel_queued_agent": cancel_queued_agent,
             "clear_queue": clear_queue,
         }
@@ -1954,6 +2036,7 @@ class BackendApiTests(unittest.TestCase):
             runtime=SimpleNamespace(**runtime_methods),
         )
         fake.messages = messages
+        fake.injected_prompts = injected_prompts
         fake.stopped = stopped
         fake.cancelled = cancelled
         fake.cleared = cleared

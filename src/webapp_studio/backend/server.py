@@ -16,6 +16,7 @@ from src.team_instanciator.interfaces.cli_support import build_config_variables,
 from src.webapp.api.conversation_protocol import WebConversation
 from src.webapp_studio.backend.api.studio_api_controller import StudioApiController
 from src.webapp_studio.backend.api.studio_api_error import StudioApiError
+from src.webapp_studio.backend.contracts.agent_prompt_inject_request import AgentPromptInjectRequest
 from src.webapp_studio.backend.contracts.append_message_request import AppendMessageRequest
 from src.webapp_studio.backend.contracts.branch_create_request import BranchCreateRequest
 from src.webapp_studio.backend.contracts.checkpoint_resume_request import CheckpointResumeRequest
@@ -143,6 +144,10 @@ def create_app(conversation: WebConversation, *, stream_buffer: StreamBuffer | N
     @app.post("/api/studio/v1/agents/{agent_id}/stop")
     async def stop_agent(agent_id: str) -> JSONResponse:
         return ok(controller.stop_agent(agent_id))
+
+    @app.post("/api/studio/v1/agents/{agent_id}/prompt")
+    async def inject_agent_prompt(agent_id: str, request: AgentPromptInjectRequest) -> JSONResponse:
+        return ok(controller.inject_agent_prompt(agent_id, request))
 
     @app.get("/api/studio/v1/stream")
     async def stream(

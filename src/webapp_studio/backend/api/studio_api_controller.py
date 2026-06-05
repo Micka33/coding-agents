@@ -20,6 +20,7 @@ from src.webapp_studio.backend.api.studio_api_error import StudioApiError
 from src.webapp_studio.backend.api.studio_state_factory import StudioStateFactory
 from src.webapp_studio.backend.api.studio_terminal_session import StudioTerminalSession
 from src.webapp_studio.backend.api.time_utils import utc_now_iso
+from src.webapp_studio.backend.contracts.agent_prompt_inject_request import AgentPromptInjectRequest
 from src.webapp_studio.backend.contracts.append_message_request import AppendMessageRequest
 from src.webapp_studio.backend.contracts.append_message_result import AppendMessageResult
 from src.webapp_studio.backend.contracts.branch_create_request import BranchCreateRequest
@@ -355,6 +356,28 @@ class StudioApiController:
                     }
                 ).model_dump(mode="json"),
             )
+        self._stream_buffer.publish("snapshot.replace", state.model_dump(mode="json"))
+        return state
+
+    def inject_agent_prompt(self, agent_id: str, request: AgentPromptInjectRequest) -> StudioState:
+        if not agent_id:
+            raise StudioApiError(status_code=400, code="invalid_request", message="agent_id is required", field="agent_id")
+        inject_agent_prompt = self._runtime_method("inject_agent_prompt")
+        if inject_agent_prompt is None:
+            raise self._unsupported("time_travel", f"Prompt injection is not supported for agent: {agent_id}")
+        try:
+            injected = inject_agent_prompt(agent_id, request.content, wait=request.wait)
+        except ValueError as error:
+            raise StudioApiError(
+                status_code=400,
+                code="invalid_request",
+                message=str(error),
+                field="content",
+            ) from error
+        state = self.state()
+        self._stream_buffer.publish("conversation.event.appended", injected.event.to_dict())
+        for delivery in injected.deliveries + injected.failures:
+            self._publish_delivery_state(ConversationDeliveryDto.model_validate(delivery.to_dict()))
         self._stream_buffer.publish("snapshot.replace", state.model_dump(mode="json"))
         return state
 

@@ -16,12 +16,14 @@ from src.type_defs import JsonObject, is_json_value
 from src.team_loader.models.team_definition import TeamDefinition
 from src.team_instanciator.factories.checkpoint_metadata_factory import CheckpointMetadataFactory
 from src.team_instanciator.runtime.checkpointer_handle import CheckpointerHandle
+from src.team_instanciator.runtime.runnable_config_metadata_injector import RunnableConfigMetadataInjector
 from src.team_instanciator.runtime.thread_id_factory import ThreadIdFactory
 
 from .conversation_append_result import ConversationAppendResult
 from .conversation_checkpoint_resume_result import ConversationCheckpointResumeResult
 from .conversation_event import ConversationEvent
 from .conversation_file_ref import ConversationFileRef
+from .dispatch_context import DispatchContext
 from .payloads import ConversationStateDict, MessageSummaryDict
 from .conversation_runtime_controller import ConversationRuntimeController
 from .mention_parser import MentionParser
@@ -55,6 +57,7 @@ class MentionAwareTeam:
         self.conversation_id = conversation_id
         self.thread_id_factory = thread_id_factory
         self.checkpoint_metadata_factory = checkpoint_metadata_factory
+        self._metadata_injector = RunnableConfigMetadataInjector()
         self.store = ConversationStore(
             team_id=team.id,
             conversation_id=conversation_id,
@@ -214,6 +217,147 @@ class MentionAwareTeam:
     def wait_for_idle(self) -> None:
         self.router.wait_for_idle()
 
+    def inject_agent_prompt(
+        self,
+        agent_id: str,
+        content: str,
+        *,
+        wait: bool = True,
+    ) -> ConversationAppendResult:
+        if not content.strip():
+            raise ValueError("content is required for prompt injection.")
+        branch_id = self.store.current_branch_id()
+        proposed_thread_id = self.thread_id_factory.mention(
+            self.thread_id_factory.branch(self.conversation_id, branch_id),
+            agent_id,
+        )
+        logical_thread_key = self.thread_id_factory.logical_thread_key(proposed_thread_id)
+        source_frontier = self._latest_usable_thread_frontier(
+            branch_id=branch_id,
+            logical_thread_key=logical_thread_key,
+        )
+        if source_frontier is None or source_frontier.checkpoint_id is None:
+            raise ValueError("prompt injection requires a usable checkpoint for this agent thread.")
+        graph = self.registry.graph(agent_id)
+        update_state = getattr(graph, "update_state", None)
+        if not callable(update_state):
+            raise ValueError("prompt injection requires graph.update_state support.")
+
+        config = update_state(
+            {
+                "configurable": {
+                    "thread_id": source_frontier.physical_thread_id,
+                    "checkpoint_ns": "",
+                    "checkpoint_id": source_frontier.checkpoint_id,
+                }
+            },
+            {
+                "messages": [
+                    HumanMessage(
+                        name="human",
+                        content=content,
+                        response_metadata={
+                            "branch_id": branch_id,
+                            "control_event": "prompt-injection",
+                        },
+                    )
+                ]
+            },
+        )
+        control_event = self.store.create_control_event(
+            branch_id=branch_id,
+            logical_thread_key=logical_thread_key,
+            physical_thread_id=source_frontier.physical_thread_id,
+            parent_run_id=self._latest_run_id_for_thread(branch_id, logical_thread_key),
+            kind="prompt-injection",
+            content=content,
+        )
+        snapshot_seq = self._latest_snapshot_seq(branch_id)
+        run_id = f"run_{uuid.uuid4().hex}"
+        self.store.mark_run_started(
+            agent_id,
+            run_id=run_id,
+            snapshot_seq=snapshot_seq,
+            branch_id=branch_id,
+            logical_thread_key=logical_thread_key,
+            physical_thread_id=source_frontier.physical_thread_id,
+        )
+
+        try:
+            result = graph.invoke(
+                None,
+                config=self._metadata_injector.inject(
+                    config,
+                    {
+                        **self.checkpoint_metadata_factory.mention(self.team, self.team.agents[agent_id]),
+                        "branch_id": branch_id,
+                        "logical_thread_key": logical_thread_key,
+                        "physical_thread_id": source_frontier.physical_thread_id,
+                        "run_id": run_id,
+                        "control_event_id": control_event.id,
+                        "source_checkpoint_id": source_frontier.checkpoint_id,
+                    },
+                ),
+            )
+        except Exception as exc:
+            self.store.complete_run(
+                agent_id,
+                run_id=run_id,
+                snapshot_seq=snapshot_seq,
+                delivered=False,
+                identity_inserted=False,
+                token_estimate=0,
+                branch_id=branch_id,
+            )
+            self.store.record_delivery(
+                agent_id=agent_id,
+                run_id=run_id,
+                snapshot_seq=snapshot_seq,
+                status="failed",
+                error=str(exc),
+                branch_id=branch_id,
+            )
+            raise
+
+        self.store.complete_run(
+            agent_id,
+            run_id=run_id,
+            snapshot_seq=snapshot_seq,
+            delivered=True,
+            identity_inserted=False,
+            token_estimate=0,
+            branch_id=branch_id,
+        )
+        reply = PublicReplyExtractor().extract(result)
+        if reply is None:
+            self.store.record_delivery(
+                agent_id=agent_id,
+                run_id=run_id,
+                snapshot_seq=snapshot_seq,
+                status="empty",
+                error="Injected prompt returned no final textual AI reply.",
+                branch_id=branch_id,
+            )
+            raise ValueError("Injected prompt returned no final textual AI reply.")
+        delivery = self.store.record_delivery(
+            agent_id=agent_id,
+            run_id=run_id,
+            snapshot_seq=snapshot_seq,
+            status="success",
+            branch_id=branch_id,
+        )
+        event = self.router.append_public_reply(
+            agent_id,
+            reply.content,
+            source_thread_id=source_frontier.physical_thread_id,
+            source_message_id=reply.source_message_id,
+            run_id=run_id,
+            branch_id=branch_id,
+            context=DispatchContext(),
+        )
+        self.router.dispatch(wait=wait)
+        return ConversationAppendResult(event=event, deliveries=(delivery,))
+
     def resume_checkpoint(
         self,
         *,
@@ -293,6 +437,28 @@ class MentionAwareTeam:
             },
         )
         return ConversationCheckpointResumeResult(branch=branch, event=event, mode=mode)
+
+    def _latest_usable_thread_frontier(self, *, branch_id: str, logical_thread_key: str):
+        candidates = [
+            frontier
+            for frontier in self.store.list_thread_frontiers(branch_id=branch_id)
+            if frontier.logical_thread_key == logical_thread_key
+            and frontier.usable_for_continue
+            and frontier.checkpoint_id is not None
+        ]
+        return candidates[-1] if candidates else None
+
+    def _latest_run_id_for_thread(self, branch_id: str, logical_thread_key: str) -> str | None:
+        candidates = [
+            run
+            for run in self.store.list_runs(branch_id=branch_id)
+            if run.logical_thread_key == logical_thread_key and run.commit_state == "committed"
+        ]
+        return candidates[-1].id if candidates else None
+
+    def _latest_snapshot_seq(self, branch_id: str) -> int:
+        events = self.store.list_events(branch_id=branch_id)
+        return max((event.seq for event in events), default=0)
 
     def state(self) -> ConversationStateDict:
         events = [event.to_dict() for event in self.store.list_events()]

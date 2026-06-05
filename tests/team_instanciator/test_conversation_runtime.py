@@ -703,6 +703,71 @@ class ConversationRuntimeTests(unittest.TestCase):
         )
         self.assertEqual(regenerated.branch.label, "Checkpoint regenerate")
 
+    def test_prompt_injection_after_stop_uses_usable_checkpoint_and_control_event(self) -> None:
+        connection = sqlite3.connect(":memory:", check_same_thread=False)
+        self._create_checkpoint_tables(connection)
+        runtime_holder = {}
+
+        def write_checkpoint(graph: FakeGraph, _input: Any, config: Any) -> None:
+            thread_id = config["configurable"]["thread_id"]
+            next_index = connection.execute("select count(*) from checkpoints").fetchone()[0] + 1
+            checkpoint_id = f"checkpoint-{next_index}"
+            parent_checkpoint_id = connection.execute(
+                """
+                select checkpoint_id
+                from checkpoints
+                where thread_id = ? and checkpoint_ns = ''
+                order by checkpoint_id desc
+                limit 1
+                """,
+                (thread_id,),
+            ).fetchone()
+            self._insert_checkpoint(
+                connection,
+                thread_id=thread_id,
+                checkpoint_id=checkpoint_id,
+                parent_checkpoint_id=parent_checkpoint_id[0] if parent_checkpoint_id is not None else None,
+            )
+            connection.commit()
+            if len(graph.calls) == 1:
+                runtime_holder["runtime"].runtime.stop_agent("agent-b")
+
+        graph = FakeGraph("continued", callback=write_checkpoint)
+        runtime = self._conversation_runtime({"agent-b": graph}, connection=connection)
+        runtime_holder["runtime"] = runtime
+
+        stopped = runtime.append_human_message("@agent-b pause", author_id="mickael")
+        injected = runtime.runtime.inject_agent_prompt("agent-b", "please continue")
+
+        control_event = runtime.store.list_control_events(branch_id="branch_main")[0]
+        deliveries = runtime.store.list_deliveries(branch_id="branch_main")
+        checkpoints = connection.execute(
+            """
+            select checkpoint_id, parent_checkpoint_id
+            from checkpoints
+            where thread_id = 'thread:branch:branch_main:mention:agent-b'
+            order by checkpoint_id asc
+            """
+        ).fetchall()
+
+        self.assertEqual(stopped.deliveries[0].status, "stopped")
+        self.assertEqual(graph.updates[0][0]["configurable"]["checkpoint_id"], "checkpoint-1")
+        self.assertEqual(graph.updates[0][1]["messages"][0].content, "please continue")
+        self.assertEqual(graph.calls[1][0], None)
+        self.assertEqual(graph.calls[1][1]["metadata"]["control_event_id"], control_event.id)
+        self.assertEqual(control_event.kind, "prompt-injection")
+        self.assertEqual(control_event.content, "please continue")
+        self.assertEqual(control_event.branch_id, "branch_main")
+        self.assertEqual(injected.event.content, "continued")
+        self.assertEqual([delivery.status for delivery in deliveries], ["stopped", "success"])
+        self.assertEqual(checkpoints, [("checkpoint-1", None), ("checkpoint-2", "checkpoint-1")])
+
+    def test_prompt_injection_requires_usable_continue_frontier(self) -> None:
+        runtime = self._conversation_runtime({"agent-b": FakeGraph("continued")})
+
+        with self.assertRaisesRegex(ValueError, "usable checkpoint"):
+            runtime.runtime.inject_agent_prompt("agent-b", "please continue")
+
     def test_store_private_helpers_are_noops_without_sqlite_connection(self) -> None:
         store = ConversationStore(team_id="team", conversation_id="thread")
         file_ref = ConversationFileRef(id="file-1", filename="notes.txt", uri="conversation://files/file-1")

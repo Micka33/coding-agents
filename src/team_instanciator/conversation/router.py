@@ -98,6 +98,27 @@ class MentionRouter:
             except Exception:
                 pass
 
+    def append_public_reply(
+        self,
+        agent_id: str,
+        content: str,
+        *,
+        source_thread_id: str,
+        source_message_id: str | None,
+        run_id: str | None = None,
+        branch_id: str,
+        context: DispatchContext,
+    ) -> ConversationEvent:
+        return self._append_public_reply(
+            agent_id,
+            content,
+            source_thread_id=source_thread_id,
+            source_message_id=source_message_id,
+            run_id=run_id,
+            branch_id=branch_id,
+            context=context,
+        )
+
     def wait_for_idle(self) -> None:
         thread = self._background_thread
         if thread is not None and thread.is_alive():
@@ -267,7 +288,7 @@ class MentionRouter:
         run_id: str | None = None,
         branch_id: str,
         context: DispatchContext,
-    ) -> None:
+    ) -> ConversationEvent:
         mentions = self._parser.parse(content, author_id=agent_id)
         event = self._store.append_event(
             author_id=agent_id,
@@ -299,7 +320,7 @@ class MentionRouter:
             run_id=run_id,
         )
         if not mentions or not self._store.get_runtime_state().mention_hook_enabled:
-            return
+            return event
 
         max_cascade_turns = self._store.get_runtime_state().max_cascade_turns
         if max_cascade_turns is not None and context.cascade_turns >= max_cascade_turns:
@@ -310,10 +331,11 @@ class MentionRouter:
                 error=f"max_cascade_turns={max_cascade_turns} reached.",
                 branch_id=branch_id,
             )
-            return
+            return event
 
         context.cascade_turns += 1
         self.enqueue_targets(event, mentions)
+        return event
 
     def _record_tool_call_frontiers(
         self,
