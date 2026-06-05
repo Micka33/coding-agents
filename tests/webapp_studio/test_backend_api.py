@@ -102,7 +102,7 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(health["capabilities"]["time_travel"], "degraded")
         self.assertEqual(health["capabilities"]["generated_ui"], "degraded")
         self.assertEqual(state["data"]["history"]["branches"][0]["id"], "branch_main")
-        self.assertEqual(activity["data"]["activity"]["private_threads"][0]["thread_id"], "thread:mention:agent")
+        self.assertEqual(activity["data"]["activity"]["private_threads"][0]["thread_id"], "thread:branch:branch_main:mention:agent")
         self.assertEqual(message["data"]["event"]["content"], "@agent hello")
         self.assertFalse(runtime["data"]["runtime"]["mention_hook_enabled"])
         self.assertEqual(stopped["data"]["team_id"], "team")
@@ -155,7 +155,7 @@ class BackendApiTests(unittest.TestCase):
 
         self.assertEqual(
             [thread["thread_id"] for thread in state["data"]["activity"]["private_threads"]],
-            ["thread:mention:agent-a", "thread:mention:agent-b"],
+            ["thread:branch:branch_main:mention:agent-a", "thread:branch:branch_main:mention:agent-b"],
         )
         self.assertEqual(
             [thread["messages"][0]["name"] for thread in state["data"]["activity"]["private_threads"]],
@@ -163,11 +163,11 @@ class BackendApiTests(unittest.TestCase):
         )
         self.assertEqual(
             [thread["thread_id"] for thread in activity["data"]["activity"]["private_threads"]],
-            ["thread:mention:agent-a"],
+            ["thread:branch:branch_main:mention:agent-a"],
         )
         self.assertEqual(
             encoded_activity["data"]["activity"]["private_threads"][0]["thread_id"],
-            "thread:mention:agent a",
+            "thread:branch:branch_main:mention:agent a",
         )
 
     def test_queue_controls_cancel_and_clear_pending_entries(self) -> None:
@@ -455,7 +455,7 @@ class BackendApiTests(unittest.TestCase):
                 values (?, '', 'checkpoint_01', null, ?, ?, ?)
                 """,
                 (
-                    "thread:mention:agent",
+                    "thread:branch:branch_main:mention:agent",
                     checkpoint_type,
                     checkpoint_blob,
                     json.dumps({"step": 1, "target_agent_id": "agent"}).encode("utf-8"),
@@ -466,14 +466,14 @@ class BackendApiTests(unittest.TestCase):
                 insert into checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, type, checkpoint, metadata)
                 values (?, '', 'checkpoint_02', 'checkpoint_01', null, null, null)
                 """,
-                ("thread:mention:agent",),
+                ("thread:branch:branch_main:mention:agent",),
             )
             connection.execute(
                 """
                 insert into writes (thread_id, checkpoint_ns, checkpoint_id, task_id, idx, channel, type, value)
                 values (?, '', 'checkpoint_02', 'task', 0, 'messages', ?, ?)
                 """,
-                ("thread:mention:agent", write_type, write_blob),
+                ("thread:branch:branch_main:mention:agent", write_type, write_blob),
             )
             relation_thread_id = "thread:branch:branch_main:mention:agent:relation:rel_worker:agent:worker"
             other_branch_thread_id = "thread:branch:branch_other:mention:agent:relation:rel_worker:agent:worker"
@@ -490,6 +490,13 @@ class BackendApiTests(unittest.TestCase):
                 values (?, '', 'checkpoint_04', null, null, null, null)
                 """,
                 (other_branch_thread_id,),
+            )
+            connection.execute(
+                """
+                insert into checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, type, checkpoint, metadata)
+                values (?, '', 'checkpoint_legacy_global', null, null, null, null)
+                """,
+                ("thread:mention:agent",),
             )
             connection.commit()
             fake = self._fake_conversation(connection=connection)
@@ -532,6 +539,7 @@ class BackendApiTests(unittest.TestCase):
             self.assertEqual(branches["data"][0]["head_checkpoint_id"], "checkpoint_02")
             self.assertEqual(empty_participant_history, [])
             self.assertEqual([checkpoint.id for checkpoint in relation_history], ["checkpoint_01", "checkpoint_02", "checkpoint_03"])
+            self.assertNotIn("checkpoint_legacy_global", [checkpoint["id"] for checkpoint in checkpoints["data"]])
             self.assertEqual(relation_history[2].thread_id, relation_thread_id)
             self.assertEqual(relation_history[2].summary["agent_id"], "worker")
 
@@ -563,7 +571,7 @@ class BackendApiTests(unittest.TestCase):
             connection.execute(
                 """
                 insert into checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, type, checkpoint, metadata)
-                values ('thread:mention:agent', '', 'checkpoint_01', null, ?, ?, null)
+                values ('thread:branch:branch_main:mention:agent', '', 'checkpoint_01', null, ?, ?, null)
                 """,
                 (checkpoint_type, checkpoint_blob),
             )
@@ -586,10 +594,10 @@ class BackendApiTests(unittest.TestCase):
                 "/api/studio/v1/branches",
                 json={"label": "Missing", "checkpoint_id": "missing"},
             ).json()
+            checkpoints = client.get("/api/studio/v1/checkpoints").json()
             missing_branch = client.post("/api/studio/v1/branches/branch_missing/switch").json()
             switched = client.post(f"/api/studio/v1/branches/{created['data']['id']}/switch").json()
             state = client.get("/api/studio/v1/state").json()
-            checkpoints = client.get("/api/studio/v1/checkpoints").json()
 
             self.assertEqual(created["capabilities"]["branching"], "available")
             self.assertEqual(created["capabilities"]["time_travel"], "available")
@@ -608,6 +616,7 @@ class BackendApiTests(unittest.TestCase):
             self.assertTrue([item for item in switched["data"] if item["id"] == created["data"]["id"]][0]["current"])
             self.assertIn("branch.updated", [frame.event for frame in buffer.replay_after(None) or []])
 
+            client.post("/api/studio/v1/branches/branch_main/switch")
             resumed = client.post("/api/studio/v1/checkpoints/checkpoint_01/resume", json={"mode": "resume"}).json()
             branch_events = [
                 event
@@ -618,10 +627,12 @@ class BackendApiTests(unittest.TestCase):
             self.assertEqual(resumed["data"]["history"]["current_branch_id"], branch_events[0]["metadata"]["branch_id"])
             self.assertEqual(branch_events[0]["content"], "checkpoint replay")
 
+            client.post("/api/studio/v1/branches/branch_main/switch")
             edited = client.post(
                 "/api/studio/v1/checkpoints/checkpoint_01/resume",
                 json={"mode": "edit", "edited_content": "edited checkpoint reply"},
             ).json()
+            client.post("/api/studio/v1/branches/branch_main/switch")
             regenerated = client.post(
                 "/api/studio/v1/checkpoints/checkpoint_01/resume",
                 json={"mode": "regenerate"},
@@ -655,7 +666,7 @@ class BackendApiTests(unittest.TestCase):
             unmatched_connection.execute(
                 """
                 insert into checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, type, checkpoint, metadata)
-                values ('thread:mention:agent', '', 'checkpoint_01', null, null, null, null)
+                values ('thread:branch:branch_main:mention:agent', '', 'checkpoint_01', null, null, null, null)
                 """
             )
             unmatched_connection.commit()
@@ -673,13 +684,13 @@ class BackendApiTests(unittest.TestCase):
             connection.execute(
                 """
                 insert into checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, type, checkpoint, metadata)
-                values ('thread:mention:agent', '', 'checkpoint_01', null, null, null, null)
+                values ('thread:branch:branch_main:mention:agent', '', 'checkpoint_01', null, null, null, null)
                 """
             )
             connection.execute(
                 """
                 insert into checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, type, checkpoint, metadata)
-                values ('thread:mention:agent', '', 'checkpoint_02', 'checkpoint_01', null, null, null)
+                values ('thread:branch:branch_main:mention:agent', '', 'checkpoint_02', 'checkpoint_01', null, null, null)
                 """
             )
             connection.commit()
@@ -691,7 +702,7 @@ class BackendApiTests(unittest.TestCase):
                     "branch_id": "branch_main",
                     "agent_id": "agent",
                     "logical_thread_key": "mention:agent",
-                    "physical_thread_id": "thread:mention:agent",
+                    "physical_thread_id": "thread:branch:branch_main:mention:agent",
                     "status": "success",
                     "stop_kind": None,
                     "snapshot_seq": 1,
@@ -711,7 +722,7 @@ class BackendApiTests(unittest.TestCase):
                     "branch_id": "branch_main",
                     "agent_id": "agent",
                     "logical_thread_key": "mention:agent",
-                    "physical_thread_id": "thread:mention:agent",
+                    "physical_thread_id": "thread:branch:branch_main:mention:agent",
                     "status": "stopped",
                     "stop_kind": "user",
                     "snapshot_seq": 2,
@@ -734,7 +745,7 @@ class BackendApiTests(unittest.TestCase):
                     "event_id": "event_01",
                     "event_boundary": "after",
                     "logical_thread_key": "mention:agent",
-                    "physical_thread_id": "thread:mention:agent",
+                    "physical_thread_id": "thread:branch:branch_main:mention:agent",
                     "checkpoint_id": "checkpoint_01",
                     "parent_logical_thread_key": None,
                     "usable_for_fork": True,
@@ -749,7 +760,7 @@ class BackendApiTests(unittest.TestCase):
                     "event_id": "event_01",
                     "event_boundary": "after",
                     "logical_thread_key": "mention:agent",
-                    "physical_thread_id": "thread:mention:agent",
+                    "physical_thread_id": "thread:branch:branch_main:mention:agent",
                     "checkpoint_id": "checkpoint_02",
                     "parent_logical_thread_key": None,
                     "usable_for_fork": False,
@@ -907,7 +918,7 @@ class BackendApiTests(unittest.TestCase):
         stopped = client.post("/api/stop", json={"agent_id": "agent"}).json()
 
         self.assertEqual(state["team_id"], "team")
-        self.assertEqual(activity["private_thread_id"], "thread:mention:agent")
+        self.assertEqual(activity["private_thread_id"], "thread:branch:branch_main:mention:agent")
         self.assertNotIn("schema_version", message)
         self.assertEqual(message["event"]["content"], "@agent legacy")
         self.assertEqual(runtime["runtime"]["max_cascade_turns"], None)
@@ -1092,7 +1103,7 @@ class BackendApiTests(unittest.TestCase):
             changed_snapshot["activity"]["private_threads"] = [
                 {
                     "agent_id": "agent",
-                    "thread_id": "thread:mention:agent",
+                    "thread_id": "thread:branch:branch_main:mention:agent",
                     "messages": [{"type": "ai", "name": "agent", "content": "working", "tool_calls": []}],
                 }
             ]
@@ -1186,7 +1197,7 @@ class BackendApiTests(unittest.TestCase):
                         "content": "changed",
                         "mentions": [],
                         "attachments": [],
-                        "source_thread_id": "thread:mention:agent",
+                        "source_thread_id": "thread:branch:branch_main:mention:agent",
                         "source_message_id": "message_01",
                         "metadata": {},
                     }
@@ -1229,14 +1240,14 @@ class BackendApiTests(unittest.TestCase):
         changed_snapshot["activity"]["private_threads"] = [
             {
                 "agent_id": "agent",
-                "thread_id": "thread:mention:agent",
+                "thread_id": "thread:branch:branch_main:mention:agent",
                 "messages": [{"type": "ai", "name": "agent", "content": "working", "tool_calls": []}],
             }
         ]
         changed_snapshot["history"]["checkpoints"] = [
             {
                 "id": "checkpoint_new",
-                "thread_id": "thread:mention:agent",
+                "thread_id": "thread:branch:branch_main:mention:agent",
                 "checkpoint_ns": "",
                 "parent_checkpoint_id": None,
                 "seq": 1,
@@ -1302,7 +1313,7 @@ class BackendApiTests(unittest.TestCase):
         self.assertIn("event: studio.hello", frames[0])
         self.assertIn("event: snapshot.replace", frames[1])
         self.assertIn("event: activity.private_message.appended", frames[2])
-        self.assertIn("thread:mention:agent", frames[2])
+        self.assertIn("thread:branch:branch_main:mention:agent", frames[2])
         self.assertIn("event: checkpoint.observed", frames[3])
         self.assertIn("checkpoint_new", frames[3])
         self.assertIn("event: generated_ui.validated", frames[4])
@@ -1731,7 +1742,8 @@ class BackendApiTests(unittest.TestCase):
 
         def activity(agent_id=None):
             snapshot = state()
-            snapshot["private_thread_id"] = f"thread:mention:{agent_id}"
+            branch_id = branch_store.current_branch_id() if branch_store is not None else "branch_main"
+            snapshot["private_thread_id"] = f"thread:branch:{branch_id}:mention:{agent_id}"
             snapshot["private_messages"] = [{"type": "ai", "name": agent_id, "content": "working", "tool_calls": []}]
             return snapshot
 

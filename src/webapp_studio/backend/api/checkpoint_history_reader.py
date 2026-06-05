@@ -46,12 +46,7 @@ class CheckpointHistoryReader:
     def _thread_ids(self, state: ConversationStateDict, *, conversation_id: str, branch_id: str) -> list[str]:
         thread_ids: list[str] = []
         for participant in state.get("participants", []):
-            thread_ids.extend(
-                (
-                    f"{conversation_id}:branch:{branch_id}:mention:{participant}",
-                    f"{conversation_id}:mention:{participant}",
-                )
-            )
+            thread_ids.append(f"{conversation_id}:branch:{branch_id}:mention:{participant}")
         for branch_thread in state.get("branch_threads", []):
             if not isinstance(branch_thread, dict):
                 continue
