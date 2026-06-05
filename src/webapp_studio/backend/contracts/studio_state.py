@@ -11,6 +11,7 @@ from src.webapp_studio.backend.contracts.interrupt_request import InterruptReque
 from src.webapp_studio.backend.contracts.queue_item import QueueItem
 from src.webapp_studio.backend.contracts.run_summary import RunSummary
 from src.webapp_studio.backend.contracts.runtime_settings import RuntimeSettings
+from src.webapp_studio.backend.contracts.studio_branch_ui_state_dto import StudioBranchUiStateDto
 
 
 class StudioState(ContractModel):
@@ -25,4 +26,5 @@ class StudioState(ContractModel):
     queue: list[QueueItem] = Field(default_factory=list)
     interrupts: list[InterruptRequest] = Field(default_factory=list)
     history: HistorySnapshot
+    ui_state: StudioBranchUiStateDto
     generated_ui: list[GeneratedUiSpec] = Field(default_factory=list)

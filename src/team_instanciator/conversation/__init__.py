@@ -15,6 +15,7 @@ from .mention_parser import MentionParser
 from .public_reply import PublicReply
 from .reply_extractor import PublicReplyExtractor
 from .router import MentionRouter
+from .studio_branch_ui_state import StudioBranchUiState
 from .store import ConversationStore
 from .sync_builder import AgentSyncBuilder
 from .team import MentionAwareTeam
@@ -40,4 +41,5 @@ __all__ = [
     "MentionRouter",
     "PublicReply",
     "PublicReplyExtractor",
+    "StudioBranchUiState",
 ]

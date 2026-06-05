@@ -454,6 +454,18 @@ const studioState: StudioState = {
       },
     ],
   },
+  ui_state: {
+    team_id: "software",
+    conversation_id: "thread_temp_agent_history",
+    branch_id: "branch_main",
+    participant_id: "human",
+    draft_content: "",
+    outbox_state: [],
+    editing_event_id: null,
+    selected_agent_id: null,
+    scroll_anchor_event_id: null,
+    updated_at: "2026-06-03T09:14:11Z",
+  },
   generated_ui: [],
 }
 

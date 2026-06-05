@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from src.type_defs import JsonMapping
+from src.type_defs import JsonMapping, JsonValue
 
 from .conversation_branch import ConversationBranch
 from .conversation_checkpoint_resume_result import ConversationCheckpointResumeResult
@@ -86,6 +86,33 @@ class ConversationRuntimeController:
 
     def switch_branch(self, branch_id: str) -> ConversationBranch | None:
         return self._team.store.switch_branch(branch_id)
+
+    def get_studio_branch_ui_state(self, *, participant_id: str = "human", branch_id: str | None = None):
+        return self._team.store.get_studio_branch_ui_state(
+            participant_id=participant_id,
+            branch_id=branch_id,
+        ).to_dict()
+
+    def save_studio_branch_ui_state(
+        self,
+        *,
+        participant_id: str = "human",
+        branch_id: str | None = None,
+        draft_content: str = "",
+        outbox_state: JsonValue | None = None,
+        editing_event_id: str | None = None,
+        selected_agent_id: str | None = None,
+        scroll_anchor_event_id: str | None = None,
+    ):
+        return self._team.store.save_studio_branch_ui_state(
+            participant_id=participant_id,
+            branch_id=branch_id,
+            draft_content=draft_content,
+            outbox_state=outbox_state,
+            editing_event_id=editing_event_id,
+            selected_agent_id=selected_agent_id,
+            scroll_anchor_event_id=scroll_anchor_event_id,
+        ).to_dict()
 
     def create_interrupt(
         self,

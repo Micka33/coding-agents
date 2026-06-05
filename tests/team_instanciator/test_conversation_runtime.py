@@ -557,6 +557,38 @@ class ConversationRuntimeTests(unittest.TestCase):
         self.assertEqual(store.current_branch_id(), "branch_main")
         self.assertFalse(store.list_branches()[0].current)
 
+    def test_store_persists_studio_branch_ui_state_per_branch(self) -> None:
+        connection = sqlite3.connect(":memory:")
+        store = ConversationStore(team_id="team", conversation_id="thread", connection=connection)
+        branch = store.create_branch(label="Edit", parent_branch_id="branch_main")
+
+        main_state = store.save_studio_branch_ui_state(
+            branch_id="branch_main",
+            participant_id="human",
+            draft_content="main draft",
+            outbox_state=[{"clientMessageId": "main"}],
+            editing_event_id="event_01",
+        )
+        branch_state = store.save_studio_branch_ui_state(
+            branch_id=branch.id,
+            participant_id="human",
+            draft_content="branch draft",
+            outbox_state=[],
+            selected_agent_id="agent",
+        )
+        reloaded = ConversationStore(team_id="team", conversation_id="thread", connection=connection)
+
+        self.assertEqual(main_state.branch_id, "branch_main")
+        self.assertEqual(branch_state.branch_id, branch.id)
+        self.assertEqual(reloaded.get_studio_branch_ui_state(branch_id="branch_main").draft_content, "main draft")
+        self.assertEqual(reloaded.get_studio_branch_ui_state(branch_id="branch_main").editing_event_id, "event_01")
+        self.assertEqual(reloaded.get_studio_branch_ui_state(branch_id=branch.id).draft_content, "branch draft")
+        self.assertEqual(reloaded.get_studio_branch_ui_state(branch_id=branch.id).selected_agent_id, "agent")
+        with self.assertRaisesRegex(ValueError, "participant_id"):
+            store.save_studio_branch_ui_state(participant_id=" ")
+        with self.assertRaisesRegex(ValueError, "outbox_state"):
+            store.save_studio_branch_ui_state(outbox_state=[object()])  # type: ignore[list-item]
+
     def test_store_tracks_in_memory_interrupts_and_validation_edges(self) -> None:
         store = ConversationStore(team_id="team", conversation_id="thread")
 

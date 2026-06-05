@@ -8,7 +8,7 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from typing import cast
 
-from src.type_defs import JsonMapping, is_json_object
+from src.type_defs import JsonMapping, JsonValue, is_json_object, is_json_value
 from src.team_instanciator.runtime.tool_call_edge import ToolCallEdge, ToolCallEdgeStatus
 from src.team_instanciator.runtime.thread_forker import ThreadForker
 
@@ -33,6 +33,7 @@ from .conversation_run import (
 )
 from .conversation_runtime_state import ConversationRuntimeState
 from .external_side_effect import ExternalSideEffect
+from .studio_branch_ui_state import StudioBranchUiState
 from .thread_frontier import ThreadFrontier, ThreadFrontierBoundary
 
 
@@ -94,6 +95,7 @@ class ConversationStore:
         self._thread_frontiers: list[ThreadFrontier] = []
         self._control_events: list[ConversationControlEvent] = []
         self._external_side_effects: list[ExternalSideEffect] = []
+        self._studio_branch_ui_states: dict[tuple[str, str], StudioBranchUiState] = {}
         self._runs: dict[str, ConversationRun] = {}
         self._interrupts: dict[str, ConversationInterrupt] = {}
         self._current_branch_id = "branch_main"
@@ -1223,6 +1225,111 @@ class ConversationStore:
             ).fetchall()
             return [self._external_side_effect_from_row(row) for row in rows]
 
+    def get_studio_branch_ui_state(
+        self,
+        *,
+        participant_id: str = "human",
+        branch_id: str | None = None,
+    ) -> StudioBranchUiState:
+        participant = self._non_empty_participant_id(participant_id)
+        resolved_branch_id = self._resolved_branch_id(branch_id)
+        with self._lock:
+            if self._connection is None:
+                state = self._studio_branch_ui_states.get((resolved_branch_id, participant))
+                return replace(state) if state is not None else self._default_studio_branch_ui_state(resolved_branch_id, participant)
+            row = self._connection.execute(
+                """
+                select
+                    branch_id,
+                    participant_id,
+                    draft_content,
+                    outbox_state_json,
+                    editing_event_id,
+                    selected_agent_id,
+                    scroll_anchor_event_id,
+                    updated_at
+                from team_conversation_studio_branch_ui_state
+                where team_id = ? and conversation_id = ? and branch_id = ? and participant_id = ?
+                """,
+                (self.team_id, self.conversation_id, resolved_branch_id, participant),
+            ).fetchone()
+            return (
+                self._studio_branch_ui_state_from_row(row)
+                if row is not None
+                else self._default_studio_branch_ui_state(resolved_branch_id, participant)
+            )
+
+    def save_studio_branch_ui_state(
+        self,
+        *,
+        participant_id: str = "human",
+        branch_id: str | None = None,
+        draft_content: str = "",
+        outbox_state: JsonValue | None = None,
+        editing_event_id: str | None = None,
+        selected_agent_id: str | None = None,
+        scroll_anchor_event_id: str | None = None,
+    ) -> StudioBranchUiState:
+        participant = self._non_empty_participant_id(participant_id)
+        resolved_branch_id = self._resolved_branch_id(branch_id)
+        resolved_outbox_state: JsonValue = [] if outbox_state is None else outbox_state
+        if not is_json_value(resolved_outbox_state):
+            raise ValueError("studio branch UI outbox_state must be JSON-serializable.")
+        state = StudioBranchUiState(
+            team_id=self.team_id,
+            conversation_id=self.conversation_id,
+            branch_id=resolved_branch_id,
+            participant_id=participant,
+            draft_content=draft_content,
+            outbox_state=resolved_outbox_state,
+            editing_event_id=editing_event_id,
+            selected_agent_id=selected_agent_id,
+            scroll_anchor_event_id=scroll_anchor_event_id,
+            updated_at=self._now(),
+        )
+        with self._lock:
+            if self._connection is None:
+                self._studio_branch_ui_states[(resolved_branch_id, participant)] = state
+                return replace(state)
+            self._connection.execute(
+                """
+                insert into team_conversation_studio_branch_ui_state (
+                    team_id,
+                    conversation_id,
+                    branch_id,
+                    participant_id,
+                    draft_content,
+                    outbox_state_json,
+                    editing_event_id,
+                    selected_agent_id,
+                    scroll_anchor_event_id,
+                    updated_at
+                )
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                on conflict(team_id, conversation_id, branch_id, participant_id) do update set
+                    draft_content = excluded.draft_content,
+                    outbox_state_json = excluded.outbox_state_json,
+                    editing_event_id = excluded.editing_event_id,
+                    selected_agent_id = excluded.selected_agent_id,
+                    scroll_anchor_event_id = excluded.scroll_anchor_event_id,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    state.team_id,
+                    state.conversation_id,
+                    state.branch_id,
+                    state.participant_id,
+                    state.draft_content,
+                    json.dumps(state.outbox_state, ensure_ascii=False),
+                    state.editing_event_id,
+                    state.selected_agent_id,
+                    state.scroll_anchor_event_id,
+                    state.updated_at,
+                ),
+            )
+            self._connection.commit()
+            return state
+
     def latest_checkpoint_id(self, physical_thread_id: str, *, checkpoint_ns: str = "") -> str | None:
         if self._connection is None or not self._table_exists("checkpoints"):
             return None
@@ -1953,6 +2060,23 @@ class ConversationStore:
         )
         connection.execute(
             """
+            create table if not exists team_conversation_studio_branch_ui_state (
+                team_id text not null,
+                conversation_id text not null,
+                branch_id text not null,
+                participant_id text not null,
+                draft_content text not null,
+                outbox_state_json text not null,
+                editing_event_id text,
+                selected_agent_id text,
+                scroll_anchor_event_id text,
+                updated_at text not null,
+                primary key (team_id, conversation_id, branch_id, participant_id)
+            )
+            """
+        )
+        connection.execute(
+            """
             create table if not exists team_conversation_interrupts (
                 team_id text not null,
                 conversation_id text not null,
@@ -2160,6 +2284,21 @@ class ConversationStore:
             audit_payload=raw_payload if is_json_object(raw_payload) else {},
             not_rewindable=bool(row[8]),
             created_at=str(row[9]),
+        )
+
+    def _studio_branch_ui_state_from_row(self, row: tuple[object, ...]) -> StudioBranchUiState:
+        raw_outbox_state: object = json.loads(str(row[3] or "[]"))
+        return StudioBranchUiState(
+            team_id=self.team_id,
+            conversation_id=self.conversation_id,
+            branch_id=str(row[0]),
+            participant_id=str(row[1]),
+            draft_content=str(row[2] or ""),
+            outbox_state=raw_outbox_state if is_json_value(raw_outbox_state) else [],
+            editing_event_id=str(row[4]) if row[4] is not None else None,
+            selected_agent_id=str(row[5]) if row[5] is not None else None,
+            scroll_anchor_event_id=str(row[6]) if row[6] is not None else None,
+            updated_at=str(row[7]),
         )
 
     def _run_from_row(self, row: tuple[object, ...]) -> ConversationRun:
@@ -2619,6 +2758,7 @@ class ConversationStore:
             "team_conversation_thread_frontiers",
             "team_conversation_control_events",
             "team_conversation_external_side_effects",
+            "team_conversation_studio_branch_ui_state",
             "team_conversation_interrupts",
         )
         for table in tables:
@@ -2711,6 +2851,21 @@ class ConversationStore:
 
     def _resolved_branch_id(self, branch_id: str | None) -> str:
         return branch_id or self.current_branch_id()
+
+    def _non_empty_participant_id(self, participant_id: str) -> str:
+        participant = participant_id.strip()
+        if not participant:
+            raise ValueError("participant_id is required.")
+        return participant
+
+    def _default_studio_branch_ui_state(self, branch_id: str, participant_id: str) -> StudioBranchUiState:
+        return StudioBranchUiState(
+            team_id=self.team_id,
+            conversation_id=self.conversation_id,
+            branch_id=branch_id,
+            participant_id=participant_id,
+            updated_at=self._now(),
+        )
 
     def _latest_visible_event(self, branch_id: str | None) -> ConversationEvent | None:
         events = self.list_events(branch_id=branch_id)

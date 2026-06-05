@@ -851,6 +851,63 @@ class BackendApiTests(unittest.TestCase):
         self.assertIn("conversation.event.appended", stream_events)
         self.assertIn("branch.updated", stream_events)
 
+    def test_branch_ui_state_persists_per_branch(self) -> None:
+        fake = self._fake_conversation(branching=True)
+        buffer = StreamBuffer()
+        client = TestClient(create_app(fake, stream_buffer=buffer))
+
+        main_saved = client.patch(
+            "/api/studio/v1/ui-state",
+            json={
+                "branch_id": "branch_main",
+                "participant_id": "human",
+                "draft_content": "main draft",
+                "outbox_state": [
+                    {
+                        "clientMessageId": "main",
+                        "content": "hello",
+                        "createdAt": "2026-06-01T10:00:00Z",
+                        "fileNames": [],
+                        "status": "sending",
+                    }
+                ],
+                "editing_event_id": "event_01",
+            },
+        ).json()
+        edited = client.post(
+            "/api/studio/v1/messages/event_01/edit",
+            json={"content": "@agent edited", "author_id": "human", "wait": False},
+        ).json()
+        branch_id = edited["data"]["history"]["current_branch_id"]
+        branch_saved = client.patch(
+            "/api/studio/v1/ui-state",
+            json={
+                "branch_id": branch_id,
+                "participant_id": "human",
+                "draft_content": "branch draft",
+                "outbox_state": [],
+                "selected_agent_id": "agent",
+            },
+        ).json()
+
+        client.post("/api/studio/v1/branches/branch_main/switch")
+        main_snapshot = client.get("/api/studio/v1/state").json()
+        client.post(f"/api/studio/v1/branches/{branch_id}/switch")
+        branch_snapshot = client.get("/api/studio/v1/state").json()
+
+        self.assertEqual(main_saved["data"]["branch_id"], "branch_main")
+        self.assertEqual(main_saved["data"]["draft_content"], "main draft")
+        self.assertEqual(branch_saved["data"]["branch_id"], branch_id)
+        self.assertEqual(branch_saved["data"]["draft_content"], "branch draft")
+        self.assertEqual(main_snapshot["data"]["history"]["current_branch_id"], "branch_main")
+        self.assertEqual(main_snapshot["data"]["ui_state"]["draft_content"], "main draft")
+        self.assertEqual(main_snapshot["data"]["ui_state"]["editing_event_id"], "event_01")
+        self.assertEqual(branch_snapshot["data"]["history"]["current_branch_id"], branch_id)
+        self.assertEqual(branch_snapshot["data"]["ui_state"]["draft_content"], "branch draft")
+        self.assertEqual(branch_snapshot["data"]["ui_state"]["selected_agent_id"], "agent")
+        stream_events = [frame.event for frame in buffer.replay_after(None) or []]
+        self.assertIn("studio.ui_state.updated", stream_events)
+
     def test_file_download_serves_public_attachments_with_content_checks(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root_dir = Path(temp_dir)
@@ -1968,6 +2025,36 @@ class BackendApiTests(unittest.TestCase):
                 raise AssertionError("branching is not enabled for this fake conversation")
             return branch_store.switch_branch(branch_id)
 
+        def get_studio_branch_ui_state(*, participant_id="human", branch_id=None):
+            if branch_store is None:
+                raise AssertionError("branching is not enabled for this fake conversation")
+            return branch_store.get_studio_branch_ui_state(
+                participant_id=participant_id,
+                branch_id=branch_id,
+            ).to_dict()
+
+        def save_studio_branch_ui_state(
+            *,
+            participant_id="human",
+            branch_id=None,
+            draft_content="",
+            outbox_state=None,
+            editing_event_id=None,
+            selected_agent_id=None,
+            scroll_anchor_event_id=None,
+        ):
+            if branch_store is None:
+                raise AssertionError("branching is not enabled for this fake conversation")
+            return branch_store.save_studio_branch_ui_state(
+                participant_id=participant_id,
+                branch_id=branch_id,
+                draft_content=draft_content,
+                outbox_state=outbox_state,
+                editing_event_id=editing_event_id,
+                selected_agent_id=selected_agent_id,
+                scroll_anchor_event_id=scroll_anchor_event_id,
+            ).to_dict()
+
         def resume_checkpoint(
             *,
             checkpoint_id,
@@ -2039,6 +2126,8 @@ class BackendApiTests(unittest.TestCase):
                     "list_branches": list_branches,
                     "current_branch_id": current_branch_id,
                     "switch_branch": switch_branch,
+                    "get_studio_branch_ui_state": get_studio_branch_ui_state,
+                    "save_studio_branch_ui_state": save_studio_branch_ui_state,
                     "edit_human_message": edit_human_message,
                     "resume_checkpoint": resume_checkpoint,
                 }

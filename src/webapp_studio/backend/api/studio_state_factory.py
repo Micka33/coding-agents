@@ -28,6 +28,7 @@ from src.webapp_studio.backend.contracts.queue_item import QueueItem
 from src.webapp_studio.backend.contracts.run_summary import RunSummary
 from src.webapp_studio.backend.contracts.runtime_settings import RuntimeSettings
 from src.webapp_studio.backend.contracts.studio_state import StudioState
+from src.webapp_studio.backend.contracts.studio_branch_ui_state_dto import StudioBranchUiStateDto
 from src.webapp_studio.backend.contracts.thread_frontier_dto import ThreadFrontierDto
 
 
@@ -42,6 +43,7 @@ class StudioStateFactory:
         current_branch_id: str = "branch_main",
         dismissed_failed_queue_delivery_ids: set[str] | None = None,
         private_activity_states: list[ConversationStateDict] | None = None,
+        ui_state: StudioBranchUiStateDto | None = None,
     ) -> StudioState:
         branch_list = branches or []
         visible_state = self._visible_state(state, branch_list, current_branch_id)
@@ -78,7 +80,17 @@ class StudioStateFactory:
             queue=self._queue(state, agent_states, deliveries, dismissed_failed_queue_delivery_ids or set()),
             interrupts=[self._interrupt_request(interrupt) for interrupt in interrupts or []],
             history=history,
+            ui_state=ui_state or self._default_ui_state(state, current_branch_id),
             generated_ui=self._generated_ui(visible_state),
+        )
+
+    def _default_ui_state(self, state: ConversationStateDict, current_branch_id: str) -> StudioBranchUiStateDto:
+        return StudioBranchUiStateDto(
+            team_id=state["team_id"],
+            conversation_id=state["conversation_id"],
+            branch_id=current_branch_id,
+            participant_id="human",
+            updated_at=utc_now_iso(),
         )
 
     def _activity(

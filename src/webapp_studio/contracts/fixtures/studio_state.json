@@ -136,5 +136,17 @@
       }
     ]
   },
+  "ui_state": {
+    "team_id": "team",
+    "conversation_id": "thread",
+    "branch_id": "branch_main",
+    "participant_id": "human",
+    "draft_content": "",
+    "outbox_state": [],
+    "editing_event_id": null,
+    "selected_agent_id": null,
+    "scroll_anchor_event_id": null,
+    "updated_at": "2026-06-01T10:00:00Z"
+  },
   "generated_ui": []
 }

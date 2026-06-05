@@ -5,6 +5,7 @@ import {
   ConversationSwitchResultSchema,
   QueueItemSchema,
   RunJoinResultSchema,
+  StudioBranchUiStateSchema,
   StudioChangesSchema,
   StudioChangeDiffSchema,
   StudioEnvelopeSchema,
@@ -20,6 +21,7 @@ import {
   type QueueItem,
   type RunJoinResult,
   type RuntimeSettings,
+  type StudioBranchUiState,
   type StudioChanges,
   type StudioChangeDiff,
   type StudioFiles,
@@ -263,6 +265,32 @@ export class StudioApiClient {
         method: "POST",
       }
     )
+  }
+
+  async updateUiState(input: {
+    branchId: string
+    draftContent: string
+    outboxState: unknown
+    editingEventId?: string | null
+    participantId?: string
+    scrollAnchorEventId?: string | null
+    selectedAgentId?: string | null
+  }): Promise<StudioBranchUiState> {
+    return this.request("/ui-state", StudioBranchUiStateSchema, {
+      method: "PATCH",
+      body: JSON.stringify({
+        branch_id: input.branchId,
+        participant_id: input.participantId ?? "human",
+        draft_content: input.draftContent,
+        outbox_state: input.outboxState,
+        editing_event_id: input.editingEventId ?? null,
+        selected_agent_id: input.selectedAgentId ?? null,
+        scroll_anchor_event_id: input.scrollAnchorEventId ?? null,
+      }),
+      headers: {
+        "Content-Type": "application/json",
+      },
+    })
   }
 
   async resumeCheckpoint(

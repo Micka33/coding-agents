@@ -24,6 +24,7 @@ from src.webapp_studio.backend.contracts.edit_message_request import EditMessage
 from src.webapp_studio.backend.contracts.interrupt_resume_request import InterruptResumeRequest
 from src.webapp_studio.backend.contracts.queue_clear_request import QueueClearRequest
 from src.webapp_studio.backend.contracts.runtime_update_request import RuntimeUpdateRequest
+from src.webapp_studio.backend.contracts.studio_branch_ui_state_update_request import StudioBranchUiStateUpdateRequest
 from src.webapp_studio.backend.contracts.studio_capabilities import StudioCapabilities
 from src.webapp_studio.backend.contracts.studio_envelope import StudioEnvelope
 from src.webapp_studio.backend.contracts.studio_error import StudioError
@@ -205,6 +206,10 @@ def create_app(conversation: WebConversation, *, stream_buffer: StreamBuffer | N
     @app.post("/api/studio/v1/branches/{branch_id}/switch")
     async def switch_branch(branch_id: str) -> JSONResponse:
         return ok(controller.switch_branch(branch_id))
+
+    @app.patch("/api/studio/v1/ui-state")
+    async def update_ui_state(request: StudioBranchUiStateUpdateRequest) -> JSONResponse:
+        return ok(controller.update_ui_state(request))
 
     @app.get("/api/studio/v1/interrupts")
     async def interrupts() -> JSONResponse:

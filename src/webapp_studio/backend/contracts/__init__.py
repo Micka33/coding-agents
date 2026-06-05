@@ -27,6 +27,8 @@ from src.webapp_studio.backend.contracts.run_join_result import RunJoinResult
 from src.webapp_studio.backend.contracts.run_summary import RunSummary
 from src.webapp_studio.backend.contracts.runtime_settings import RuntimeSettings
 from src.webapp_studio.backend.contracts.stream_frame import StreamFrame
+from src.webapp_studio.backend.contracts.studio_branch_ui_state_dto import StudioBranchUiStateDto
+from src.webapp_studio.backend.contracts.studio_branch_ui_state_update_request import StudioBranchUiStateUpdateRequest
 from src.webapp_studio.backend.contracts.studio_capabilities import StudioCapabilities
 from src.webapp_studio.backend.contracts.studio_envelope import StudioEnvelope
 from src.webapp_studio.backend.contracts.studio_error import StudioError
@@ -60,6 +62,8 @@ __all__ = [
     "RunSummary",
     "RuntimeSettings",
     "StreamFrame",
+    "StudioBranchUiStateDto",
+    "StudioBranchUiStateUpdateRequest",
     "StudioCapabilities",
     "StudioEnvelope",
     "StudioError",

@@ -207,6 +207,28 @@ export function StudioWorkspace({
     }
   }
 
+  function handlePersistUiState(input: {
+    branchId: string
+    draftContent: string
+    editingEventId: string | null
+    outboxState: {
+      clientMessageId: string
+      content: string
+      createdAt: string
+      fileNames: string[]
+      status: "sending" | "failed"
+    }[]
+  }) {
+    if (!apiClient) {
+      return
+    }
+    apiClient.updateUiState(input).catch((error) => {
+      setOperationError(
+        error instanceof Error ? error.message : "Studio API request failed."
+      )
+    })
+  }
+
   function handleStopAgent(agentId: string) {
     replaceStateFromLiveApi(() => apiClient!.stopAgent(agentId))
   }
@@ -386,6 +408,7 @@ export function StudioWorkspace({
               liveApi={liveApi}
               onEditMessage={handleEditMessage}
               onOpenInspector={handleOpenInspector}
+              onPersistUiState={handlePersistUiState}
               onSubmitDraft={handleSubmitDraft}
               onSwitchBranch={handleSwitchBranch}
               session={session}
@@ -457,6 +480,7 @@ export function StudioWorkspace({
             liveApi={liveApi}
             onEditMessage={handleEditMessage}
             onOpenInspector={handleOpenInspector}
+            onPersistUiState={handlePersistUiState}
             onSubmitDraft={handleSubmitDraft}
             onSwitchBranch={handleSwitchBranch}
             session={session}

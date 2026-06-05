@@ -665,6 +665,40 @@ describe("chat panel transcript actions", () => {
 })
 
 describe("chat panel local recovery", () => {
+  it("hydrates and persists branch UI state through the live backend callback", async () => {
+    vi.useFakeTimers()
+    const fixture = loadStudioMock()
+    const onPersistUiState = vi.fn()
+    const state: StudioState = {
+      ...fixture.state,
+      ui_state: {
+        ...fixture.state.ui_state,
+        draft_content: "restored backend draft",
+      },
+    }
+
+    renderChatPanel({
+      liveApi: true,
+      onPersistUiState,
+      state,
+    })
+
+    const textarea = screen.getByLabelText("Message") as HTMLTextAreaElement
+    expect(textarea).toHaveValue("restored backend draft")
+
+    fireEvent.change(textarea, {
+      target: { value: "next backend draft" },
+    })
+    await vi.advanceTimersByTimeAsync(400)
+
+    expect(onPersistUiState).toHaveBeenLastCalledWith({
+      branchId: "branch_main",
+      draftContent: "next backend draft",
+      editingEventId: null,
+      outboxState: [],
+    })
+  })
+
   it("persists failed submitted prompts in the per-thread outbox", async () => {
     const fixture = loadStudioMock()
     const state = fixture.state
@@ -692,6 +726,7 @@ describe("chat panel local recovery", () => {
           liveApi
           onEditMessage={() => undefined}
           onOpenInspector={() => undefined}
+          onPersistUiState={() => undefined}
           onSubmitDraft={async () => {
             throw new Error("offline")
           }}
@@ -758,6 +793,7 @@ describe("chat panel local recovery", () => {
           liveApi
           onEditMessage={() => undefined}
           onOpenInspector={() => undefined}
+          onPersistUiState={() => undefined}
           onSubmitDraft={() => undefined}
           onSwitchBranch={() => undefined}
           session={session}
@@ -784,6 +820,7 @@ describe("chat panel local recovery", () => {
           liveApi
           onEditMessage={() => undefined}
           onOpenInspector={() => undefined}
+          onPersistUiState={() => undefined}
           onSubmitDraft={() => undefined}
           onSwitchBranch={() => undefined}
           session={session}
@@ -937,6 +974,7 @@ function renderChatPanel(
         liveApi={false}
         onEditMessage={() => undefined}
         onOpenInspector={() => undefined}
+        onPersistUiState={() => undefined}
         onSubmitDraft={() => undefined}
         onSwitchBranch={() => undefined}
         session={null}

@@ -37,6 +37,8 @@ from src.webapp_studio.backend.contracts.queue_item import QueueItem
 from src.webapp_studio.backend.contracts.run_join_result import RunJoinResult
 from src.webapp_studio.backend.contracts.run_summary import RunSummary
 from src.webapp_studio.backend.contracts.runtime_update_request import RuntimeUpdateRequest
+from src.webapp_studio.backend.contracts.studio_branch_ui_state_dto import StudioBranchUiStateDto
+from src.webapp_studio.backend.contracts.studio_branch_ui_state_update_request import StudioBranchUiStateUpdateRequest
 from src.webapp_studio.backend.contracts.studio_capabilities import StudioCapabilities
 from src.webapp_studio.backend.contracts.studio_state import StudioState
 from src.webapp_studio.backend.streaming.stream_buffer import StreamBuffer
@@ -499,6 +501,32 @@ class StudioApiController:
             self._publish_branch_state(state, branch)
         return state.history.branches
 
+    def update_ui_state(self, request: StudioBranchUiStateUpdateRequest) -> StudioBranchUiStateDto:
+        save_ui_state = self._runtime_method("save_studio_branch_ui_state")
+        if save_ui_state is None:
+            raise self._unsupported("ui_state", "Studio branch UI state is not supported by this runtime.")
+        try:
+            state = StudioBranchUiStateDto.model_validate(
+                save_ui_state(
+                    branch_id=request.branch_id,
+                    participant_id=request.participant_id,
+                    draft_content=request.draft_content,
+                    outbox_state=request.outbox_state,
+                    editing_event_id=request.editing_event_id,
+                    selected_agent_id=request.selected_agent_id,
+                    scroll_anchor_event_id=request.scroll_anchor_event_id,
+                )
+            )
+        except ValueError as error:
+            raise StudioApiError(
+                status_code=400,
+                code="invalid_request",
+                message=str(error),
+                field="ui_state",
+            ) from error
+        self._stream_buffer.publish("studio.ui_state.updated", state.model_dump(mode="json"))
+        return state
+
     def interrupts(self) -> list[InterruptRequest]:
         return [self._interrupt_request(interrupt) for interrupt in self._interrupts_from_runtime()]
 
@@ -679,6 +707,7 @@ class StudioApiController:
             current_branch_id=current_branch_id,
             dismissed_failed_queue_delivery_ids=self._dismissed_failed_queue_delivery_ids,
             private_activity_states=private_activity_states,
+            ui_state=self._studio_ui_state(current_branch_id=current_branch_id),
         )
 
     def _private_activity_states(self, state: ConversationStateDict) -> list[ConversationStateDict]:
@@ -835,6 +864,21 @@ class StudioApiController:
         if current_branch_id is None:
             return "branch_main"
         return str(current_branch_id())
+
+    def _studio_ui_state(self, *, current_branch_id: str) -> StudioBranchUiStateDto:
+        get_ui_state = self._runtime_method("get_studio_branch_ui_state")
+        if get_ui_state is None:
+            legacy_state = self._compat.state()
+            return StudioBranchUiStateDto(
+                team_id=str(legacy_state["team_id"]),
+                conversation_id=str(legacy_state["conversation_id"]),
+                branch_id=current_branch_id,
+                participant_id="human",
+                updated_at=utc_now_iso(),
+            )
+        return StudioBranchUiStateDto.model_validate(
+            get_ui_state(participant_id="human", branch_id=current_branch_id)
+        )
 
     def _interrupts_from_runtime(self) -> list[ConversationInterrupt]:
         list_interrupts = self._runtime_method("list_interrupts")

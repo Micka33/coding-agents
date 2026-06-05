@@ -57,12 +57,26 @@ import type {
   StudioState,
 } from "@/lib/studio/schemas"
 
+type LocalOutboxItem = {
+  clientMessageId: string
+  content: string
+  createdAt: string
+  fileNames: string[]
+  status: "sending" | "failed"
+}
+
 type ChatPanelProps = {
   busy: boolean
   changes: StudioChanges | null
   liveApi: boolean
   onOpenInspector: (view: InspectorView) => void
   onEditMessage: (messageId: string, content: string) => Promise<void> | void
+  onPersistUiState: (input: {
+    branchId: string
+    draftContent: string
+    editingEventId: string | null
+    outboxState: LocalOutboxItem[]
+  }) => void
   onSubmitDraft: (
     content: string,
     files: FileUIPart[],
@@ -72,14 +86,6 @@ type ChatPanelProps = {
   session: StudioSession | null
   state: StudioState
   streamStatus: StudioStreamStatus
-}
-
-type LocalOutboxItem = {
-  clientMessageId: string
-  content: string
-  createdAt: string
-  fileNames: string[]
-  status: "sending" | "failed"
 }
 
 type MentionOption = {
@@ -105,6 +111,7 @@ export function ChatPanel({
   liveApi,
   onOpenInspector,
   onEditMessage,
+  onPersistUiState,
   onSubmitDraft,
   onSwitchBranch,
   session,
@@ -113,10 +120,16 @@ export function ChatPanel({
 }: ChatPanelProps) {
   const draftStorageKey = draftKey(session, state)
   const outboxStorageKey = outboxKey(session, state)
+  const branchUiState = uiStateForCurrentBranch(state)
+  const uiStateHydrationKey = branchUiState
+    ? `${branchUiState.conversation_id}:${branchUiState.branch_id}:${branchUiState.participant_id}`
+    : null
   const [draft, setDraft] = useState("")
   const [loadedDraftKey, setLoadedDraftKey] = useState<string | null>(null)
   const [outbox, setOutbox] = useState<LocalOutboxItem[]>([])
   const [loadedOutboxKey, setLoadedOutboxKey] = useState<string | null>(null)
+  const [editingEventId, setEditingEventId] = useState<string | null>(null)
+  const [loadedUiStateKey, setLoadedUiStateKey] = useState<string | null>(null)
   const [selectionEnd, setSelectionEnd] = useState(0)
   const [mentionIndex, setMentionIndex] = useState(0)
   const [dismissedMentionKey, setDismissedMentionKey] = useState<string | null>(null)
@@ -142,9 +155,11 @@ export function ChatPanel({
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- Hydrates a per-branch browser draft after the client storage key is known.
-    setDraft(draftStorageKey ? localStorage.getItem(draftStorageKey) ?? "" : "")
+    setDraft(liveApi && branchUiState ? branchUiState.draft_content : draftStorageKey ? localStorage.getItem(draftStorageKey) ?? "" : "")
+    setEditingEventId(liveApi && branchUiState ? branchUiState.editing_event_id : null)
     setLoadedDraftKey(draftStorageKey)
-  }, [draftStorageKey])
+    setLoadedUiStateKey(uiStateHydrationKey)
+  }, [draftStorageKey, liveApi, uiStateHydrationKey])
 
   useEffect(() => {
     if (draftStorageKey !== loadedDraftKey) {
@@ -162,9 +177,9 @@ export function ChatPanel({
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- Hydrates a per-branch browser outbox after the client storage key is known.
-    setOutbox(outboxStorageKey ? readOutbox(outboxStorageKey) : [])
+    setOutbox(liveApi && branchUiState ? outboxItemsFromValue(branchUiState.outbox_state) : outboxStorageKey ? readOutbox(outboxStorageKey) : [])
     setLoadedOutboxKey(outboxStorageKey)
-  }, [outboxStorageKey])
+  }, [liveApi, outboxStorageKey, uiStateHydrationKey])
 
   useEffect(() => {
     if (outboxStorageKey !== loadedOutboxKey) {
@@ -179,6 +194,37 @@ export function ChatPanel({
       localStorage.removeItem(outboxStorageKey)
     }
   }, [loadedOutboxKey, outbox, outboxStorageKey])
+
+  useEffect(() => {
+    if (!liveApi || !uiStateHydrationKey || loadedUiStateKey !== uiStateHydrationKey) {
+      return
+    }
+    if (draftStorageKey !== loadedDraftKey || outboxStorageKey !== loadedOutboxKey) {
+      return
+    }
+    const handle = window.setTimeout(() => {
+      onPersistUiState({
+        branchId: state.history.current_branch_id,
+        draftContent: draft,
+        editingEventId,
+        outboxState: outbox,
+      })
+    }, 350)
+    return () => window.clearTimeout(handle)
+  }, [
+    draft,
+    draftStorageKey,
+    editingEventId,
+    liveApi,
+    loadedDraftKey,
+    loadedOutboxKey,
+    loadedUiStateKey,
+    onPersistUiState,
+    outbox,
+    outboxStorageKey,
+    state.history.current_branch_id,
+    uiStateHydrationKey,
+  ])
 
   function insertMention(participant: string) {
     if (!mentionQuery) {
@@ -287,8 +333,10 @@ export function ChatPanel({
               generatedUi={state.generated_ui}
               key={event.id}
               onEditMessage={onEditMessage}
+              onEditingEventChange={setEditingEventId}
               onOpenInspector={onOpenInspector}
               onSwitchBranch={onSwitchBranch}
+              persistedEditing={editingEventId === event.id}
               versionSwitchDisabled={!liveApi || busy}
               versions={messageVersions.get(messageVersionKey(event)) ?? []}
             />
@@ -544,8 +592,10 @@ function TranscriptMessage({
   event,
   generatedUi,
   onEditMessage,
+  onEditingEventChange,
   onOpenInspector,
   onSwitchBranch,
+  persistedEditing,
   versionSwitchDisabled,
   versions,
 }: {
@@ -553,8 +603,10 @@ function TranscriptMessage({
   event: ConversationEvent
   generatedUi: StudioState["generated_ui"]
   onEditMessage: (messageId: string, content: string) => Promise<void> | void
+  onEditingEventChange: (eventId: string | null) => void
   onOpenInspector: (view: InspectorView) => void
   onSwitchBranch: (branchId: string) => Promise<void> | void
+  persistedEditing: boolean
   versionSwitchDisabled: boolean
   versions: MessageVersionOption[]
 }) {
@@ -568,6 +620,16 @@ function TranscriptMessage({
   const [editing, setEditing] = useState(false)
   const [copied, setCopied] = useState(false)
   const timestamp = transcriptTimestamp(event.created_at)
+
+  useEffect(() => {
+    if (persistedEditing && event.author_kind === "human") {
+      setDraft(content)
+      setEditing(true)
+    } else if (!persistedEditing && editing) {
+      setDraft(content)
+      setEditing(false)
+    }
+  }, [content, editing, event.author_kind, persistedEditing])
 
   async function copyMessage() {
     if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
@@ -586,6 +648,7 @@ function TranscriptMessage({
     setDraft(content)
     setCopied(false)
     setEditing(true)
+    onEditingEventChange(event.id)
   }
 
   async function saveEdit() {
@@ -593,6 +656,7 @@ function TranscriptMessage({
     if (!nextContent || nextContent === content) {
       setDraft(content)
       setEditing(false)
+      onEditingEventChange(null)
       return
     }
     try {
@@ -604,11 +668,13 @@ function TranscriptMessage({
     setDraft(nextContent)
     setCopied(false)
     setEditing(false)
+    onEditingEventChange(null)
   }
 
   function cancelEdit() {
     setDraft(content)
     setEditing(false)
+    onEditingEventChange(null)
   }
 
   return (
@@ -1082,16 +1148,28 @@ function outboxKey(session: StudioSession | null, state: StudioState) {
   return `webapp-studio:v1:${storageId}:${state.team_id}:${state.conversation_id}:${state.history.current_branch_id}:human:outbox`
 }
 
+function uiStateForCurrentBranch(state: StudioState) {
+  return state.ui_state.conversation_id === state.conversation_id &&
+    state.ui_state.branch_id === state.history.current_branch_id &&
+    state.ui_state.participant_id === "human"
+    ? state.ui_state
+    : null
+}
+
 function readOutbox(key: string): LocalOutboxItem[] {
   try {
     const parsed: unknown = JSON.parse(localStorage.getItem(key) ?? "[]")
-    if (!Array.isArray(parsed)) {
-      return []
-    }
-    return parsed.filter(isLocalOutboxItem)
+    return outboxItemsFromValue(parsed)
   } catch {
     return []
   }
+}
+
+function outboxItemsFromValue(value: unknown): LocalOutboxItem[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  return value.filter(isLocalOutboxItem)
 }
 
 function isLocalOutboxItem(value: unknown): value is LocalOutboxItem {

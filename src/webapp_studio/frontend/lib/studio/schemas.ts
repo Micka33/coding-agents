@@ -514,6 +514,21 @@ export const BranchSummarySchema = z
   })
   .passthrough()
 
+export const StudioBranchUiStateSchema = z
+  .object({
+    team_id: z.string(),
+    conversation_id: z.string(),
+    branch_id: z.string(),
+    participant_id: z.string(),
+    draft_content: z.string().default(""),
+    outbox_state: JsonValueSchema.default([]),
+    editing_event_id: z.string().nullable().default(null),
+    selected_agent_id: z.string().nullable().default(null),
+    scroll_anchor_event_id: z.string().nullable().default(null),
+    updated_at: z.string(),
+  })
+  .passthrough()
+
 export const HistorySnapshotSchema = z
   .object({
     current_branch_id: z.string(),
@@ -614,6 +629,7 @@ export const StudioStateSchema = z
     queue: z.array(QueueItemSchema),
     interrupts: z.array(InterruptRequestSchema),
     history: HistorySnapshotSchema,
+    ui_state: StudioBranchUiStateSchema,
     generated_ui: z.array(GeneratedUiSpecSchema),
   })
   .passthrough()
@@ -664,6 +680,7 @@ export type CheckpointResumeRequest = z.infer<typeof CheckpointResumeRequestSche
 export type QueueItem = z.infer<typeof QueueItemSchema>
 export type InterruptRequest = z.infer<typeof InterruptRequestSchema>
 export type BranchSummary = z.infer<typeof BranchSummarySchema>
+export type StudioBranchUiState = z.infer<typeof StudioBranchUiStateSchema>
 export type CheckpointSummary = z.infer<typeof CheckpointSummarySchema>
 export type GeneratedUiSpec = z.infer<typeof GeneratedUiSpecSchema>
 export type GeneratedUiPatchPayload = z.infer<typeof GeneratedUiPatchPayloadSchema>
