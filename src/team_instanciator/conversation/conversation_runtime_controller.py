@@ -43,8 +43,8 @@ class ConversationRuntimeController:
             wait=wait,
         )
 
-    def cancel_queued_agent(self, agent_id: str) -> ConversationRuntimeStateDict:
-        self._team.store.cancel_queued(agent_id)
+    def cancel_queued_agent(self, agent_id: str, *, branch_id: str | None = None) -> ConversationRuntimeStateDict:
+        self._team.store.cancel_queued(agent_id, branch_id=branch_id)
         return self._team.store.get_runtime_state().to_dict()
 
     def clear_queue(self, scope: str = "pending") -> ConversationRuntimeStateDict:

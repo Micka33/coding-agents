@@ -162,6 +162,7 @@ describe("studio sidebar controls", () => {
         {
           id: "queue_thread_agent",
           conversation_id: fixture.state.conversation_id,
+          branch_id: "branch_main",
           agent_id: "agent",
           status: "pending" as const,
           position: 1,

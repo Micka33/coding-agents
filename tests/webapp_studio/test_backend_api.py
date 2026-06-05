@@ -179,8 +179,9 @@ class BackendApiTests(unittest.TestCase):
         cancelled = client.delete(f"/api/studio/v1/queue/{queue['data'][0]['id']}").json()
 
         self.assertTrue(queue["data"][0]["can_cancel"])
+        self.assertEqual(queue["data"][0]["branch_id"], "branch_main")
         self.assertEqual(cancelled["data"], [])
-        self.assertEqual(cancel_fake.cancelled, ["agent"])
+        self.assertEqual(cancel_fake.cancelled, [("agent", "branch_main")])
         self.assertIn("queue.updated", [frame.event for frame in buffer.replay_after(None) or []])
 
         clear_fake = self._fake_conversation(running=False, queued=True, queued_after_seq=1)
@@ -220,6 +221,7 @@ class BackendApiTests(unittest.TestCase):
         state_after_clear = client.get("/api/studio/v1/state").json()
 
         self.assertEqual(queue["data"][0]["id"], "queue_failed_delivery_failed")
+        self.assertEqual(queue["data"][0]["branch_id"], "branch_main")
         self.assertEqual(queue["data"][0]["status"], "failed")
         self.assertEqual(queue["data"][0]["message_event_id"], "event_01")
         self.assertEqual(queue["data"][0]["error"], "boom")
@@ -1161,6 +1163,7 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(studio_state.participant_aliases, {"agent": ["lead"]})
         self.assertTrue(studio_state.history.branches[0].created_at.endswith("Z"))
         self.assertIsNone(studio_state.runs[0].cursor)
+        self.assertEqual(studio_state.queue[0].branch_id, "branch_main")
         self.assertIsNone(studio_state.queue[0].message_event_id)
         self.assertTrue(studio_state.queue[0].can_cancel)
         self.assertIsNone(studio_state.activity.private_threads[0].agent_id)
@@ -1641,8 +1644,8 @@ class BackendApiTests(unittest.TestCase):
         def stop_agent(agent_id):
             stopped.append(agent_id)
 
-        def cancel_queued_agent(agent_id):
-            cancelled.append(agent_id)
+        def cancel_queued_agent(agent_id, *, branch_id=None):
+            cancelled.append((agent_id, branch_id or "branch_main"))
             agent_state["queued"] = False
             agent_state["queued_after_seq"] = None
             return state()["runtime"]

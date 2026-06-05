@@ -378,7 +378,7 @@ class StudioApiController:
         item = self._queue_item(queue_item_id)
         if not item.can_cancel:
             raise self._unsupported("queue_control", f"Queue item is not cancellable: {queue_item_id}")
-        self._conversation.runtime.cancel_queued_agent(item.agent_id)
+        self._conversation.runtime.cancel_queued_agent(item.agent_id, branch_id=item.branch_id)
         state = self.state()
         self._publish_queue_state(state)
         return state.queue

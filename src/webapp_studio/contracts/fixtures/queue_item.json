@@ -1,6 +1,7 @@
 {
   "id": "queue_thread_agent",
   "conversation_id": "thread",
+  "branch_id": "branch_main",
   "agent_id": "agent",
   "status": "pending",
   "position": 1,

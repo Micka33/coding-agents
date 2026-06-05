@@ -441,6 +441,7 @@ export const QueueItemSchema = z
   .object({
     id: z.string(),
     conversation_id: z.string(),
+    branch_id: z.string().default("branch_main"),
     agent_id: z.string(),
     status: z.enum(["pending", "running", "cancelled", "failed", "completed"]),
     position: z.number().int().nullable(),

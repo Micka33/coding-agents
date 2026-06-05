@@ -217,6 +217,7 @@ class StudioStateFactory:
             QueueItem(
                 id=f"queue_{state['conversation_id']}_{item.agent_id}",
                 conversation_id=item.conversation_id,
+                branch_id=item.branch_id,
                 agent_id=item.agent_id,
                 status="pending",
                 position=index,
@@ -229,6 +230,7 @@ class StudioStateFactory:
             QueueItem(
                 id=f"queue_failed_{delivery.id}",
                 conversation_id=delivery.conversation_id,
+                branch_id=delivery.branch_id,
                 agent_id=delivery.agent_id,
                 status="failed",
                 position=None,

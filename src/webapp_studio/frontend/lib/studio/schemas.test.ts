@@ -622,6 +622,7 @@ describe("studio reducer", () => {
     const queued = {
       id: "queue_failed_delivery_streamed",
       conversation_id: fixture.state.conversation_id,
+      branch_id: "branch_main",
       agent_id: "agent",
       status: "failed" as const,
       position: null,
