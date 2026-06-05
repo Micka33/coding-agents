@@ -2437,6 +2437,12 @@ class ConversationStore:
             branch_id=parent_branch_id,
             logical_thread_key=logical_thread_key,
         )
+        if source_frontier is None:
+            source_frontier = self._latest_thread_frontier_for_checkpoint(
+                branch_id=parent_branch_id,
+                logical_thread_key=logical_thread_key,
+                checkpoint_id=branch.origin_checkpoint_id,
+            )
         if source_frontier is None or not source_frontier.usable_for_fork or not source_frontier.checkpoint_id:
             return None, None, None
         ThreadForker(self._connection).fork_checkpoint(
@@ -2445,6 +2451,22 @@ class ConversationStore:
             target_physical_thread_id=target_physical_thread_id,
         )
         return source_frontier.branch_id, source_frontier.physical_thread_id, source_frontier.checkpoint_id
+
+    def _latest_thread_frontier_for_checkpoint(
+        self,
+        *,
+        branch_id: str,
+        logical_thread_key: str,
+        checkpoint_id: str,
+    ) -> ThreadFrontier | None:
+        candidates = [
+            frontier
+            for frontier in self.list_thread_frontiers(branch_id=branch_id)
+            if frontier.logical_thread_key == logical_thread_key
+            and frontier.event_boundary == "after"
+            and frontier.checkpoint_id == checkpoint_id
+        ]
+        return candidates[-1] if candidates else None
 
     def _branch_by_id(self, branch_id: str) -> ConversationBranch | None:
         if self._connection is None:

@@ -1013,6 +1013,64 @@ class ConversationRuntimeTests(unittest.TestCase):
         self.assertEqual(branch_writes[0], ("checkpoint-1", b"write-checkpoint-1"))
         self.assertEqual(branch_writes[1][0], branch_checkpoints[1][0])
 
+    def test_mention_aware_team_forks_branch_created_from_raw_checkpoint_id(self) -> None:
+        connection = sqlite3.connect(":memory:", check_same_thread=False)
+        self._create_checkpoint_tables(connection)
+        checkpoint_lock = threading.Lock()
+
+        def write_checkpoint(_graph: FakeGraph, _input: Any, config: Any) -> None:
+            thread_id = config["configurable"]["thread_id"]
+            with checkpoint_lock:
+                next_index = connection.execute("select count(*) from checkpoints").fetchone()[0] + 1
+                checkpoint_id = f"checkpoint-{next_index}"
+                parent_checkpoint_id = connection.execute(
+                    """
+                    select checkpoint_id
+                    from checkpoints
+                    where thread_id = ? and checkpoint_ns = ''
+                    order by checkpoint_id desc
+                    limit 1
+                    """,
+                    (thread_id,),
+                ).fetchone()
+                self._insert_checkpoint(
+                    connection,
+                    thread_id=thread_id,
+                    checkpoint_id=checkpoint_id,
+                    parent_checkpoint_id=parent_checkpoint_id[0] if parent_checkpoint_id is not None else None,
+                )
+                self._insert_write(connection, thread_id=thread_id, checkpoint_id=checkpoint_id, value=f"write-{checkpoint_id}")
+                connection.commit()
+
+        graph = FakeGraph("checkpointed reply", callback=write_checkpoint)
+        runtime = self._conversation_runtime({"agent-b": graph}, connection=connection)
+
+        runtime.append_human_message("@agent-b first", author_id="mickael")
+        branch = runtime.store.create_branch(
+            label="Checkpoint branch",
+            origin_checkpoint_id="checkpoint-1",
+            parent_branch_id="branch_main",
+        )
+        runtime.store.switch_branch(branch.id)
+        runtime.append_human_message("@agent-b from checkpoint", author_id="mickael")
+
+        branch_thread_id = graph.calls[1][1]["configurable"]["thread_id"]
+        branch_thread = runtime.store.list_branch_threads(branch_id=branch.id)[0]
+        branch_checkpoints = connection.execute(
+            """
+            select checkpoint_id, parent_checkpoint_id
+            from checkpoints
+            where thread_id = ?
+            order by checkpoint_id asc
+            """,
+            (branch_thread_id,),
+        ).fetchall()
+
+        self.assertEqual(branch_thread.forked_from_branch_id, "branch_main")
+        self.assertEqual(branch_thread.forked_from_checkpoint_id, "checkpoint-1")
+        self.assertEqual(branch_checkpoints[0], ("checkpoint-1", None))
+        self.assertEqual(branch_checkpoints[1][1], "checkpoint-1")
+
     def test_mention_aware_team_forks_from_terminal_empty_run_frontier(self) -> None:
         connection = sqlite3.connect(":memory:", check_same_thread=False)
         self._create_checkpoint_tables(connection)
