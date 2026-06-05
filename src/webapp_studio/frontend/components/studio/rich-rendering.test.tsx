@@ -202,6 +202,70 @@ describe("studio sidebar controls", () => {
 
     expect(onCascadeLimitChange).toHaveBeenCalledWith(5)
   })
+
+  it("renders branches as a parent-child tree and switches from tree items", () => {
+    const fixture = loadStudioMock()
+    const onSwitchBranch = vi.fn()
+    const state: StudioState = {
+      ...fixture.state,
+      history: {
+        ...fixture.state.history,
+        branches: [
+          {
+            id: "branch_main",
+            label: "Main",
+            parent_branch_id: null,
+            origin_checkpoint_id: null,
+            origin_event_id: null,
+            origin_logical_message_id: null,
+            origin_previous_event_id: null,
+            origin_event_seq: null,
+            created_at: "2026-06-03T10:00:00Z",
+            current: true,
+            status: "derived",
+            head_checkpoint_id: null,
+          },
+          {
+            id: "branch_edit_01",
+            label: "Edit #1",
+            parent_branch_id: "branch_main",
+            origin_checkpoint_id: "frontier_event_01_before",
+            origin_event_id: "event_01",
+            origin_logical_message_id: "event_01",
+            origin_previous_event_id: null,
+            origin_event_seq: 0,
+            created_at: "2026-06-03T10:05:00Z",
+            current: false,
+            status: "persisted",
+            head_checkpoint_id: null,
+          },
+          {
+            id: "branch_edit_02",
+            label: "Nested edit",
+            parent_branch_id: "branch_edit_01",
+            origin_checkpoint_id: "frontier_event_02_before",
+            origin_event_id: "event_02",
+            origin_logical_message_id: "event_02",
+            origin_previous_event_id: "event_01",
+            origin_event_seq: 1,
+            created_at: "2026-06-03T10:10:00Z",
+            current: false,
+            status: "persisted",
+            head_checkpoint_id: null,
+          },
+        ],
+      },
+    }
+
+    renderSidebar({ liveApi: true, onSwitchBranch, state })
+
+    const nested = screen.getByText("Nested edit").closest("[role='treeitem']")
+    expect(nested).toHaveAttribute("data-branch-depth", "2")
+
+    fireEvent.click(screen.getByRole("button", { name: "Switch to Nested edit" }))
+
+    expect(onSwitchBranch).toHaveBeenCalledWith("branch_edit_02")
+  })
 })
 
 function renderActivityPanel(props: ComponentProps<typeof ActivityPanel>) {

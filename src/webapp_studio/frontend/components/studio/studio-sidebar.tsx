@@ -30,6 +30,7 @@ import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import type {
+  BranchSummary,
   ConversationList,
   InterruptRequest,
   StudioSession,
@@ -110,6 +111,10 @@ export function StudioSidebar({
   const activeAgents = useMemo(
     () => state.conversation.agent_states.filter((agent) => agent.running || agent.queued),
     [state.conversation.agent_states]
+  )
+  const branchTreeItems = useMemo(
+    () => branchTree(state.history.branches),
+    [state.history.branches]
   )
   const fileCount = state.conversation.events.reduce(
     (count, event) => count + event.attachments.length,
@@ -437,12 +442,22 @@ export function StudioSidebar({
         <Section title="History">
           <div>
             <h3 className="text-xs font-medium uppercase text-muted-foreground">Branches</h3>
-            <div className="mt-2 grid gap-2">
-              {state.history.branches.map((branch) => (
-                <div className="flex min-w-0 items-center justify-between gap-2" key={branch.id}>
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">{branch.label}</p>
-                    <p className="truncate text-xs text-muted-foreground">{branch.id}</p>
+            <div aria-label="Conversation branches" className="mt-2 grid gap-1" role="tree">
+              {branchTreeItems.map(({ branch, depth }) => (
+                <div
+                  aria-level={depth + 1}
+                  className="flex min-w-0 items-center justify-between gap-2 rounded-md px-1 py-1 hover:bg-muted/60"
+                  data-branch-depth={depth}
+                  key={branch.id}
+                  role="treeitem"
+                  style={{ paddingLeft: `${depth * 12}px` }}
+                >
+                  <div className="flex min-w-0 items-center gap-2">
+                    <GitBranchIcon className="size-3 shrink-0 text-muted-foreground" />
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">{branch.label}</p>
+                      <p className="truncate text-xs text-muted-foreground">{branch.id}</p>
+                    </div>
                   </div>
                   {branch.current ? (
                     <StatusPill label="Current" tone="emerald" />
@@ -543,6 +558,39 @@ export function StudioSidebar({
       </div>
     </aside>
   )
+}
+
+function branchTree(branches: BranchSummary[]) {
+  const childrenByParent = new Map<string, BranchSummary[]>()
+  const branchIds = new Set(branches.map((branch) => branch.id))
+  for (const branch of branches) {
+    const parentId = branch.parent_branch_id && branchIds.has(branch.parent_branch_id) ? branch.parent_branch_id : "__root__"
+    const children = childrenByParent.get(parentId) ?? []
+    children.push(branch)
+    childrenByParent.set(parentId, children)
+  }
+
+  const items: { branch: BranchSummary; depth: number }[] = []
+  const visited = new Set<string>()
+
+  function visit(branch: BranchSummary, depth: number) {
+    if (visited.has(branch.id)) {
+      return
+    }
+    visited.add(branch.id)
+    items.push({ branch, depth })
+    for (const child of childrenByParent.get(branch.id) ?? []) {
+      visit(child, depth + 1)
+    }
+  }
+
+  for (const root of childrenByParent.get("__root__") ?? []) {
+    visit(root, 0)
+  }
+  for (const branch of branches) {
+    visit(branch, 0)
+  }
+  return items
 }
 
 function Metric({ label, value }: { label: string; value: number }) {
