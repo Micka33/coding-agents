@@ -451,6 +451,7 @@ const studioState: StudioState = {
         current: true,
         status: "derived",
         head_checkpoint_id: "checkpoint_temp_history_01",
+        archived_at: null,
       },
     ],
   },

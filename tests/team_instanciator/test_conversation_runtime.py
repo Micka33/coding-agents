@@ -557,6 +557,29 @@ class ConversationRuntimeTests(unittest.TestCase):
         self.assertEqual(store.current_branch_id(), "branch_main")
         self.assertFalse(store.list_branches()[0].current)
 
+    def test_store_archives_branches_without_deleting_history(self) -> None:
+        connection = sqlite3.connect(":memory:")
+        store = ConversationStore(team_id="team", conversation_id="thread", connection=connection)
+
+        branch = store.create_branch(label="Alternative", parent_branch_id="branch_main")
+        archived = store.archive_branch(branch.id)
+        reloaded = ConversationStore(team_id="team", conversation_id="thread", connection=connection)
+        reloaded_archived = reloaded.archive_branch(branch.id)
+
+        self.assertIsNotNone(archived)
+        self.assertIsNotNone(archived.archived_at if archived else None)
+        self.assertEqual(store.list_branches(), [])
+        self.assertEqual([item.id for item in store.list_branches(include_archived=True)], [branch.id])
+        self.assertEqual(reloaded_archived.archived_at if reloaded_archived else None, archived.archived_at if archived else None)
+        self.assertIsNone(reloaded.switch_branch(branch.id))
+
+        current = store.create_branch(label="Current", parent_branch_id="branch_main")
+        store.switch_branch(current.id)
+        with self.assertRaisesRegex(ValueError, "branch_main"):
+            store.archive_branch("branch_main")
+        with self.assertRaisesRegex(ValueError, "current branch"):
+            store.archive_branch(current.id)
+
     def test_store_persists_studio_branch_ui_state_per_branch(self) -> None:
         connection = sqlite3.connect(":memory:")
         store = ConversationStore(team_id="team", conversation_id="thread", connection=connection)

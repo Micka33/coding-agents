@@ -267,6 +267,16 @@ export class StudioApiClient {
     )
   }
 
+  async archiveBranch(branchId: string): Promise<BranchSummary[]> {
+    return this.request(
+      `/branches/${encodeURIComponent(branchId)}/archive`,
+      z.array(BranchSummarySchema),
+      {
+        method: "POST",
+      }
+    )
+  }
+
   async updateUiState(input: {
     branchId: string
     draftContent: string

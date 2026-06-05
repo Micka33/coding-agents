@@ -511,6 +511,7 @@ export const BranchSummarySchema = z
     current: z.boolean(),
     status: z.enum(["derived", "persisted"]),
     head_checkpoint_id: z.string().nullable(),
+    archived_at: z.string().nullable().default(null),
   })
   .passthrough()
 

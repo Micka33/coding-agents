@@ -20,6 +20,7 @@ class ConversationBranch:
     current: bool
     status: Literal["derived", "persisted"] = "persisted"
     head_checkpoint_id: str | None = None
+    archived_at: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -37,4 +38,5 @@ class ConversationBranch:
             "current": self.current,
             "status": self.status,
             "head_checkpoint_id": self.head_checkpoint_id,
+            "archived_at": self.archived_at,
         }

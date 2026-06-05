@@ -18,3 +18,4 @@ class BranchSummary(ContractModel):
     current: bool
     status: Literal["derived", "persisted"]
     head_checkpoint_id: str | None = None
+    archived_at: str | None = None

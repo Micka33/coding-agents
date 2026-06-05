@@ -680,6 +680,34 @@ class BackendApiTests(unittest.TestCase):
 
             self.assertEqual(unsupported_message["errors"][0]["details"]["capability"], "branching")
 
+    def test_branch_archiving_is_logical_and_excludes_active_history(self) -> None:
+        fake = self._fake_conversation(branching=True)
+        archived_candidate = fake.runtime.create_branch(label="Archive me", parent_branch_id="branch_main")
+        current = fake.runtime.create_branch(label="Current", parent_branch_id="branch_main")
+        fake.runtime.switch_branch(current.id)
+        buffer = StreamBuffer()
+        client = TestClient(create_app(fake, stream_buffer=buffer))
+
+        current_error = client.post(f"/api/studio/v1/branches/{current.id}/archive").json()
+        client.post("/api/studio/v1/branches/branch_main/switch")
+        archived = client.post(f"/api/studio/v1/branches/{archived_candidate.id}/archive").json()
+        archived_again = client.post(f"/api/studio/v1/branches/{archived_candidate.id}/archive").json()
+        switch_archived = client.post(f"/api/studio/v1/branches/{archived_candidate.id}/switch").json()
+        main_error = client.post("/api/studio/v1/branches/branch_main/archive").json()
+        missing = client.post("/api/studio/v1/branches/branch_missing/archive").json()
+        all_branches = fake.runtime.list_branches(include_archived=True)
+        stream_events = [frame.event for frame in buffer.replay_after(None) or []]
+
+        self.assertEqual(current_error["errors"][0]["code"], "invalid_request")
+        self.assertEqual(main_error["errors"][0]["field"], "branch_id")
+        self.assertEqual(missing["errors"][0]["code"], "not_found")
+        self.assertEqual(switch_archived["errors"][0]["field"], "branch_id")
+        self.assertEqual([branch["id"] for branch in archived["data"]], ["branch_main", current.id])
+        self.assertEqual(archived_again["data"], archived["data"])
+        self.assertIsNotNone([branch for branch in all_branches if branch.id == archived_candidate.id][0].archived_at)
+        self.assertIn("branch.archived", stream_events)
+        self.assertIn("snapshot.replace", stream_events)
+
     def test_checkpoint_actions_require_usable_frontier_metadata_when_present(self) -> None:
         with sqlite3.connect(":memory:", check_same_thread=False) as connection:
             self._create_checkpoint_tables(connection)
@@ -2010,10 +2038,10 @@ class BackendApiTests(unittest.TestCase):
                 parent_branch_id=parent_branch_id,
             )
 
-        def list_branches():
+        def list_branches(*, include_archived=False):
             if branch_store is None:
                 raise AssertionError("branching is not enabled for this fake conversation")
-            return branch_store.list_branches()
+            return branch_store.list_branches(include_archived=include_archived)
 
         def current_branch_id():
             if branch_store is None:
@@ -2024,6 +2052,11 @@ class BackendApiTests(unittest.TestCase):
             if branch_store is None:
                 raise AssertionError("branching is not enabled for this fake conversation")
             return branch_store.switch_branch(branch_id)
+
+        def archive_branch(branch_id):
+            if branch_store is None:
+                raise AssertionError("branching is not enabled for this fake conversation")
+            return branch_store.archive_branch(branch_id)
 
         def get_studio_branch_ui_state(*, participant_id="human", branch_id=None):
             if branch_store is None:
@@ -2126,6 +2159,7 @@ class BackendApiTests(unittest.TestCase):
                     "list_branches": list_branches,
                     "current_branch_id": current_branch_id,
                     "switch_branch": switch_branch,
+                    "archive_branch": archive_branch,
                     "get_studio_branch_ui_state": get_studio_branch_ui_state,
                     "save_studio_branch_ui_state": save_studio_branch_ui_state,
                     "edit_human_message": edit_human_message,

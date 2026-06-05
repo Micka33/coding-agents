@@ -285,6 +285,7 @@ class StudioStateFactory:
             current=current_branch_id == "branch_main",
             status="derived",
             head_checkpoint_id=checkpoints[-1].id if checkpoints else None,
+            archived_at=None,
         )
 
     def _branch_summary(self, branch: ConversationBranch, *, current_branch_id: str) -> BranchSummary:
@@ -301,6 +302,7 @@ class StudioStateFactory:
             current=branch.current or branch.id == current_branch_id,
             status=branch.status,
             head_checkpoint_id=branch.head_checkpoint_id,
+            archived_at=branch.archived_at,
         )
 
     def _visible_state(

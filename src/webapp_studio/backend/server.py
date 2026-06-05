@@ -207,6 +207,10 @@ def create_app(conversation: WebConversation, *, stream_buffer: StreamBuffer | N
     async def switch_branch(branch_id: str) -> JSONResponse:
         return ok(controller.switch_branch(branch_id))
 
+    @app.post("/api/studio/v1/branches/{branch_id}/archive")
+    async def archive_branch(branch_id: str) -> JSONResponse:
+        return ok(controller.archive_branch(branch_id))
+
     @app.patch("/api/studio/v1/ui-state")
     async def update_ui_state(request: StudioBranchUiStateUpdateRequest) -> JSONResponse:
         return ok(controller.update_ui_state(request))

@@ -118,7 +118,8 @@
         "created_at": "2026-06-01T10:00:00Z",
         "current": true,
         "status": "derived",
-        "head_checkpoint_id": "checkpoint_01"
+        "head_checkpoint_id": "checkpoint_01",
+        "archived_at": null
       },
       {
         "id": "branch_edit_01",
@@ -132,7 +133,8 @@
         "created_at": "2026-06-01T10:04:00Z",
         "current": false,
         "status": "persisted",
-        "head_checkpoint_id": null
+        "head_checkpoint_id": null,
+        "archived_at": null
       }
     ]
   },

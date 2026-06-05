@@ -78,14 +78,17 @@ class ConversationRuntimeController:
             parent_branch_id=parent_branch_id,
         )
 
-    def list_branches(self) -> list[ConversationBranch]:
-        return self._team.store.list_branches()
+    def list_branches(self, *, include_archived: bool = False) -> list[ConversationBranch]:
+        return self._team.store.list_branches(include_archived=include_archived)
 
     def current_branch_id(self) -> str:
         return self._team.store.current_branch_id()
 
     def switch_branch(self, branch_id: str) -> ConversationBranch | None:
         return self._team.store.switch_branch(branch_id)
+
+    def archive_branch(self, branch_id: str) -> ConversationBranch | None:
+        return self._team.store.archive_branch(branch_id)
 
     def get_studio_branch_ui_state(self, *, participant_id: str = "human", branch_id: str | None = None):
         return self._team.store.get_studio_branch_ui_state(

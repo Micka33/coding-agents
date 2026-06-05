@@ -1502,7 +1502,7 @@ class ConversationStore:
             id=f"branch_{uuid.uuid4().hex}",
             team_id=self.team_id,
             conversation_id=self.conversation_id,
-            label=label or f"Branch {len(self.list_branches()) + 1}",
+            label=label or f"Branch {len(self.list_branches(include_archived=True)) + 1}",
             parent_branch_id=parent_branch_id or self.current_branch_id(),
             origin_checkpoint_id=origin_checkpoint_id,
             origin_event_id=origin_event_id,
@@ -1513,6 +1513,7 @@ class ConversationStore:
             current=False,
             status="persisted",
             head_checkpoint_id=head_checkpoint_id,
+            archived_at=None,
         )
         with self._lock:
             if self._connection is None:
@@ -1534,9 +1535,10 @@ class ConversationStore:
                     origin_event_seq,
                     created_at,
                     current,
-                    head_checkpoint_id
+                    head_checkpoint_id,
+                    archived_at
                 )
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     branch.team_id,
@@ -1552,18 +1554,27 @@ class ConversationStore:
                     branch.created_at,
                     int(branch.current),
                     branch.head_checkpoint_id,
+                    branch.archived_at,
                 ),
             )
             self._connection.commit()
             self._initialize_branch_agent_states(branch)
             return replace(branch)
 
-    def list_branches(self) -> list[ConversationBranch]:
+    def list_branches(self, *, include_archived: bool = False) -> list[ConversationBranch]:
         with self._lock:
             if self._connection is None:
-                return [replace(self._branches[branch_id]) for branch_id in sorted(self._branches)]
+                return [
+                    replace(self._branches[branch_id])
+                    for branch_id in sorted(self._branches)
+                    if include_archived or self._branches[branch_id].archived_at is None
+                ]
+            clauses = ["team_id = ?", "conversation_id = ?"]
+            params: list[object] = [self.team_id, self.conversation_id]
+            if not include_archived:
+                clauses.append("archived_at is null")
             rows = self._connection.execute(
-                """
+                f"""
                 select
                     id,
                     label,
@@ -1575,14 +1586,41 @@ class ConversationStore:
                     origin_event_seq,
                     created_at,
                     current,
-                    head_checkpoint_id
+                    head_checkpoint_id,
+                    archived_at
                 from team_conversation_branches
-                where team_id = ? and conversation_id = ?
+                where {" and ".join(clauses)}
                 order by created_at asc, id asc
                 """,
-                (self.team_id, self.conversation_id),
+                tuple(params),
             ).fetchall()
             return [self._branch_from_row(row) for row in rows]
+
+    def archive_branch(self, branch_id: str) -> ConversationBranch | None:
+        with self._lock:
+            if branch_id == "branch_main":
+                raise ValueError("branch_main cannot be archived.")
+            branch = self._branch_by_id(branch_id)
+            if branch is None:
+                return None
+            if branch.current or branch_id == self.current_branch_id():
+                raise ValueError("cannot archive the current branch.")
+            if branch.archived_at is not None:
+                return replace(branch)
+            archived = replace(branch, current=False, archived_at=self._now())
+            if self._connection is None:
+                self._branches[branch_id] = replace(archived)
+                return replace(archived)
+            self._connection.execute(
+                """
+                update team_conversation_branches
+                set archived_at = ?, current = 0
+                where team_id = ? and conversation_id = ? and id = ?
+                """,
+                (archived.archived_at, self.team_id, self.conversation_id, branch_id),
+            )
+            self._connection.commit()
+            return replace(archived)
 
     def current_branch_id(self) -> str:
         with self._lock:
@@ -1592,7 +1630,7 @@ class ConversationStore:
                 """
                 select id
                 from team_conversation_branches
-                where team_id = ? and conversation_id = ? and current = 1
+                where team_id = ? and conversation_id = ? and current = 1 and archived_at is null
                 order by created_at desc, id desc
                 limit 1
                 """,
@@ -1607,12 +1645,12 @@ class ConversationStore:
                 return None
             if self._connection is None:
                 branch = self._branch_by_id(branch_id)
-                if branch is None:
+                if branch is None or branch.archived_at is not None:
                     return None
                 self._set_current_branch(branch_id)
                 return replace(self._branches[branch_id])
             branch = self._branch_by_id(branch_id)
-            if branch is None:
+            if branch is None or branch.archived_at is not None:
                 return None
             self._set_current_branch(branch_id)
             return self._branch_by_id(branch_id)
@@ -1980,6 +2018,7 @@ class ConversationStore:
                 created_at text not null,
                 current integer not null,
                 head_checkpoint_id text,
+                archived_at text,
                 primary key (team_id, conversation_id, id)
             )
             """
@@ -2107,6 +2146,7 @@ class ConversationStore:
         self._ensure_column("team_conversation_branches", "origin_logical_message_id", "text")
         self._ensure_column("team_conversation_branches", "origin_previous_event_id", "text")
         self._ensure_column("team_conversation_branches", "origin_event_seq", "integer")
+        self._ensure_column("team_conversation_branches", "archived_at", "text")
         self._ensure_column("team_conversation_thread_frontiers", "run_id", "text")
         self._ensure_branch_aware_history_schema()
         connection.commit()
@@ -2221,6 +2261,7 @@ class ConversationStore:
             current=bool(row[9]),
             status="persisted",
             head_checkpoint_id=str(row[10]) if row[10] is not None else None,
+            archived_at=str(row[11]) if len(row) > 11 and row[11] is not None else None,
         )
 
     def _branch_thread_from_row(self, row: tuple[object, ...]) -> ConversationBranchThread:
@@ -2651,7 +2692,8 @@ class ConversationStore:
                 origin_event_seq,
                 created_at,
                 current,
-                head_checkpoint_id
+                head_checkpoint_id,
+                archived_at
             from team_conversation_branches
             where team_id = ? and conversation_id = ? and id = ?
             """,

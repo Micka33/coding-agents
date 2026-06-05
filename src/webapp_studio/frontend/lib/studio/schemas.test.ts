@@ -313,6 +313,7 @@ describe("studio API loading", () => {
       await client.clearQueue("pending")
       await client.createBranch({ label: "Alternative", checkpointId: "checkpoint_01" })
       await client.switchBranch("branch_main")
+      await client.archiveBranch("branch_edit_01")
       await client.resumeCheckpoint("checkpoint_01")
       await client.resumeInterrupt("interrupt_01", { decision: "respond", response: "ok" })
       await client.changes()
@@ -397,6 +398,11 @@ describe("studio API loading", () => {
           body: undefined,
           method: "POST",
           url: "http://127.0.0.1:8765/api/studio/v1/branches/branch_main/switch",
+        },
+        {
+          body: undefined,
+          method: "POST",
+          url: "http://127.0.0.1:8765/api/studio/v1/branches/branch_edit_01/archive",
         },
         {
           body: JSON.stringify({

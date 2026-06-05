@@ -224,6 +224,7 @@ describe("studio sidebar controls", () => {
             current: true,
             status: "derived",
             head_checkpoint_id: null,
+            archived_at: null,
           },
           {
             id: "branch_edit_01",
@@ -238,6 +239,7 @@ describe("studio sidebar controls", () => {
             current: false,
             status: "persisted",
             head_checkpoint_id: null,
+            archived_at: null,
           },
           {
             id: "branch_edit_02",
@@ -252,6 +254,7 @@ describe("studio sidebar controls", () => {
             current: false,
             status: "persisted",
             head_checkpoint_id: null,
+            archived_at: null,
           },
         ],
       },
@@ -603,6 +606,7 @@ describe("chat panel transcript actions", () => {
             current: true,
             status: "derived",
             head_checkpoint_id: null,
+            archived_at: null,
           },
           {
             id: "branch_edit_01",
@@ -617,6 +621,7 @@ describe("chat panel transcript actions", () => {
             current: false,
             status: "persisted",
             head_checkpoint_id: null,
+            archived_at: null,
           },
         ],
       },

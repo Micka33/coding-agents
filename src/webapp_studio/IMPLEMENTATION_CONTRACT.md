@@ -73,6 +73,7 @@ runs, stream modes, checkpoints, branches, interrupts, and state history.
 | `GET` | `/api/studio/v1/branches` | Branch list and current branch pointer. |
 | `POST` | `/api/studio/v1/branches` | Create a branch from a checkpoint or message edit. |
 | `POST` | `/api/studio/v1/branches/{branch_id}/switch` | Switch the visible branch. |
+| `POST` | `/api/studio/v1/branches/{branch_id}/archive` | Archive a non-current branch without deleting its persisted history. |
 | `GET` | `/api/studio/v1/interrupts` | Active human-review interrupts. |
 | `POST` | `/api/studio/v1/interrupts/{interrupt_id}/resume` | Approve, reject, edit, or respond to an interrupt. |
 | `GET` | `/api/studio/v1/files/{file_id}` | Serve public conversation attachments with authorization and content checks. |
@@ -231,7 +232,8 @@ return a single branch during pre-V1 development:
   "created_at": "2026-06-01T10:00:00Z",
   "current": true,
   "status": "derived",
-  "head_checkpoint_id": "checkpoint_..."
+  "head_checkpoint_id": "checkpoint_...",
+  "archived_at": null
 }
 ```
 

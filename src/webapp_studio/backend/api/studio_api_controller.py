@@ -501,6 +501,35 @@ class StudioApiController:
             self._publish_branch_state(state, branch)
         return state.history.branches
 
+    def archive_branch(self, branch_id: str) -> list[BranchSummary]:
+        archive_branch = self._runtime_method("archive_branch")
+        if archive_branch is None:
+            raise self._unsupported("branching", f"Branch archiving is not supported yet: {branch_id}")
+        branch = self._branch_by_id(self.branches(), branch_id)
+        if branch_id == "branch_main" or (branch is not None and branch.current):
+            raise StudioApiError(
+                status_code=400,
+                code="invalid_request",
+                message="cannot archive the current branch.",
+                field="branch_id",
+            )
+        try:
+            archived = archive_branch(branch_id)
+        except ValueError as error:
+            raise StudioApiError(
+                status_code=400,
+                code="invalid_request",
+                message=str(error),
+                field="branch_id",
+            ) from error
+        if archived is None:
+            raise StudioApiError(status_code=404, code="not_found", message="branch not found", field="branch_id")
+        archived_summary = BranchSummary.model_validate(archived.to_dict())
+        state = self.state()
+        self._stream_buffer.publish("branch.archived", archived_summary.model_dump(mode="json"))
+        self._stream_buffer.publish("snapshot.replace", state.model_dump(mode="json"))
+        return state.history.branches
+
     def update_ui_state(self, request: StudioBranchUiStateUpdateRequest) -> StudioBranchUiStateDto:
         save_ui_state = self._runtime_method("save_studio_branch_ui_state")
         if save_ui_state is None:
