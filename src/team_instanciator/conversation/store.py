@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import cast
 
 from src.type_defs import JsonMapping, is_json_object
+from src.team_instanciator.runtime.tool_call_edge import ToolCallEdge, ToolCallEdgeStatus
 from src.team_instanciator.runtime.thread_forker import ThreadForker
 
 from .agent_delivery_state import AgentDeliveryState
@@ -1248,6 +1249,61 @@ class ConversationStore:
             return None
         runs.sort(key=lambda item: (item.completed_at or item.started_at, item.id))
         return runs[-1].stable_checkpoint_id
+
+    def list_tool_call_edges(
+        self,
+        *,
+        branch_id: str,
+        run_id: str,
+        status: str | None = None,
+    ) -> list[ToolCallEdge]:
+        if self._connection is None or not self._table_exists("tool_call_edges"):
+            return []
+        clauses = ["branch_id = ?", "run_id = ?"]
+        params: list[object] = [branch_id, run_id]
+        if status is not None:
+            clauses.append("status = ?")
+            params.append(status)
+        rows = self._connection.execute(
+            f"""
+            select
+                id,
+                commit_id,
+                branch_id,
+                parent_logical_thread_key,
+                parent_physical_thread_id,
+                relation_id,
+                target_agent_id,
+                child_logical_thread_key,
+                child_physical_thread_id,
+                run_id,
+                status
+            from tool_call_edges
+            where {" and ".join(clauses)}
+            order by id asc
+            """,
+            tuple(params),
+        ).fetchall()
+        edges = []
+        for row in rows:
+            status_value = str(row[10])
+            status = cast(ToolCallEdgeStatus, status_value) if status_value in {"running", "success", "failed"} else "failed"
+            edges.append(
+                ToolCallEdge(
+                    id=str(row[0]),
+                    commit_id=str(row[1]),
+                    branch_id=str(row[2]),
+                    parent_logical_thread_key=str(row[3]),
+                    parent_physical_thread_id=str(row[4]),
+                    relation_id=str(row[5]),
+                    target_agent_id=str(row[6]),
+                    child_logical_thread_key=str(row[7]),
+                    child_physical_thread_id=str(row[8]),
+                    run_id=str(row[9]) if row[9] is not None else None,
+                    status=status,
+                )
+            )
+        return edges
 
     def reconcile_incomplete_commits(self) -> dict[str, int]:
         with self._lock:

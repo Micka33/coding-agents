@@ -234,6 +234,7 @@ class MentionRouter:
                 reply.content,
                 source_thread_id=thread_id,
                 source_message_id=reply.source_message_id,
+                run_id=run_id,
                 branch_id=branch_id,
                 context=context,
             )
@@ -263,6 +264,7 @@ class MentionRouter:
         *,
         source_thread_id: str,
         source_message_id: str | None,
+        run_id: str | None = None,
         branch_id: str,
         context: DispatchContext,
     ) -> None:
@@ -290,6 +292,12 @@ class MentionRouter:
                 usable_for_fork=True,
                 usable_for_continue=True,
             )
+        self._record_tool_call_frontiers(
+            frontier_id=event.frontier_after_event_id,
+            event_id=event.id,
+            branch_id=branch_id,
+            run_id=run_id,
+        )
         if not mentions or not self._store.get_runtime_state().mention_hook_enabled:
             return
 
@@ -306,3 +314,30 @@ class MentionRouter:
 
         context.cascade_turns += 1
         self.enqueue_targets(event, mentions)
+
+    def _record_tool_call_frontiers(
+        self,
+        *,
+        frontier_id: str | None,
+        event_id: str,
+        branch_id: str,
+        run_id: str | None,
+    ) -> None:
+        if frontier_id is None or run_id is None:
+            return
+        for edge in self._store.list_tool_call_edges(branch_id=branch_id, run_id=run_id, status="success"):
+            checkpoint_id = self._store.latest_checkpoint_id(edge.child_physical_thread_id)
+            if checkpoint_id is None:
+                continue
+            self._store.record_thread_frontier(
+                frontier_id=frontier_id,
+                branch_id=branch_id,
+                event_id=event_id,
+                event_boundary="after",
+                logical_thread_key=edge.child_logical_thread_key,
+                physical_thread_id=edge.child_physical_thread_id,
+                checkpoint_id=checkpoint_id,
+                parent_logical_thread_key=edge.parent_logical_thread_key,
+                usable_for_fork=True,
+                usable_for_continue=True,
+            )

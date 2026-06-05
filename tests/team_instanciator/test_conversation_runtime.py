@@ -1014,6 +1014,84 @@ class ConversationRuntimeTests(unittest.TestCase):
         self.assertEqual(branch_checkpoints[0], ("checkpoint-1", None))
         self.assertEqual(branch_checkpoints[1][1], "checkpoint-1")
 
+    def test_public_frontier_captures_five_nested_tool_threads_for_branch_fork(self) -> None:
+        connection = sqlite3.connect(":memory:", check_same_thread=False)
+        self._create_checkpoint_tables(connection)
+
+        def create_nested_edges(_graph: FakeGraph, _input: Any, config: Any) -> None:
+            metadata = config["metadata"]
+            run_id = metadata["run_id"]
+            branch_id = metadata["branch_id"]
+            parent_logical_thread_key = metadata["logical_thread_key"]
+            parent_physical_thread_id = metadata["physical_thread_id"]
+            recorder = ToolCallEdgeRecorder(connection)
+            self._insert_checkpoint(
+                connection,
+                thread_id=parent_physical_thread_id,
+                checkpoint_id="checkpoint-parent",
+                parent_checkpoint_id=None,
+            )
+            for level in range(1, 6):
+                child_logical_thread_key = f"{parent_logical_thread_key}:relation:rel_level_{level}:agent:agent-{level}"
+                child_physical_thread_id = f"{parent_physical_thread_id}:relation:rel_level_{level}:agent:agent-{level}"
+                edge_id = f"edge_level_{level}"
+                recorder.record_started(
+                    ToolCallEdge(
+                        id=edge_id,
+                        commit_id=f"commit_{edge_id}",
+                        branch_id=branch_id,
+                        parent_logical_thread_key=parent_logical_thread_key,
+                        parent_physical_thread_id=parent_physical_thread_id,
+                        relation_id=f"rel_level_{level}",
+                        target_agent_id=f"agent-{level}",
+                        child_logical_thread_key=child_logical_thread_key,
+                        child_physical_thread_id=child_physical_thread_id,
+                        run_id=run_id,
+                        status="running",
+                    )
+                )
+                recorder.record_finished(edge_id, "success")
+                self._insert_checkpoint(
+                    connection,
+                    thread_id=child_physical_thread_id,
+                    checkpoint_id=f"checkpoint-level-{level}",
+                    parent_checkpoint_id=None,
+                )
+                parent_logical_thread_key = child_logical_thread_key
+                parent_physical_thread_id = child_physical_thread_id
+            connection.commit()
+
+        graph = FakeGraph("public reply", callback=create_nested_edges)
+        runtime = self._conversation_runtime({"agent-b": graph}, connection=connection)
+
+        runtime.append_human_message("@agent-b first", author_id="mickael")
+        original_second = runtime.append_human_message("second", author_id="mickael").event
+        first_reply = [event for event in runtime.store.list_events() if event.author_kind == "agent"][0]
+        first_reply_frontiers = [
+            frontier
+            for frontier in runtime.store.list_thread_frontiers(branch_id="branch_main")
+            if frontier.frontier_id == first_reply.frontier_after_event_id
+        ]
+        level_five_frontier = next(
+            frontier
+            for frontier in first_reply_frontiers
+            if frontier.logical_thread_key.endswith(":relation:rel_level_5:agent:agent-5")
+        )
+
+        runtime.edit_human_message(original_second.id, "second edited", author_id="mickael")
+        branch_id = runtime.store.current_branch_id()
+        level_five_branch_thread = runtime.store.ensure_branch_thread(
+            branch_id=branch_id,
+            logical_thread_key=level_five_frontier.logical_thread_key,
+            physical_thread_id=f"thread:branch:{branch_id}:mention:agent-b:relation:rel_level_1:agent:agent-1:relation:rel_level_2:agent:agent-2:relation:rel_level_3:agent:agent-3:relation:rel_level_4:agent:agent-4:relation:rel_level_5:agent:agent-5",
+        )
+
+        self.assertEqual(len(first_reply_frontiers), 6)
+        self.assertEqual(level_five_frontier.checkpoint_id, "checkpoint-level-5")
+        self.assertEqual(level_five_frontier.parent_logical_thread_key, "thread:mention:agent-b:relation:rel_level_1:agent:agent-1:relation:rel_level_2:agent:agent-2:relation:rel_level_3:agent:agent-3:relation:rel_level_4:agent:agent-4")
+        self.assertEqual(level_five_branch_thread.forked_from_branch_id, "branch_main")
+        self.assertEqual(level_five_branch_thread.forked_from_checkpoint_id, "checkpoint-level-5")
+
     def test_mention_aware_team_identity_uses_team_aliases_and_agent_descriptions(self) -> None:
         graph = FakeGraph("answer")
         team_config = team(
