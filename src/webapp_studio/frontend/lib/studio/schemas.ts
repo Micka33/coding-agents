@@ -462,6 +462,7 @@ export const QueueUpdatedPayloadSchema = z
 export const InterruptRequestSchema = z
   .object({
     id: z.string(),
+    branch_id: z.string().default("branch_main"),
     run_id: z.string().nullable(),
     agent_id: z.string().nullable(),
     checkpoint_id: z.string().nullable(),

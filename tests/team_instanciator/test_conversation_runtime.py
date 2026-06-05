@@ -255,8 +255,9 @@ class ConversationRuntimeTests(unittest.TestCase):
                 run_id="run_01",
                 agent_id="agent",
                 checkpoint_id="checkpoint_01",
+                branch_id=branch.id,
             )
-            resolved = store.resume_interrupt(interrupt.id, decision="approve", response="ok")
+            resolved = store.resume_interrupt(interrupt.id, decision="approve", response="ok", branch_id=branch.id)
             store.switch_branch(branch.id)
 
             reloaded = ConversationStore(team_id="team", conversation_id="thread", connection=connection)
@@ -537,6 +538,37 @@ class ConversationRuntimeTests(unittest.TestCase):
             store.create_interrupt(kind="approve", payload={"bad": object()})  # type: ignore[arg-type]
         with self.assertRaisesRegex(ValueError, "edited_payload"):
             store.resume_interrupt(interrupt.id, decision="approve", edited_payload={"bad": object()})  # type: ignore[arg-type]
+
+    def test_store_scopes_interrupts_to_current_branch(self) -> None:
+        with sqlite3.connect(":memory:", check_same_thread=False) as connection:
+            store = ConversationStore(team_id="team", conversation_id="thread", connection=connection)
+            main_interrupt = store.create_interrupt(
+                kind="approve",
+                payload={"action": "main"},
+                interrupt_id="interrupt_main",
+            )
+            branch = store.create_branch(label="Edit", parent_branch_id="branch_main")
+            store.switch_branch(branch.id)
+            branch_interrupt = store.create_interrupt(
+                kind="approve",
+                payload={"action": "branch"},
+                interrupt_id="interrupt_branch",
+            )
+
+            self.assertEqual([interrupt.id for interrupt in store.list_interrupts()], [branch_interrupt.id])
+            self.assertEqual([interrupt.id for interrupt in store.list_interrupts(branch_id="branch_main")], [main_interrupt.id])
+            self.assertEqual(
+                [interrupt.id for interrupt in store.list_interrupts(branch_id=None)],
+                [main_interrupt.id, branch_interrupt.id],
+            )
+            self.assertIsNone(store.resume_interrupt(main_interrupt.id, decision="approve"))
+
+            store.switch_branch("branch_main")
+            resolved = store.resume_interrupt(main_interrupt.id, decision="approve")
+
+            self.assertEqual(resolved.status if resolved else None, "resolved")
+            self.assertEqual(store.list_interrupts(branch_id="branch_main"), [])
+            self.assertEqual([interrupt.id for interrupt in store.list_interrupts(branch_id=branch.id)], [branch_interrupt.id])
 
     def test_runtime_controller_cancels_and_clears_pending_queue(self) -> None:
         store = ConversationStore(team_id="team", conversation_id="thread")

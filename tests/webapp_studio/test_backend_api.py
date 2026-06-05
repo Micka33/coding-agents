@@ -418,6 +418,7 @@ class BackendApiTests(unittest.TestCase):
 
         self.assertEqual(pending["capabilities"]["interrupts"], "degraded")
         self.assertEqual(state["data"]["interrupts"][0]["status"], "pending")
+        self.assertEqual(state["data"]["interrupts"][0]["branch_id"], "branch_main")
         self.assertEqual(pending["data"][0]["payload"]["action"], "write_file")
         self.assertEqual(resumed["data"]["interrupts"], [])
         self.assertEqual(fake.runtime.list_interrupts(active_only=False)[0].decisions[0]["response"], "approved with notes")

@@ -17,6 +17,7 @@ class ConversationInterrupt:
     conversation_id: str
     created_at: str
     kind: ConversationInterruptKind
+    branch_id: str = "branch_main"
     payload: JsonObject = field(default_factory=dict)
     status: ConversationInterruptStatus = "pending"
     decisions: tuple[JsonObject, ...] = ()
@@ -29,6 +30,7 @@ class ConversationInterrupt:
             "id": self.id,
             "team_id": self.team_id,
             "conversation_id": self.conversation_id,
+            "branch_id": self.branch_id,
             "run_id": self.run_id,
             "agent_id": self.agent_id,
             "checkpoint_id": self.checkpoint_id,

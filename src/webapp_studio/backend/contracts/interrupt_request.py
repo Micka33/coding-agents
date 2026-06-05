@@ -10,6 +10,7 @@ from src.webapp_studio.backend.contracts.types import JsonLike
 
 class InterruptRequest(ContractModel):
     id: str
+    branch_id: str = "branch_main"
     run_id: str | None = None
     agent_id: str | None = None
     checkpoint_id: str | None = None

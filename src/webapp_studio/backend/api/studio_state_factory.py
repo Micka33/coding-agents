@@ -248,6 +248,7 @@ class StudioStateFactory:
     def _interrupt_request(self, interrupt: ConversationInterrupt) -> InterruptRequest:
         return InterruptRequest(
             id=interrupt.id,
+            branch_id=interrupt.branch_id,
             run_id=interrupt.run_id,
             agent_id=interrupt.agent_id,
             checkpoint_id=interrupt.checkpoint_id,

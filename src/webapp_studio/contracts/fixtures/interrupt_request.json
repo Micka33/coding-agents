@@ -1,5 +1,6 @@
 {
   "id": "interrupt_01",
+  "branch_id": "branch_main",
   "run_id": "run_01",
   "agent_id": "agent",
   "checkpoint_id": "checkpoint_01",

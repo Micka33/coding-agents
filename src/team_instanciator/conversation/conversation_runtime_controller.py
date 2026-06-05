@@ -89,6 +89,7 @@ class ConversationRuntimeController:
         agent_id: str | None = None,
         checkpoint_id: str | None = None,
         interrupt_id: str | None = None,
+        branch_id: str | None = None,
     ) -> ConversationInterrupt:
         return self._team.store.create_interrupt(
             kind=kind,
@@ -97,10 +98,13 @@ class ConversationRuntimeController:
             agent_id=agent_id,
             checkpoint_id=checkpoint_id,
             interrupt_id=interrupt_id,
+            branch_id=branch_id,
         )
 
-    def list_interrupts(self, *, active_only: bool = True) -> list[ConversationInterrupt]:
-        return self._team.store.list_interrupts(active_only=active_only)
+    def list_interrupts(self, *, active_only: bool = True, branch_id: str | None = None) -> list[ConversationInterrupt]:
+        if branch_id is None:
+            return self._team.store.list_interrupts(active_only=active_only)
+        return self._team.store.list_interrupts(active_only=active_only, branch_id=branch_id)
 
     def resume_interrupt(
         self,
@@ -109,12 +113,21 @@ class ConversationRuntimeController:
         decision: ConversationInterruptDecision,
         response: str | None = None,
         edited_payload: JsonMapping | None = None,
+        branch_id: str | None = None,
     ) -> ConversationInterrupt | None:
+        if branch_id is None:
+            return self._team.store.resume_interrupt(
+                interrupt_id,
+                decision=decision,
+                response=response,
+                edited_payload=edited_payload,
+            )
         return self._team.store.resume_interrupt(
             interrupt_id,
             decision=decision,
             response=response,
             edited_payload=edited_payload,
+            branch_id=branch_id,
         )
 
     def resume_checkpoint(

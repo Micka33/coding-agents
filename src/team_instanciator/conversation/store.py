@@ -1484,16 +1484,19 @@ class ConversationStore:
         agent_id: str | None = None,
         checkpoint_id: str | None = None,
         interrupt_id: str | None = None,
+        branch_id: str | None = None,
     ) -> ConversationInterrupt:
         if kind not in _INTERRUPT_KINDS:
             raise ValueError("interrupt kind is not supported.")
         payload_dict = dict(payload or {})
         if not is_json_object(payload_dict):
             raise ValueError("interrupt payload must be JSON-serializable.")
+        resolved_branch_id = self._resolved_branch_id(branch_id)
         interrupt = ConversationInterrupt(
             id=interrupt_id or f"interrupt_{uuid.uuid4().hex}",
             team_id=self.team_id,
             conversation_id=self.conversation_id,
+            branch_id=resolved_branch_id,
             run_id=run_id,
             agent_id=agent_id,
             checkpoint_id=checkpoint_id,
@@ -1511,6 +1514,7 @@ class ConversationStore:
                     team_id,
                     conversation_id,
                     id,
+                    branch_id,
                     run_id,
                     agent_id,
                     checkpoint_id,
@@ -1520,12 +1524,13 @@ class ConversationStore:
                     status,
                     decisions_json
                 )
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     interrupt.team_id,
                     interrupt.conversation_id,
                     interrupt.id,
+                    interrupt.branch_id,
                     interrupt.run_id,
                     interrupt.agent_id,
                     interrupt.checkpoint_id,
@@ -1539,15 +1544,26 @@ class ConversationStore:
             self._connection.commit()
             return replace(interrupt)
 
-    def list_interrupts(self, *, active_only: bool = True) -> list[ConversationInterrupt]:
+    def list_interrupts(
+        self,
+        *,
+        active_only: bool = True,
+        branch_id: str | None | _UnsetType = _UNSET,
+    ) -> list[ConversationInterrupt]:
         with self._lock:
+            resolved_branch_id = self.current_branch_id() if branch_id is _UNSET else branch_id
             if self._connection is None:
                 interrupts = list(self._interrupts.values())
+                if resolved_branch_id is not None:
+                    interrupts = [interrupt for interrupt in interrupts if interrupt.branch_id == resolved_branch_id]
                 if active_only:
                     interrupts = [interrupt for interrupt in interrupts if interrupt.status == "pending"]
                 return [replace(interrupt) for interrupt in sorted(interrupts, key=lambda item: (item.created_at, item.id))]
             clauses = ["team_id = ?", "conversation_id = ?"]
             params: list[object] = [self.team_id, self.conversation_id]
+            if resolved_branch_id is not None:
+                clauses.append("branch_id = ?")
+                params.append(resolved_branch_id)
             if active_only:
                 clauses.append("status = ?")
                 params.append("pending")
@@ -1555,6 +1571,7 @@ class ConversationStore:
                 f"""
                 select
                     id,
+                    branch_id,
                     run_id,
                     agent_id,
                     checkpoint_id,
@@ -1578,6 +1595,7 @@ class ConversationStore:
         decision: ConversationInterruptDecision,
         response: str | None = None,
         edited_payload: JsonMapping | None = None,
+        branch_id: str | None | _UnsetType = _UNSET,
     ) -> ConversationInterrupt | None:
         if decision not in _INTERRUPT_DECISIONS:
             raise ValueError("interrupt decision is not supported.")
@@ -1585,8 +1603,11 @@ class ConversationStore:
         if not is_json_object(edited_payload_dict):
             raise ValueError("interrupt edited_payload must be JSON-serializable.")
         with self._lock:
+            resolved_branch_id = self.current_branch_id() if branch_id is _UNSET else branch_id
             interrupt = self._interrupt_by_id(interrupt_id)
             if interrupt is None:
+                return None
+            if resolved_branch_id is not None and interrupt.branch_id != resolved_branch_id:
                 return None
             decision_record: JsonObject = {
                 "decision": decision,
@@ -1898,6 +1919,7 @@ class ConversationStore:
                 team_id text not null,
                 conversation_id text not null,
                 id text not null,
+                branch_id text not null default 'branch_main',
                 run_id text,
                 agent_id text,
                 checkpoint_id text,
@@ -1918,6 +1940,7 @@ class ConversationStore:
         self._ensure_column("team_conversation_events", "frontier_after_event_id", "text")
         self._ensure_branch_scoped_agent_state()
         self._ensure_column("team_conversation_deliveries", "branch_id", "text not null default 'branch_main'")
+        self._ensure_column("team_conversation_interrupts", "branch_id", "text not null default 'branch_main'")
         self._ensure_column("team_conversation_branches", "origin_event_id", "text")
         self._ensure_column("team_conversation_branches", "origin_event_seq", "integer")
         self._ensure_branch_aware_history_schema()
@@ -2429,20 +2452,21 @@ class ConversationStore:
         return self._branch_from_row(row) if row is not None else None
 
     def _interrupt_from_row(self, row: tuple[object, ...]) -> ConversationInterrupt:
-        raw_payload: object = json.loads(str(row[6] or "{}"))
-        raw_decisions: object = json.loads(str(row[8] or "[]"))
+        raw_payload: object = json.loads(str(row[7] or "{}"))
+        raw_decisions: object = json.loads(str(row[9] or "[]"))
         decisions = tuple(item for item in raw_decisions if is_json_object(item)) if isinstance(raw_decisions, list) else ()
         return ConversationInterrupt(
             id=str(row[0]),
             team_id=self.team_id,
             conversation_id=self.conversation_id,
-            run_id=str(row[1]) if row[1] is not None else None,
-            agent_id=str(row[2]) if row[2] is not None else None,
-            checkpoint_id=str(row[3]) if row[3] is not None else None,
-            created_at=str(row[4]),
-            kind=self._interrupt_kind(row[5]),
+            branch_id=str(row[1] or "branch_main"),
+            run_id=str(row[2]) if row[2] is not None else None,
+            agent_id=str(row[3]) if row[3] is not None else None,
+            checkpoint_id=str(row[4]) if row[4] is not None else None,
+            created_at=str(row[5]),
+            kind=self._interrupt_kind(row[6]),
             payload=raw_payload if is_json_object(raw_payload) else {},
-            status=self._interrupt_status(row[7]),
+            status=self._interrupt_status(row[8]),
             decisions=decisions,
         )
 
@@ -2454,6 +2478,7 @@ class ConversationStore:
             """
             select
                 id,
+                branch_id,
                 run_id,
                 agent_id,
                 checkpoint_id,
