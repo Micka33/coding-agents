@@ -43,6 +43,7 @@ class RelationToolTests(unittest.TestCase):
 
         self.assertEqual(result, "answer")
         self.assertEqual(registry.graph_calls, ["worker"])
+        self.assertEqual(graph.async_calls, 1)
         self.assertEqual(graph.calls[0][0], {"messages": [{"role": "user", "content": "question"}]})
         self.assertEqual(graph.calls[0][1]["configurable"]["thread_id"], "root:relation:rel_worker:agent:worker")
         self.assertEqual(

@@ -300,6 +300,9 @@ class BackendApiTests(unittest.TestCase):
             files_dir.mkdir(parents=True)
             (files_dir / "file_01").write_bytes(b"hello")
             (files_dir / "file_html").write_bytes(b"<h1>x</h1>")
+            (files_dir / "file_markdown").write_bytes(b"# skill")
+            (files_dir / "file_large_text").write_bytes(b"x" * (500 * 1024 + 1))
+            (files_dir / "file_unknown").write_bytes(b"unknown")
             attachments = [
                 {
                     "id": "file_01",
@@ -317,6 +320,30 @@ class BackendApiTests(unittest.TestCase):
                     "size_bytes": 8,
                     "added_by": "human",
                 },
+                {
+                    "id": "file_markdown",
+                    "filename": "SKILL.md",
+                    "uri": "conversation://files/file_markdown",
+                    "media_type": None,
+                    "size_bytes": 7,
+                    "added_by": "human",
+                },
+                {
+                    "id": "file_large_text",
+                    "filename": "large.txt",
+                    "uri": "conversation://files/file_large_text",
+                    "media_type": "text/plain",
+                    "size_bytes": 500 * 1024 + 1,
+                    "added_by": "human",
+                },
+                {
+                    "id": "file_unknown",
+                    "filename": "unknown.bin",
+                    "uri": "conversation://files/file_unknown",
+                    "media_type": None,
+                    "size_bytes": 7,
+                    "added_by": "human",
+                },
             ]
             client = TestClient(create_app(self._fake_conversation(attachments=attachments, root_dir=root_dir)))
 
@@ -324,6 +351,9 @@ class BackendApiTests(unittest.TestCase):
             conversations = client.get("/api/studio/v1/conversations?limit=10").json()
             files = client.get("/api/studio/v1/files").json()
             preview = client.get("/api/studio/v1/files/file_01/preview")
+            markdown_preview = client.get("/api/studio/v1/files/file_markdown/preview")
+            large_text_preview = client.get("/api/studio/v1/files/file_large_text/preview").json()
+            unknown_preview = client.get("/api/studio/v1/files/file_unknown/preview").json()
             download = client.get("/api/studio/v1/files/file_html/download")
             changes = client.get("/api/studio/v1/changes").json()
             terminal = client.post("/api/studio/v1/terminal/sessions").json()
@@ -344,10 +374,24 @@ class BackendApiTests(unittest.TestCase):
             self.assertEqual(session["data"]["checkpointer"]["backend"], "memory")
             self.assertEqual(conversations["data"]["current_conversation_id"], "thread")
             self.assertEqual(conversations["data"]["conversations"][0]["conversation_id"], "thread")
-            self.assertEqual(files["data"]["files"][0]["preview_url"], "/api/studio/v1/files/file_01/preview")
-            self.assertEqual(files["data"]["files"][0]["download_url"], "/api/studio/v1/files/file_01/download")
-            self.assertIsNone(files["data"]["files"][1]["preview_url"])
+            files_by_id = {file["id"]: file for file in files["data"]["files"]}
+            self.assertEqual(files_by_id["file_01"]["preview_mode"], "text")
+            self.assertEqual(files_by_id["file_01"]["preview_url"], "/api/studio/v1/files/file_01/preview")
+            self.assertEqual(files_by_id["file_01"]["download_url"], "/api/studio/v1/files/file_01/download")
+            self.assertIsNone(files_by_id["file_html"]["preview_mode"])
+            self.assertIsNone(files_by_id["file_html"]["preview_url"])
+            self.assertEqual(files_by_id["file_markdown"]["media_type"], "text/markdown")
+            self.assertEqual(files_by_id["file_markdown"]["preview_mode"], "text")
+            self.assertEqual(files_by_id["file_markdown"]["preview_url"], "/api/studio/v1/files/file_markdown/preview")
+            self.assertIsNone(files_by_id["file_large_text"]["preview_mode"])
+            self.assertIsNone(files_by_id["file_large_text"]["preview_url"])
+            self.assertIsNone(files_by_id["file_unknown"]["preview_mode"])
+            self.assertIsNone(files_by_id["file_unknown"]["preview_url"])
             self.assertEqual(preview.content, b"hello")
+            self.assertEqual(markdown_preview.content, b"# skill")
+            self.assertIn("text/markdown", markdown_preview.headers["content-type"])
+            self.assertEqual(large_text_preview["errors"][0]["code"], "unsupported_media_type")
+            self.assertEqual(unknown_preview["errors"][0]["code"], "unsupported_media_type")
             self.assertEqual(download.content, b"<h1>x</h1>")
             self.assertEqual(changes["data"], {"changes": [], "supported": False})
             self.assertEqual(terminal["data"]["cwd"], str(root_dir.resolve()))
@@ -1693,6 +1737,36 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(studio_state.runs[3].status, "superseded")
         self.assertEqual(studio_state.runs[4].status, "completed")
 
+    def test_state_factory_includes_model_attempts(self) -> None:
+        state = self._fake_conversation(running=False).state()
+        state["model_attempts"] = [
+            {
+                "id": "model_attempt_01",
+                "team_id": "team",
+                "conversation_id": "thread",
+                "branch_id": "branch_main",
+                "run_id": "run_01",
+                "agent_id": "agent",
+                "provider": "openai",
+                "model": "openai:gpt-test",
+                "attempt_number": 2,
+                "max_attempts": 3,
+                "timeout_mode": "stream_idle_timeout",
+                "timeout_seconds": 120,
+                "started_at": "2026-06-01T10:00:01Z",
+                "completed_at": "2026-06-01T10:00:02Z",
+                "status": "retrying",
+                "normalized_failure_code": "stream_idle_timeout",
+                "provider_error_type": "TimeoutError",
+            }
+        ]
+
+        studio_state = StudioStateFactory().from_legacy_state(state)
+
+        self.assertEqual(studio_state.conversation.model_attempts[0].id, "model_attempt_01")
+        self.assertEqual(studio_state.conversation.model_attempts[0].status, "retrying")
+        self.assertEqual(studio_state.conversation.model_attempts[0].attempt_number, 2)
+
     def test_controller_direct_edges(self) -> None:
         controller = StudioApiController(self._fake_conversation())
         checkpoint = CheckpointSummary(
@@ -1841,16 +1915,23 @@ class BackendApiTests(unittest.TestCase):
                 content="previous plan",
             )
             created_conversations: list[str | None] = []
+            dispatch_calls: list[tuple[str, bool]] = []
+
+            def conversation_for(conversation_id: str | None):
+                resolved_conversation_id = created_conversations.append(conversation_id) or str(conversation_id)
+                conversation = self._fake_created_conversation(
+                    team_id="alpha",
+                    conversation_id=resolved_conversation_id,
+                    root_dir=workspace,
+                )
+                conversation.dispatch_pending = lambda *, wait=False: dispatch_calls.append((resolved_conversation_id, wait))
+                return conversation
 
             def instanciator_factory(config_variables=None):
                 return SimpleNamespace(
                     instantiate=lambda _team_file, _variables: SimpleNamespace(
                         close=lambda: None,
-                        conversation_for=lambda conversation_id: self._fake_created_conversation(
-                            team_id="alpha",
-                            conversation_id=created_conversations.append(conversation_id) or str(conversation_id),
-                            root_dir=workspace,
-                        ),
+                        conversation_for=conversation_for,
                     )
                 )
 
@@ -1899,6 +1980,7 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(created["data"]["append"]["event"]["metadata"]["client_message_id"], "client_01")
         self.assertEqual(switched["data"]["session"]["conversation_id"], "alpha-existing")
         self.assertIn("alpha-existing", created_conversations)
+        self.assertIn(("alpha-existing", False), dispatch_calls)
 
     def _create_checkpoint_tables(self, connection: sqlite3.Connection) -> None:
         connection.execute(
@@ -2155,6 +2237,7 @@ class BackendApiTests(unittest.TestCase):
                 "agent_states": [dict(agent_state)],
                 "deliveries": list(deliveries or []),
                 "runs": list(runs or []),
+                "model_attempts": [],
                 "thread_frontiers": list(thread_frontiers or []),
                 "control_events": list(control_events),
                 "activities": [],

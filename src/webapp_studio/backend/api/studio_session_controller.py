@@ -256,8 +256,8 @@ class StudioSessionController:
     def resume_interrupt(self, interrupt_id: str, request: Any) -> Any:
         return self._require_active().resume_interrupt(interrupt_id, request)
 
-    def file_resource(self, file_id: str, *, allow_blocked: bool = False) -> Any:
-        return self._require_active().file_resource(file_id, allow_blocked=allow_blocked)
+    def file_resource(self, file_id: str, *, allow_blocked: bool = False, preview: bool = False) -> Any:
+        return self._require_active().file_resource(file_id, allow_blocked=allow_blocked, preview=preview)
 
     def compat_state(self) -> Any:
         return self._require_active().compat_state()
@@ -283,6 +283,7 @@ class StudioSessionController:
         conversation = instantiated.conversation_for(conversation_id)
         if conversation is None:
             raise ValueError("Selected team has no top-level conversation section.")
+        self._dispatch_pending(conversation)
         self._active = StudioApiController(conversation, stream_buffer=self._stream_buffer)
 
     def _activate_team(self, team_id: str, conversation_id: str) -> StudioApiController:
@@ -306,6 +307,7 @@ class StudioSessionController:
                 message="Selected team has no top-level conversation section.",
                 field="team_id",
             )
+        self._dispatch_pending(conversation)
         self._active = StudioApiController(conversation, stream_buffer=self._stream_buffer)
         return self._active
 
@@ -342,6 +344,11 @@ class StudioSessionController:
                 message="Team discovery is blocked by duplicate team ids.",
                 details={"duplicate_ids": self._discovery.get("duplicate_ids", [])},
             )
+
+    def _dispatch_pending(self, conversation: Any) -> None:
+        dispatch_pending = getattr(conversation, "dispatch_pending", None)
+        if callable(dispatch_pending):
+            dispatch_pending(wait=False)
 
     def _require_active(self) -> StudioApiController:
         self._ensure_discovery_ready()

@@ -265,6 +265,7 @@ function ActivityMessageItem({
           <RichMarkdown
             className="max-w-full min-w-0 overflow-hidden [overflow-wrap:anywhere] break-words text-muted-foreground [&_*]:max-w-full [&_code]:break-words [&_pre]:overflow-x-auto [&_pre]:whitespace-pre-wrap"
             content={message.content || "empty message"}
+            defaultCodeWrap={false}
           />
         </CollapsibleContent>
       </Collapsible>
@@ -285,6 +286,7 @@ function ActivityMessageItem({
           <RichMarkdown
             className="mt-2 max-w-full min-w-0 overflow-hidden [overflow-wrap:anywhere] break-words text-sky-950 dark:text-sky-100 [&_*]:max-w-full [&_code]:break-words [&_pre]:overflow-x-auto [&_pre]:whitespace-pre-wrap"
             content={content}
+            defaultCodeWrap={false}
           />
         </article>
         <MessageActions
@@ -307,6 +309,7 @@ function ActivityMessageItem({
         <RichMarkdown
           className="mt-1.5 max-w-full min-w-0 overflow-hidden border-l border-violet-300/60 pl-3 text-[13px] leading-tight [overflow-wrap:anywhere] break-words text-muted-foreground dark:border-violet-700/60 [&_*]:max-w-full [&_code]:break-words [&_p]:my-0 [&_pre]:overflow-x-auto [&_pre]:whitespace-pre-wrap"
           content={message.content || "empty message"}
+          defaultCodeWrap={false}
         />
       </article>
     )
@@ -327,6 +330,7 @@ function ActivityMessageItem({
           sameSpeaker(message, previousMessage) ? "mt-0" : "mt-2"
         )}
         content={content}
+        defaultCodeWrap={false}
       />
       <div className="min-w-0 overflow-hidden">
         <ToolCallList value={message.tool_calls} />

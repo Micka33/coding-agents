@@ -17,10 +17,12 @@ import {
 } from "@/components/ai-elements/web-preview"
 import { GeneratedUiPanel } from "@/components/studio/generated-ui-panel"
 import { RichMarkdown } from "@/components/studio/rich-markdown"
+import { RightInspector } from "@/components/studio/right-inspector"
 import { StudioSidebar } from "@/components/studio/studio-sidebar"
 import { emptyStudioState } from "@/components/studio/studio-workspace"
 import { ToolCallList } from "@/components/studio/tool-call-list"
 import { TooltipProvider } from "@/components/ui/tooltip"
+import type { StudioApiClient } from "@/lib/studio/api-client"
 import { loadStudioMock } from "@/lib/studio/fixtures"
 import type { StudioState, StudioTeamDescriptor } from "@/lib/studio/schemas"
 import { studioToolCallsFromValue } from "@/lib/studio/tool-calls"
@@ -30,10 +32,13 @@ afterEach(() => {
 })
 
 describe("rich markdown rendering", () => {
-  function renderRichMarkdown(content: string) {
+  function renderRichMarkdown(
+    content: string,
+    props: Omit<ComponentProps<typeof RichMarkdown>, "content"> = {}
+  ) {
     return render(
       <TooltipProvider>
-        <RichMarkdown content={content} />
+        <RichMarkdown content={content} {...props} />
       </TooltipProvider>
     )
   }
@@ -78,6 +83,50 @@ describe("rich markdown rendering", () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("pnpm test"))
   })
 
+  it("toggles code block wrapping without changing copied code", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    })
+
+    const code = "project\n  src\n    really-long-output-line"
+    renderRichMarkdown(["```text", code, "```"].join("\n"))
+
+    const wrapButton = await screen.findByRole("button", {
+      name: "Disable code wrapping",
+    })
+    const block = wrapButton.closest("[data-code-wrap]")
+
+    expect(block).toHaveAttribute("data-code-wrap", "true")
+
+    fireEvent.click(wrapButton)
+
+    expect(block).toHaveAttribute("data-code-wrap", "false")
+    expect(
+      screen.getByRole("button", { name: "Enable code wrapping" })
+    ).toHaveAttribute("aria-pressed", "false")
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy code block" }))
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(code))
+  })
+
+  it("can render code blocks unwrapped by default", async () => {
+    renderRichMarkdown(["```text", "a very long line", "```"].join("\n"), {
+      defaultCodeWrap: false,
+    })
+
+    const wrapButton = await screen.findByRole("button", {
+      name: "Enable code wrapping",
+    })
+
+    expect(wrapButton.closest("[data-code-wrap]")).toHaveAttribute(
+      "data-code-wrap",
+      "false"
+    )
+  })
+
   it("copies tables as spreadsheet-ready TSV", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(navigator, "clipboard", {
@@ -98,6 +147,171 @@ describe("rich markdown rendering", () => {
     await waitFor(() =>
       expect(writeText).toHaveBeenCalledWith("Name\tStatus\nStudio\tready")
     )
+  })
+})
+
+describe("right inspector preformatted output", () => {
+  it("toggles diff wrapping and copies the raw diff", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    })
+
+    const diff = [
+      "diff --git a/src/app.ts b/src/app.ts",
+      "+project",
+      "+  src",
+      "+    really-long-output-line",
+    ].join("\n")
+    const apiClient = {
+      changeDiff: vi.fn().mockResolvedValue({
+        change_id: "change_1",
+        diff,
+        path: "src/app.ts",
+      }),
+    } as unknown as StudioApiClient
+    const { state } = loadStudioMock()
+
+    render(
+      <TooltipProvider>
+        <RightInspector
+          apiClient={apiClient}
+          changes={{
+            changes: [
+              {
+                agent_id: "developer",
+                diff_url: "/api/studio/v1/changes/change_1/diff",
+                event_id: "event_1",
+                id: "change_1",
+                path: "src/app.ts",
+                source: "workspace",
+                status: "modified",
+              },
+            ],
+            supported: true,
+          }}
+          files={[]}
+          generatedUi={[]}
+          onClose={() => undefined}
+          onViewChange={() => undefined}
+          placement="side"
+          session={null}
+          state={state}
+          view={{ kind: "changes" }}
+        />
+      </TooltipProvider>
+    )
+
+    await waitFor(() => expect(apiClient.changeDiff).toHaveBeenCalled())
+    expect(
+      screen.getByText((content) => content.includes("diff --git"))
+    ).toBeInTheDocument()
+
+    const wrapButton = await screen.findByRole("button", {
+      name: "Enable line wrapping",
+    })
+    const block = wrapButton.closest("[data-preformatted-wrap]")
+
+    expect(block).toHaveAttribute("data-preformatted-wrap", "false")
+
+    fireEvent.click(wrapButton)
+
+    expect(block).toHaveAttribute("data-preformatted-wrap", "true")
+    expect(
+      screen.getByRole("button", { name: "Disable line wrapping" })
+    ).toHaveAttribute("aria-pressed", "true")
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy diff output" }))
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(diff))
+  })
+
+  it("does not iframe files without an available preview url", () => {
+    const { state } = loadStudioMock()
+
+    render(
+      <TooltipProvider>
+        <RightInspector
+          apiClient={null}
+          changes={null}
+          files={[
+            {
+              added_by: "human",
+              download_url: "/api/studio/v1/files/file_01/download",
+              event_id: "event_01",
+              event_seq: 1,
+              filename: "SKILL.md",
+              id: "file_01",
+              media_type: null,
+              preview_mode: null,
+              preview_url: null,
+              size_bytes: 10738,
+            },
+          ]}
+          generatedUi={[]}
+          onClose={() => undefined}
+          onViewChange={() => undefined}
+          placement="side"
+          session={null}
+          state={state}
+          view={{ kind: "files" }}
+        />
+      </TooltipProvider>
+    )
+
+    expect(screen.getByText("Preview is not available for this file type.")).toBeInTheDocument()
+    expect(screen.queryByTitle("SKILL.md")).not.toBeInTheDocument()
+  })
+
+  it("renders text file previews as raw text instead of an iframe", async () => {
+    const previousFetch = globalThis.fetch
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response("# skill\n\nDo not render this as Markdown.")
+    ) as typeof fetch
+    const { state } = loadStudioMock()
+
+    try {
+      render(
+        <TooltipProvider>
+          <RightInspector
+            apiClient={null}
+            changes={null}
+            files={[
+              {
+                added_by: "human",
+                download_url: "/api/studio/v1/files/file_01/download",
+                event_id: "event_01",
+                event_seq: 1,
+                filename: "SKILL.md",
+                id: "file_01",
+                media_type: "text/markdown",
+                preview_mode: "text",
+                preview_url: "/api/studio/v1/files/file_01/preview",
+                size_bytes: 38,
+              },
+            ]}
+            generatedUi={[]}
+            onClose={() => undefined}
+            onViewChange={() => undefined}
+            placement="side"
+            session={null}
+            state={state}
+            view={{ kind: "files" }}
+          />
+        </TooltipProvider>
+      )
+
+      const rawPreview = await screen.findByLabelText("Raw preview for SKILL.md")
+
+      expect(rawPreview).toHaveTextContent("# skill")
+      expect(rawPreview).toHaveTextContent("Do not render this as Markdown.")
+      expect(screen.queryByRole("heading", { name: "skill" })).not.toBeInTheDocument()
+      expect(screen.queryByTitle("SKILL.md")).not.toBeInTheDocument()
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/studio/v1/files/file_01/preview")
+    } finally {
+      globalThis.fetch = previousFetch
+    }
   })
 })
 

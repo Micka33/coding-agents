@@ -248,7 +248,7 @@ def create_app(conversation: WebConversation | StudioSessionController, *, strea
 
     @app.get("/api/studio/v1/files/{file_id}/preview")
     async def file_preview(file_id: str) -> FileResponse:
-        resource = controller.file_resource(file_id)
+        resource = controller.file_resource(file_id, preview=True)
         return FileResponse(resource.path, media_type=resource.media_type)
 
     @app.get("/api/studio/v1/files/{file_id}/download")

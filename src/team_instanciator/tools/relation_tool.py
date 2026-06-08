@@ -10,6 +10,7 @@ from src.team_loader.models.relation_definition import RelationDefinition
 
 from src.team_instanciator.conversation.protocols import GraphRegistry
 from src.team_instanciator.runtime.branch_thread_resolver import BranchThreadResolver
+from src.team_instanciator.runtime.graph_invocation import invoke_graph_sync
 from src.team_instanciator.runtime.runnable_config_metadata_injector import RunnableConfigMetadataInjector
 from src.team_instanciator.runtime.thread_id_factory import ThreadIdFactory
 from src.team_instanciator.runtime.tool_call_edge import ToolCallEdge
@@ -89,10 +90,11 @@ class RelationTool:
         with lock:
             self._tool_call_edge_recorder.record_started(edge)
             try:
-                result = graph.invoke(
+                result = invoke_graph_sync(
+                    graph,
                     {"messages": [{"role": "user", "content": message}]},
                     config=self._metadata_injector.inject(
-                        {"configurable": {"thread_id": thread_id}},
+                        self._base_child_config(runtime, thread_id),
                         metadata,
                     ),
                 )
@@ -101,6 +103,14 @@ class RelationTool:
                 raise
             self._tool_call_edge_recorder.record_finished(edge_id, "success")
         return self._last_message_text(result)
+
+    def _base_child_config(self, runtime: ToolRuntime, thread_id: str) -> dict[str, object]:
+        config: dict[str, object] = {"configurable": {"thread_id": thread_id}}
+        runtime_config = runtime.config or {}
+        callbacks = runtime_config.get("callbacks") if isinstance(runtime_config, Mapping) else None
+        if callbacks is not None:
+            config["callbacks"] = callbacks
+        return config
 
     def _parent_thread_id(self, runtime: ToolRuntime) -> str:
         configurable = runtime.config.get("configurable", {}) if runtime.config else {}

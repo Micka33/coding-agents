@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import mimetypes
 import shutil
 import uuid
 from collections.abc import Iterable, Mapping
@@ -16,13 +15,15 @@ from src.type_defs import JsonObject, is_json_value
 from src.team_loader.models.team_definition import TeamDefinition
 from src.team_instanciator.factories.checkpoint_metadata_factory import CheckpointMetadataFactory
 from src.team_instanciator.runtime.checkpointer_handle import CheckpointerHandle
+from src.team_instanciator.runtime.graph_invocation import invoke_graph_sync
+from src.team_instanciator.runtime.model_attempt_callback import with_model_attempt_callback
 from src.team_instanciator.runtime.runnable_config_metadata_injector import RunnableConfigMetadataInjector
 from src.team_instanciator.runtime.thread_id_factory import ThreadIdFactory
 
 from .conversation_append_result import ConversationAppendResult
 from .conversation_checkpoint_resume_result import ConversationCheckpointResumeResult
 from .conversation_event import ConversationEvent
-from .conversation_file_ref import ConversationFileRef
+from .conversation_file_ref import ConversationFileRef, guess_conversation_media_type
 from .dispatch_context import DispatchContext
 from .payloads import ConversationStateDict, MessageSummaryDict
 from .conversation_runtime_controller import ConversationRuntimeController
@@ -219,6 +220,10 @@ class MentionAwareTeam:
     def wait_for_idle(self) -> None:
         self.router.wait_for_idle()
 
+    def dispatch_pending(self, *, wait: bool = False) -> None:
+        if self.store.get_runtime_state().mention_hook_enabled:
+            self.router.dispatch(wait=wait)
+
     def inject_agent_prompt(
         self,
         agent_id: str,
@@ -286,19 +291,27 @@ class MentionAwareTeam:
         )
 
         try:
-            result = graph.invoke(
+            config = self._metadata_injector.inject(
+                config,
+                {
+                    **self.checkpoint_metadata_factory.mention(self.team, self.team.agents[agent_id]),
+                    "branch_id": branch_id,
+                    "logical_thread_key": logical_thread_key,
+                    "physical_thread_id": source_frontier.physical_thread_id,
+                    "run_id": run_id,
+                    "control_event_id": control_event.id,
+                    "source_checkpoint_id": source_frontier.checkpoint_id,
+                },
+            )
+            result = invoke_graph_sync(
+                graph,
                 None,
-                config=self._metadata_injector.inject(
+                config=with_model_attempt_callback(
                     config,
-                    {
-                        **self.checkpoint_metadata_factory.mention(self.team, self.team.agents[agent_id]),
-                        "branch_id": branch_id,
-                        "logical_thread_key": logical_thread_key,
-                        "physical_thread_id": source_frontier.physical_thread_id,
-                        "run_id": run_id,
-                        "control_event_id": control_event.id,
-                        "source_checkpoint_id": source_frontier.checkpoint_id,
-                    },
+                    store=self.store,
+                    agent_id=agent_id,
+                    run_id=run_id,
+                    branch_id=branch_id,
                 ),
             )
         except Exception as exc:
@@ -403,7 +416,7 @@ class MentionAwareTeam:
                     ]
                 },
             )
-        result = graph.invoke(None, config=config)
+        result = invoke_graph_sync(graph, None, config=config)
         reply = PublicReplyExtractor().extract(result)
         if reply is None:
             raise ValueError("Checkpoint replay returned no final textual AI reply.")
@@ -469,6 +482,7 @@ class MentionAwareTeam:
         agent_states = [state.to_dict() for state in self.store.list_agent_states()]
         deliveries = [delivery.to_dict() for delivery in self.store.list_deliveries()]
         runs = [run.to_dict() for run in self.store.list_runs()]
+        model_attempts = [attempt.to_dict() for attempt in self.store.list_model_attempts()]
         branch_threads = [thread.to_dict() for thread in self.store.list_branch_threads()]
         thread_frontiers = [frontier.to_dict() for frontier in self.store.list_thread_frontiers()]
         control_events = [event.to_dict() for event in self.store.list_control_events()]
@@ -487,6 +501,7 @@ class MentionAwareTeam:
             "agent_states": agent_states,
             "deliveries": deliveries,
             "runs": runs,
+            "model_attempts": model_attempts,
             "branch_threads": branch_threads,
             "thread_frontiers": thread_frontiers,
             "control_events": control_events,
@@ -530,7 +545,7 @@ class MentionAwareTeam:
             id=file_id,
             filename=filename,
             uri=f"conversation://files/{file_id}",
-            media_type=media_type or mimetypes.guess_type(filename)[0],
+            media_type=media_type or guess_conversation_media_type(filename),
             size_bytes=destination.stat().st_size,
             added_by=added_by,
         )
@@ -736,7 +751,7 @@ class MentionAwareTeam:
             id=file_id,
             filename=source.name,
             uri=f"conversation://files/{file_id}",
-            media_type=mimetypes.guess_type(source.name)[0],
+            media_type=guess_conversation_media_type(source.name),
             size_bytes=destination.stat().st_size,
             added_by=added_by,
         )

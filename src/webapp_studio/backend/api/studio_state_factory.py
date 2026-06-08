@@ -16,6 +16,7 @@ from src.webapp_studio.backend.contracts.conversation_branch_thread_dto import C
 from src.webapp_studio.backend.contracts.conversation_control_event_dto import ConversationControlEventDto
 from src.webapp_studio.backend.contracts.conversation_delivery_dto import ConversationDeliveryDto
 from src.webapp_studio.backend.contracts.conversation_event_dto import ConversationEventDto
+from src.webapp_studio.backend.contracts.conversation_model_attempt_dto import ConversationModelAttemptDto
 from src.webapp_studio.backend.contracts.conversation_run_dto import ConversationRunDto
 from src.webapp_studio.backend.contracts.conversation_snapshot import ConversationSnapshot
 from src.webapp_studio.backend.contracts.external_side_effect_dto import ExternalSideEffectDto
@@ -53,6 +54,7 @@ class StudioStateFactory:
             events=[ConversationEventDto.model_validate(item) for item in visible_state.get("events", [])],
             deliveries=deliveries,
             runs=[ConversationRunDto.model_validate(item) for item in visible_state.get("runs", [])],
+            model_attempts=[ConversationModelAttemptDto.model_validate(item) for item in visible_state.get("model_attempts", [])],
             agent_states=agent_states,
             branch_threads=[ConversationBranchThreadDto.model_validate(item) for item in visible_state.get("branch_threads", [])],
             thread_frontiers=[ThreadFrontierDto.model_validate(item) for item in visible_state.get("thread_frontiers", [])],

@@ -31,6 +31,7 @@ from src.team_instanciator.conversation import (
     PublicReplyExtractor,
 )
 from src.team_instanciator.conversation.dispatch_context import DispatchContext
+from src.team_instanciator.conversation.store import ORPHANED_RUN_DELIVERY_ERROR
 from src.team_instanciator.runtime.thread_id_factory import ThreadIdFactory
 from src.team_instanciator.runtime.tool_call_edge import ToolCallEdge
 from src.team_instanciator.runtime.tool_call_edge_recorder import ToolCallEdgeRecorder
@@ -51,6 +52,7 @@ class FakeGraph:
         self.response = response
         self.callback = callback
         self.calls: list[tuple[Any, Any]] = []
+        self.async_calls = 0
         self.updates: list[tuple[Any, Any]] = []
         self.interrupted = False
 
@@ -59,6 +61,10 @@ class FakeGraph:
         if self.callback is not None:
             self.callback(self, input, config)
         return {"messages": [AIMessage(content=self.response, id=f"msg-{len(self.calls)}")]}
+
+    async def ainvoke(self, input: Any, config: Any = None):
+        self.async_calls += 1
+        return self.invoke(input, config=config)
 
     def update_state(self, config: Any, values: Any):
         self.updates.append((config, values))
@@ -412,6 +418,18 @@ class ConversationRuntimeTests(unittest.TestCase):
                 logical_thread_key=orphan_thread_id,
                 physical_thread_id=orphan_thread_id,
             )
+            store.record_model_attempt_started(
+                attempt_id="model_attempt_orphan",
+                run_id="run_orphan",
+                agent_id="orphan",
+                provider="openai",
+                model="openai:gpt-test",
+                attempt_number=1,
+                max_attempts=3,
+                timeout_mode="stream_idle_timeout",
+                timeout_seconds=120,
+                branch_id="branch_main",
+            )
             ToolCallEdgeRecorder(connection).record_started(
                 ToolCallEdge(
                     id="edge_orphan",
@@ -454,6 +472,12 @@ class ConversationRuntimeTests(unittest.TestCase):
             self.assertFalse(reloaded.ensure_agent_state("orphan", branch_id="branch_main").running)
             self.assertIsNone(reloaded.ensure_agent_state("orphan", branch_id="branch_main").current_run_id)
             self.assertEqual(connection.execute("select status from tool_call_edges where id = 'edge_orphan'").fetchone()[0], "failed")
+            orphan_delivery = [delivery for delivery in reloaded.list_deliveries(branch_id="branch_main") if delivery.run_id == "run_orphan"][0]
+            self.assertEqual(orphan_delivery.status, "failed")
+            self.assertEqual(orphan_delivery.error, ORPHANED_RUN_DELIVERY_ERROR)
+            orphan_attempt = reloaded.get_model_attempt("model_attempt_orphan")
+            self.assertEqual(orphan_attempt.status if orphan_attempt else None, "failed")
+            self.assertEqual(orphan_attempt.normalized_failure_code if orphan_attempt else None, "process_interrupted")
 
             replacement = reloaded.ensure_branch_thread(
                 branch_id="branch_main",
@@ -1511,6 +1535,30 @@ class ConversationRuntimeTests(unittest.TestCase):
         self.assertEqual(graph.calls[0][1]["metadata"]["branch_id"], "branch_main")
         self.assertFalse(runtime.store.ensure_agent_state("agent-b", branch_id="branch_main").queued)
 
+    def test_dispatch_pending_drains_existing_queue_when_hook_is_enabled(self) -> None:
+        graph = FakeGraph("answer")
+        runtime = self._conversation_runtime({"agent-b": graph})
+        event = runtime.store.append_event(
+            author_id="human",
+            author_kind="human",
+            content="@agent-b queued",
+            mentions=("agent-b",),
+        )
+        runtime.router.enqueue_targets(event, ("agent-b",))
+
+        runtime.dispatch_pending(wait=True)
+
+        self.assertEqual(len(graph.calls), 1)
+        self.assertFalse(runtime.store.ensure_agent_state("agent-b").queued)
+
+    def test_router_uses_async_graph_invocation_when_available(self) -> None:
+        graph = FakeGraph("answer")
+        runtime = self._conversation_runtime({"agent-b": graph})
+
+        runtime.append_human_message("@agent-b hello", wait=True)
+
+        self.assertEqual(graph.async_calls, 1)
+
     def test_state_reports_all_running_and_queued_activities(self) -> None:
         runtime = self._conversation_runtime({"agent-b": FakeGraph("answer"), "agent-c": FakeGraph("answer")})
         state_b = runtime.store.ensure_agent_state("agent-b")
@@ -1644,6 +1692,8 @@ class ConversationRuntimeTests(unittest.TestCase):
             existing_ref = ConversationFileRef(id="existing", filename="existing.txt", uri="conversation://files/existing")
             runtime.append_human_message("@agent-b existing", files=[existing_ref])
             public_ref = runtime.create_public_file_ref(filename="upload.txt", content=b"hello", added_by="human")
+            markdown_ref = runtime.create_public_file_ref(filename="SKILL.md", content=b"# skill", added_by="human")
+            mdc_ref = runtime.create_public_file_ref(filename="agent.mdc", content=b"---\n---\n", added_by="human")
             runtime.append_agent_message(agent_id="agent-b", content="@agent-b self ignored")
             runtime.append_agent_message(agent_id="agent-b", content="@agent-b no hook")
             dispatch_calls = []
@@ -1654,6 +1704,8 @@ class ConversationRuntimeTests(unittest.TestCase):
 
             self.assertEqual(dict_ref_event.attachments[0].id, "dict-file")
             self.assertEqual(public_ref.size_bytes, 5)
+            self.assertEqual(markdown_ref.media_type, "text/markdown")
+            self.assertEqual(mdc_ref.media_type, "text/markdown")
             side_effect = runtime.store.list_external_side_effects()[0]
             self.assertEqual(side_effect.branch_id, "branch_main")
             self.assertEqual(side_effect.kind, "file-write")

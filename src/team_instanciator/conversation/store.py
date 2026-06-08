@@ -25,6 +25,7 @@ from .conversation_interrupt import (
     ConversationInterruptKind,
     ConversationInterruptStatus,
 )
+from .conversation_model_attempt import ConversationModelAttempt, ModelAttemptStatus
 from .conversation_run import (
     CheckpointStability,
     ConversationRun,
@@ -70,7 +71,9 @@ _RUN_STATUSES: tuple[ConversationRunStatus, ...] = (
 )
 _CHECKPOINT_STABILITIES: tuple[CheckpointStability, ...] = ("stable", "unstable", "unknown")
 _RUN_COMMIT_STATES: tuple[ConversationRunCommitState, ...] = ("pending", "committed", "orphaned")
+_MODEL_ATTEMPT_STATUSES: tuple[ModelAttemptStatus, ...] = ("running", "retrying", "success", "failed")
 _HISTORY_SCHEMA_VERSION = "branching.v1"
+ORPHANED_RUN_DELIVERY_ERROR = "Run was still pending when the backend restarted; no terminal delivery was recorded."
 
 
 class ConversationStore:
@@ -97,6 +100,7 @@ class ConversationStore:
         self._external_side_effects: list[ExternalSideEffect] = []
         self._studio_branch_ui_states: dict[tuple[str, str], StudioBranchUiState] = {}
         self._runs: dict[str, ConversationRun] = {}
+        self._model_attempts: dict[str, ConversationModelAttempt] = {}
         self._interrupts: dict[str, ConversationInterrupt] = {}
         self._current_branch_id = "branch_main"
         self._runtime_state = ConversationRuntimeState(
@@ -691,6 +695,201 @@ class ConversationStore:
             self._complete_run_record_from_delivery(delivery)
             self._connection.commit()
             return delivery
+
+    def record_model_attempt_started(
+        self,
+        *,
+        attempt_id: str,
+        run_id: str,
+        agent_id: str,
+        provider: str,
+        model: str,
+        attempt_number: int,
+        max_attempts: int,
+        timeout_mode: str,
+        timeout_seconds: float,
+        branch_id: str | None = None,
+    ) -> ConversationModelAttempt:
+        attempt = ConversationModelAttempt(
+            id=attempt_id,
+            team_id=self.team_id,
+            conversation_id=self.conversation_id,
+            branch_id=self._resolved_branch_id(branch_id),
+            run_id=run_id,
+            agent_id=agent_id,
+            provider=provider,
+            model=model,
+            attempt_number=attempt_number,
+            max_attempts=max_attempts,
+            timeout_mode=timeout_mode,
+            timeout_seconds=timeout_seconds,
+            started_at=self._now(),
+        )
+        with self._lock:
+            if self._connection is None:
+                self._model_attempts[attempt.id] = attempt
+                return attempt
+            self._connection.execute(
+                """
+                insert or replace into team_conversation_model_attempts (
+                    team_id,
+                    conversation_id,
+                    branch_id,
+                    id,
+                    run_id,
+                    agent_id,
+                    provider,
+                    model,
+                    attempt_number,
+                    max_attempts,
+                    timeout_mode,
+                    timeout_seconds,
+                    started_at,
+                    completed_at,
+                    status,
+                    normalized_failure_code,
+                    provider_error_type
+                )
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    attempt.team_id,
+                    attempt.conversation_id,
+                    attempt.branch_id,
+                    attempt.id,
+                    attempt.run_id,
+                    attempt.agent_id,
+                    attempt.provider,
+                    attempt.model,
+                    attempt.attempt_number,
+                    attempt.max_attempts,
+                    attempt.timeout_mode,
+                    attempt.timeout_seconds,
+                    attempt.started_at,
+                    attempt.completed_at,
+                    attempt.status,
+                    attempt.normalized_failure_code,
+                    attempt.provider_error_type,
+                ),
+            )
+            self._connection.commit()
+            return attempt
+
+    def record_model_attempt_finished(
+        self,
+        attempt_id: str,
+        *,
+        status: ModelAttemptStatus,
+        normalized_failure_code: str | None = None,
+        provider_error_type: str | None = None,
+    ) -> ConversationModelAttempt | None:
+        if status not in _MODEL_ATTEMPT_STATUSES:
+            return None
+        with self._lock:
+            attempt = self.get_model_attempt(attempt_id)
+            if attempt is None:
+                return None
+            updated = replace(
+                attempt,
+                completed_at=self._now(),
+                status=status,
+                normalized_failure_code=normalized_failure_code,
+                provider_error_type=provider_error_type,
+            )
+            if self._connection is None:
+                self._model_attempts[attempt_id] = updated
+                return updated
+            self._connection.execute(
+                """
+                update team_conversation_model_attempts
+                set completed_at = ?,
+                    status = ?,
+                    normalized_failure_code = ?,
+                    provider_error_type = ?
+                where team_id = ? and conversation_id = ? and id = ?
+                """,
+                (
+                    updated.completed_at,
+                    updated.status,
+                    updated.normalized_failure_code,
+                    updated.provider_error_type,
+                    self.team_id,
+                    self.conversation_id,
+                    attempt_id,
+                ),
+            )
+            self._connection.commit()
+            return updated
+
+    def get_model_attempt(self, attempt_id: str) -> ConversationModelAttempt | None:
+        with self._lock:
+            if self._connection is None:
+                attempt = self._model_attempts.get(attempt_id)
+                return replace(attempt) if attempt is not None else None
+            row = self._connection.execute(
+                """
+                select
+                    branch_id,
+                    id,
+                    run_id,
+                    agent_id,
+                    provider,
+                    model,
+                    attempt_number,
+                    max_attempts,
+                    timeout_mode,
+                    timeout_seconds,
+                    started_at,
+                    completed_at,
+                    status,
+                    normalized_failure_code,
+                    provider_error_type
+                from team_conversation_model_attempts
+                where team_id = ? and conversation_id = ? and id = ?
+                """,
+                (self.team_id, self.conversation_id, attempt_id),
+            ).fetchone()
+            return self._model_attempt_from_row(row) if row is not None else None
+
+    def list_model_attempts(self, *, run_id: str | None = None) -> list[ConversationModelAttempt]:
+        with self._lock:
+            if self._connection is None:
+                attempts = [
+                    attempt
+                    for attempt in self._model_attempts.values()
+                    if run_id is None or attempt.run_id == run_id
+                ]
+                return [replace(attempt) for attempt in sorted(attempts, key=lambda item: (item.started_at, item.id))]
+            clauses = ["team_id = ?", "conversation_id = ?"]
+            params: list[object] = [self.team_id, self.conversation_id]
+            if run_id is not None:
+                clauses.append("run_id = ?")
+                params.append(run_id)
+            rows = self._connection.execute(
+                f"""
+                select
+                    branch_id,
+                    id,
+                    run_id,
+                    agent_id,
+                    provider,
+                    model,
+                    attempt_number,
+                    max_attempts,
+                    timeout_mode,
+                    timeout_seconds,
+                    started_at,
+                    completed_at,
+                    status,
+                    normalized_failure_code,
+                    provider_error_type
+                from team_conversation_model_attempts
+                where {" and ".join(clauses)}
+                order by started_at asc, id asc
+                """,
+                tuple(params),
+            ).fetchall()
+            return [self._model_attempt_from_row(row) for row in rows]
 
     def get_run(self, run_id: str) -> ConversationRun | None:
         with self._lock:
@@ -1434,6 +1633,15 @@ class ConversationStore:
                     finalized_runs += 1
                     continue
                 self._orphan_run(run)
+                self._fail_running_model_attempts_for_run(run.id)
+                self.record_delivery(
+                    agent_id=run.agent_id,
+                    run_id=run.id,
+                    snapshot_seq=run.snapshot_seq,
+                    status="failed",
+                    error=ORPHANED_RUN_DELIVERY_ERROR,
+                    branch_id=run.branch_id,
+                )
                 orphaned_runs += 1
 
             committed_run_ids = {
@@ -1982,6 +2190,30 @@ class ConversationStore:
         )
         connection.execute(
             """
+            create table if not exists team_conversation_model_attempts (
+                team_id text not null,
+                conversation_id text not null,
+                branch_id text not null default 'branch_main',
+                id text not null,
+                run_id text not null,
+                agent_id text not null,
+                provider text not null,
+                model text not null,
+                attempt_number integer not null,
+                max_attempts integer not null,
+                timeout_mode text not null,
+                timeout_seconds real not null,
+                started_at text not null,
+                completed_at text,
+                status text not null,
+                normalized_failure_code text,
+                provider_error_type text,
+                primary key (team_id, conversation_id, id)
+            )
+            """
+        )
+        connection.execute(
+            """
             create table if not exists team_conversation_runtime_state (
                 team_id text not null,
                 conversation_id text not null,
@@ -2364,6 +2596,27 @@ class ConversationStore:
             commit_state=self._run_commit_state(row[15]),
         )
 
+    def _model_attempt_from_row(self, row: tuple[object, ...]) -> ConversationModelAttempt:
+        return ConversationModelAttempt(
+            id=str(row[1]),
+            team_id=self.team_id,
+            conversation_id=self.conversation_id,
+            branch_id=str(row[0] or "branch_main"),
+            run_id=str(row[2]),
+            agent_id=str(row[3]),
+            provider=str(row[4]),
+            model=str(row[5]),
+            attempt_number=int(row[6]),
+            max_attempts=int(row[7]),
+            timeout_mode=str(row[8]),
+            timeout_seconds=float(row[9]),
+            started_at=str(row[10]),
+            completed_at=str(row[11]) if row[11] is not None else None,
+            status=self._model_attempt_status(row[12]),
+            normalized_failure_code=str(row[13]) if row[13] is not None else None,
+            provider_error_type=str(row[14]) if row[14] is not None else None,
+        )
+
     def _complete_run_record_from_delivery(self, delivery: ConversationDelivery) -> None:
         if delivery.run_id is None:
             return
@@ -2476,6 +2729,17 @@ class ConversationStore:
             completed_at=str(row[7]) if row[7] is not None else None,
             error=str(row[8]) if row[8] is not None else None,
         )
+
+    def _fail_running_model_attempts_for_run(self, run_id: str) -> int:
+        attempts = [attempt for attempt in self.list_model_attempts(run_id=run_id) if attempt.status == "running"]
+        for attempt in attempts:
+            self.record_model_attempt_finished(
+                attempt.id,
+                status="failed",
+                normalized_failure_code="process_interrupted",
+                provider_error_type="ProcessInterrupted",
+            )
+        return len(attempts)
 
     def _orphan_run(self, run: ConversationRun) -> None:
         latest_checkpoint_id = self.latest_checkpoint_id(run.physical_thread_id) if run.physical_thread_id else run.latest_checkpoint_id
@@ -3006,6 +3270,10 @@ class ConversationStore:
     def _run_status(self, value: object) -> ConversationRunStatus:
         status = str(value)
         return cast(ConversationRunStatus, status) if status in _RUN_STATUSES else "failed"
+
+    def _model_attempt_status(self, value: object) -> ModelAttemptStatus:
+        status = str(value)
+        return cast(ModelAttemptStatus, status) if status in _MODEL_ATTEMPT_STATUSES else "failed"
 
     def _run_status_from_delivery(self, status: DeliveryStatus) -> ConversationRunStatus:
         return cast(ConversationRunStatus, status) if status in _RUN_STATUSES else "failed"

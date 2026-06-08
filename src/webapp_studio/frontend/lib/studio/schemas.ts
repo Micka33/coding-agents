@@ -144,6 +144,28 @@ export const ConversationRunSchema = z
   })
   .passthrough()
 
+export const ConversationModelAttemptSchema = z
+  .object({
+    id: z.string(),
+    team_id: z.string(),
+    conversation_id: z.string(),
+    branch_id: z.string(),
+    run_id: z.string(),
+    agent_id: z.string(),
+    provider: z.string(),
+    model: z.string(),
+    attempt_number: z.number().int(),
+    max_attempts: z.number().int(),
+    timeout_mode: z.string(),
+    timeout_seconds: z.number(),
+    started_at: z.string(),
+    completed_at: z.string().nullable().default(null),
+    status: z.enum(["running", "retrying", "success", "failed"]),
+    normalized_failure_code: z.string().nullable().default(null),
+    provider_error_type: z.string().nullable().default(null),
+  })
+  .passthrough()
+
 export const AppendMessageResultSchema = z
   .object({
     event: ConversationEventSchema,
@@ -244,6 +266,7 @@ export const StudioFileItemSchema = z
     added_by: z.string().nullable(),
     event_id: z.string().nullable(),
     event_seq: z.number().int().nullable(),
+    preview_mode: z.enum(["iframe", "text"]).nullable().default(null),
     preview_url: z.string().nullable(),
     download_url: z.string(),
   })
@@ -446,6 +469,7 @@ export const ConversationSnapshotSchema = z
     events: z.array(ConversationEventSchema),
     deliveries: z.array(ConversationDeliverySchema),
     runs: z.array(ConversationRunSchema).default([]),
+    model_attempts: z.array(ConversationModelAttemptSchema).default([]),
     agent_states: z.array(AgentDeliveryStateSchema),
     branch_threads: z.array(ConversationBranchThreadSchema).default([]),
     thread_frontiers: z.array(ThreadFrontierSchema).default([]),

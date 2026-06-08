@@ -1,11 +1,13 @@
 "use client"
 
 import type { ReactNode } from "react"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useState } from "react"
 import {
   ActivityIcon,
   AppWindowIcon,
+  CheckIcon,
   ChevronRightIcon,
+  CopyIcon,
   PlayIcon,
   FileTextIcon,
   FolderIcon,
@@ -13,6 +15,7 @@ import {
   PanelRightCloseIcon,
   SquareIcon,
   TerminalIcon,
+  WrapTextIcon,
   XIcon,
 } from "lucide-react"
 
@@ -21,6 +24,11 @@ import { GeneratedUiPanel } from "@/components/studio/generated-ui-panel"
 import { StatusPill } from "@/components/studio/status-pill"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import type { StudioApiClient } from "@/lib/studio/api-client"
 import type {
   GeneratedUiSpec,
@@ -30,6 +38,7 @@ import type {
   StudioState,
   StudioTerminalSession,
 } from "@/lib/studio/schemas"
+import { cn } from "@/lib/utils"
 
 export type InspectorView =
   | { kind: "empty" }
@@ -234,7 +243,9 @@ function FilesInspector({
               Download
             </a>
           </div>
-          {selected.preview_url ? (
+          {selected.preview_url && selected.preview_mode === "text" ? (
+            <TextFilePreview filename={selected.filename} url={selected.preview_url} />
+          ) : selected.preview_url ? (
             <iframe
               className="h-72 w-full bg-muted"
               src={selected.preview_url}
@@ -273,6 +284,60 @@ function FilesInspector({
         ))}
       </div>
     </div>
+  )
+}
+
+function TextFilePreview({ filename, url }: { filename: string; url: string }) {
+  const [preview, setPreview] = useState<{
+    error: string | null
+    loading: boolean
+    text: string
+  }>({ error: null, loading: true, text: "" })
+
+  useEffect(() => {
+    let cancelled = false
+    setPreview({ error: null, loading: true, text: "" })
+    fetch(url)
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error("Unable to load preview.")
+        }
+        return response.text()
+      })
+      .then((text) => {
+        if (!cancelled) {
+          setPreview({ error: null, loading: false, text })
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setPreview({
+            error: error instanceof Error ? error.message : "Unable to load preview.",
+            loading: false,
+            text: "",
+          })
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [url])
+
+  if (preview.loading) {
+    return <div className="p-4 text-sm text-muted-foreground">Loading preview...</div>
+  }
+
+  if (preview.error) {
+    return <div className="p-4 text-sm text-muted-foreground">{preview.error}</div>
+  }
+
+  return (
+    <pre
+      aria-label={`Raw preview for ${filename}`}
+      className="max-h-72 overflow-auto whitespace-pre-wrap break-words bg-muted p-3 font-mono text-xs leading-relaxed"
+    >
+      {preview.text}
+    </pre>
   )
 }
 
@@ -378,9 +443,13 @@ function ChangesInspector({
         {error ? (
           <p className="p-3 text-sm text-destructive">{error}</p>
         ) : (
-          <pre className="max-h-[32rem] overflow-auto whitespace-pre-wrap break-words bg-muted/40 p-3 text-xs">
-            {diff || "No textual diff available."}
-          </pre>
+          <PreformattedBlock
+            className="max-h-[32rem] bg-muted/40 text-xs"
+            copyAriaLabel="Copy diff output"
+            defaultWrap={false}
+            emptyLabel="No textual diff available."
+            value={diff}
+          />
         )}
       </section>
     </div>
@@ -403,11 +472,6 @@ function TerminalInspector({
   const running = terminal?.status === "running"
   const terminalSessionId = terminal?.session_id
   const terminalStatus = terminal?.status
-  const outputLabel = useMemo(
-    () => output || "No terminal output yet.",
-    [output]
-  )
-
   useEffect(() => {
     if (!apiClient || !terminalSessionId || terminalStatus !== "running") {
       return
@@ -490,9 +554,13 @@ function TerminalInspector({
             <StatusPill label={terminal.status} tone={running ? "emerald" : "amber"} />
           ) : null}
         </div>
-        <pre className="min-h-72 max-h-[32rem] overflow-auto whitespace-pre-wrap break-words bg-black p-3 font-mono text-xs text-white">
-          {outputLabel}
-        </pre>
+        <PreformattedBlock
+          className="min-h-72 max-h-[32rem] bg-black font-mono text-xs text-white"
+          copyAriaLabel="Copy terminal output"
+          defaultWrap={false}
+          emptyLabel="No terminal output yet."
+          value={output}
+        />
       </section>
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
       <div className="flex gap-2">
@@ -526,6 +594,122 @@ function TerminalInspector({
         )}
       </div>
     </div>
+  )
+}
+
+function PreformattedBlock({
+  className,
+  copyAriaLabel,
+  defaultWrap,
+  emptyLabel,
+  value,
+}: {
+  className?: string
+  copyAriaLabel: string
+  defaultWrap: boolean
+  emptyLabel: string
+  value: string
+}) {
+  const [copied, setCopied] = useState(false)
+  const [wrapped, setWrapped] = useState(defaultWrap)
+  const displayValue = value || emptyLabel
+  const canCopy = value.length > 0
+
+  async function copy() {
+    if (
+      !canCopy ||
+      typeof navigator === "undefined" ||
+      !navigator.clipboard?.writeText
+    ) {
+      return
+    }
+
+    try {
+      await navigator.clipboard.writeText(value)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1200)
+    } catch {
+      setCopied(false)
+    }
+  }
+
+  return (
+    <div
+      className="group/preformatted relative"
+      data-preformatted-wrap={wrapped ? "true" : "false"}
+    >
+      <div className="absolute top-2 right-2 z-10 flex items-center gap-1">
+        <PreformattedActionButton
+          ariaLabel={copied ? "Preformatted content copied" : copyAriaLabel}
+          disabled={!canCopy}
+          label="copier"
+          onClick={copy}
+        >
+          {copied ? (
+            <CheckIcon className="size-3" />
+          ) : (
+            <CopyIcon className="size-3" />
+          )}
+        </PreformattedActionButton>
+        <PreformattedActionButton
+          ariaLabel={
+            wrapped ? "Disable line wrapping" : "Enable line wrapping"
+          }
+          ariaPressed={wrapped}
+          label={wrapped ? "défilement horizontal" : "retour à la ligne"}
+          onClick={() => setWrapped((value) => !value)}
+        >
+          <WrapTextIcon className="size-3" />
+        </PreformattedActionButton>
+      </div>
+      <pre
+        className={cn(
+          "max-w-full overflow-auto p-3 pt-10",
+          wrapped
+            ? "whitespace-pre-wrap break-words [overflow-wrap:anywhere]"
+            : "whitespace-pre break-normal",
+          className
+        )}
+      >
+        {displayValue}
+      </pre>
+    </div>
+  )
+}
+
+function PreformattedActionButton({
+  ariaLabel,
+  ariaPressed,
+  children,
+  disabled = false,
+  label,
+  onClick,
+}: {
+  ariaLabel: string
+  ariaPressed?: boolean
+  children: ReactNode
+  disabled?: boolean
+  label: string
+  onClick: () => void
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          aria-label={ariaLabel}
+          aria-pressed={ariaPressed}
+          className="border-border bg-background/80 opacity-100 transition-opacity supports-[backdrop-filter]:bg-background/70 supports-[backdrop-filter]:backdrop-blur sm:opacity-0 sm:group-focus-within/preformatted:opacity-100 sm:group-hover/preformatted:opacity-100"
+          disabled={disabled}
+          onClick={onClick}
+          size="icon-xs"
+          type="button"
+          variant="ghost"
+        >
+          {children}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
   )
 }
 

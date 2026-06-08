@@ -690,18 +690,92 @@ function mediaQuerySnapshot(query: string) {
 
 function filesFromState(state: StudioState): StudioFileItem[] {
   return state.conversation.events.flatMap((event) =>
-    event.attachments.map((attachment) => ({
-      id: attachment.id,
-      filename: attachment.filename,
-      media_type: attachment.media_type,
-      size_bytes: attachment.size_bytes,
-      added_by: attachment.added_by,
-      event_id: event.id,
-      event_seq: event.seq,
-      preview_url: `/api/studio/v1/files/${attachment.id}/preview`,
-      download_url: `/api/studio/v1/files/${attachment.id}/download`,
-    }))
+    event.attachments.map((attachment) => {
+      const preview = previewForAttachment(
+        attachment.id,
+        attachment.filename,
+        attachment.media_type,
+        attachment.size_bytes
+      )
+      return {
+        id: attachment.id,
+        filename: attachment.filename,
+        media_type: mediaTypeForAttachment(attachment.filename, attachment.media_type),
+        size_bytes: attachment.size_bytes,
+        added_by: attachment.added_by,
+        event_id: event.id,
+        event_seq: event.seq,
+        preview_mode: preview.mode,
+        preview_url: preview.url,
+        download_url: `/api/studio/v1/files/${attachment.id}/download`,
+      }
+    })
   )
+}
+
+const framePreviewMediaTypes = new Set(["application/pdf"])
+const framePreviewMediaPrefixes = ["audio/", "image/", "video/"]
+const textPreviewLimitBytes = 500 * 1024
+type PreviewMode = "iframe" | "text"
+const textPreviewMediaTypes = new Set(["application/json"])
+const blockedPreviewMediaTypes = new Set(["application/javascript", "image/svg+xml", "text/html", "text/javascript"])
+const blockedPreviewSuffixes = [".htm", ".html", ".js", ".mjs", ".svg"]
+const filenameMediaTypes = new Map([
+  [".markdown", "text/markdown"],
+  [".md", "text/markdown"],
+  [".mdc", "text/markdown"],
+  [".mdown", "text/markdown"],
+  [".mkd", "text/markdown"],
+])
+
+function previewForAttachment(
+  fileId: string,
+  filename: string,
+  mediaType: string | null,
+  sizeBytes: number | null
+) {
+  const mode = previewModeForAttachment(filename, mediaType, sizeBytes)
+  return {
+    mode,
+    url: mode ? `/api/studio/v1/files/${fileId}/preview` : null,
+  }
+}
+
+function previewModeForAttachment(
+  filename: string,
+  mediaType: string | null,
+  sizeBytes: number | null
+): PreviewMode | null {
+  const normalizedMediaType = mediaTypeForAttachment(filename, mediaType)
+  const normalizedFilename = filename.toLowerCase()
+  if (
+    !normalizedMediaType ||
+    blockedPreviewMediaTypes.has(normalizedMediaType) ||
+    blockedPreviewSuffixes.some((suffix) => normalizedFilename.endsWith(suffix))
+  ) {
+    return null
+  }
+  if (isTextPreviewMediaType(normalizedMediaType)) {
+    return sizeBytes !== null && sizeBytes <= textPreviewLimitBytes ? "text" : null
+  }
+  return framePreviewMediaTypes.has(normalizedMediaType) ||
+    framePreviewMediaPrefixes.some((prefix) => normalizedMediaType.startsWith(prefix))
+    ? "iframe"
+    : null
+}
+
+function mediaTypeForAttachment(filename: string, mediaType: string | null) {
+  const normalizedMediaType = mediaType?.split(";", 1)[0]?.trim().toLowerCase() || null
+  return normalizedMediaType ?? filenameMediaTypes.get(fileExtension(filename)) ?? null
+}
+
+function fileExtension(filename: string) {
+  const dotIndex = filename.lastIndexOf(".")
+  return dotIndex >= 0 ? filename.slice(dotIndex).toLowerCase() : ""
+}
+
+function isTextPreviewMediaType(mediaType: string) {
+  return textPreviewMediaTypes.has(mediaType) || mediaType.startsWith("text/")
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -743,6 +817,7 @@ export function emptyStudioState(team: StudioTeamDescriptor): StudioState {
       events: [],
       deliveries: [],
       runs: [],
+      model_attempts: [],
       agent_states: [],
       branch_threads: [],
       thread_frontiers: [],

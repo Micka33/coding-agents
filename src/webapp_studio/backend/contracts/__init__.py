@@ -12,6 +12,7 @@ from src.webapp_studio.backend.contracts.checkpoint_summary import CheckpointSum
 from src.webapp_studio.backend.contracts.conversation_delivery_dto import ConversationDeliveryDto
 from src.webapp_studio.backend.contracts.conversation_event_dto import ConversationEventDto
 from src.webapp_studio.backend.contracts.conversation_file_ref_dto import ConversationFileRefDto
+from src.webapp_studio.backend.contracts.conversation_model_attempt_dto import ConversationModelAttemptDto
 from src.webapp_studio.backend.contracts.conversation_snapshot import ConversationSnapshot
 from src.webapp_studio.backend.contracts.generated_ui_action import GeneratedUiAction
 from src.webapp_studio.backend.contracts.generated_ui_spec import GeneratedUiSpec
@@ -47,6 +48,7 @@ __all__ = [
     "ConversationDeliveryDto",
     "ConversationEventDto",
     "ConversationFileRefDto",
+    "ConversationModelAttemptDto",
     "ConversationSnapshot",
     "GeneratedUiAction",
     "GeneratedUiSpec",

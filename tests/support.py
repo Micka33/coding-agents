@@ -16,12 +16,17 @@ class FakeTeam(SimpleNamespace):
 class FakeGraph:
     def __init__(self, result: Any | None = None) -> None:
         self.calls: list[tuple[Any, Any, dict[str, Any]]] = []
+        self.async_calls = 0
         self.result = result if result is not None else {"messages": []}
         self.extra = "extra-value"
 
     def invoke(self, input: Any, config: Any = None, **kwargs: Any) -> Any:
         self.calls.append((input, config, kwargs))
         return self.result
+
+    async def ainvoke(self, input: Any, config: Any = None, **kwargs: Any) -> Any:
+        self.async_calls += 1
+        return self.invoke(input, config=config, **kwargs)
 
 
 class FakeClosable:

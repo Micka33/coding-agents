@@ -127,6 +127,7 @@ const studioState: StudioState = {
     control_events: [],
     external_side_effects: [],
     runs: [],
+    model_attempts: [],
   },
   activity: {
     active_agent_ids: [],

@@ -5,6 +5,8 @@ import uuid
 
 from src.team_loader.models.team_definition import TeamDefinition
 from src.team_instanciator.factories.checkpoint_metadata_factory import CheckpointMetadataFactory
+from src.team_instanciator.runtime.graph_invocation import invoke_graph_sync
+from src.team_instanciator.runtime.model_attempt_callback import with_model_attempt_callback
 from src.team_instanciator.runtime.runnable_config_metadata_injector import RunnableConfigMetadataInjector
 from src.team_instanciator.runtime.thread_id_factory import ThreadIdFactory
 
@@ -186,17 +188,25 @@ class MentionRouter:
                 return
 
             graph = self._registry.graph(agent_id)
-            result = graph.invoke(
+            config = self._metadata_injector.inject(
+                {"configurable": {"thread_id": thread_id}},
+                {
+                    **self._checkpoint_metadata_factory.mention(self._team, target),
+                    "branch_id": branch_id,
+                    "logical_thread_key": logical_thread_key,
+                    "physical_thread_id": thread_id,
+                    "run_id": run_id,
+                },
+            )
+            result = invoke_graph_sync(
+                graph,
                 {"messages": sync.messages},
-                config=self._metadata_injector.inject(
-                    {"configurable": {"thread_id": thread_id}},
-                    {
-                        **self._checkpoint_metadata_factory.mention(self._team, target),
-                        "branch_id": branch_id,
-                        "logical_thread_key": logical_thread_key,
-                        "physical_thread_id": thread_id,
-                        "run_id": run_id,
-                    },
+                config=with_model_attempt_callback(
+                    config,
+                    store=self._store,
+                    agent_id=agent_id,
+                    run_id=run_id,
+                    branch_id=branch_id,
                 ),
             )
             if self._store.is_stop_requested(agent_id, run_id, branch_id=branch_id):

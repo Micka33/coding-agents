@@ -208,6 +208,26 @@
     padding: 2rem 0.75rem 0.625rem;
 }
 
+.studio-markdown [data-code-wrap="true"] [data-streamdown="code-block-body"] {
+    overflow-x: hidden;
+}
+
+.studio-markdown [data-code-wrap="true"] [data-streamdown="code-block-body"] :where(pre, code, span) {
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+    word-break: normal;
+}
+
+.studio-markdown [data-code-wrap="false"] [data-streamdown="code-block-body"] {
+    overflow-x: auto;
+}
+
+.studio-markdown [data-code-wrap="false"] [data-streamdown="code-block-body"] :where(pre, code, span) {
+    overflow-wrap: normal;
+    white-space: pre;
+    word-break: normal;
+}
+
 .studio-markdown [data-streamdown="code-block-body"] code > span::before {
     margin-right: 0.75rem;
     width: 1.75rem;

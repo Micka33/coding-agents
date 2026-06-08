@@ -9,6 +9,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 from src.team_instanciator.conversation.conversation_branch import ConversationBranch
+from src.team_instanciator.conversation.conversation_file_ref import guess_conversation_media_type
 from src.team_instanciator.conversation.conversation_interrupt import ConversationInterrupt
 from src.team_instanciator.conversation.payloads import ConversationStateDict
 from src.webapp.api.conversation_api_controller import ConversationApiController
@@ -47,6 +48,10 @@ from src.webapp_studio.backend.streaming.stream_buffer import StreamBuffer
 
 _BLOCKED_FILE_MEDIA_TYPES = {"application/javascript", "image/svg+xml", "text/html", "text/javascript"}
 _BLOCKED_FILE_SUFFIXES = {".htm", ".html", ".js", ".mjs", ".svg"}
+_FRAME_PREVIEW_MEDIA_TYPES = {"application/pdf"}
+_FRAME_PREVIEW_MEDIA_PREFIXES = ("audio/", "image/", "video/")
+_TEXT_PREVIEW_LIMIT_BYTES = 500 * 1024
+_TEXT_PREVIEW_MEDIA_TYPES = {"application/json"}
 
 
 class StudioApiController:
@@ -307,17 +312,20 @@ class StudioApiController:
                 if not file_id:
                     continue
                 filename = str(attachment.get("filename") or file_id)
-                media_type = self._media_type(attachment.get("media_type"))
-                preview_url = None if self._blocked_file_type(filename, media_type) else f"/api/studio/v1/files/{file_id}/preview"
+                media_type = self._attachment_media_type(filename, attachment.get("media_type"))
+                size_bytes = self._optional_int(attachment.get("size_bytes"))
+                preview_mode = self._preview_mode(filename, media_type, size_bytes)
+                preview_url = f"/api/studio/v1/files/{file_id}/preview" if preview_mode else None
                 file_items.append(
                     {
                         "id": file_id,
                         "filename": filename,
                         "media_type": media_type,
-                        "size_bytes": self._optional_int(attachment.get("size_bytes")),
+                        "size_bytes": size_bytes,
                         "added_by": str(attachment.get("added_by")) if attachment.get("added_by") is not None else None,
                         "event_id": event.get("id"),
                         "event_seq": event.get("seq"),
+                        "preview_mode": preview_mode,
                         "preview_url": preview_url,
                         "download_url": f"/api/studio/v1/files/{file_id}/download",
                     }
@@ -628,7 +636,7 @@ class StudioApiController:
         return state
 
 
-    def file_resource(self, file_id: str, *, allow_blocked: bool = False) -> StudioFileResource:
+    def file_resource(self, file_id: str, *, allow_blocked: bool = False, preview: bool = False) -> StudioFileResource:
         if not file_id or "/" in file_id or "\\" in file_id or file_id in {".", ".."}:
             raise StudioApiError(status_code=404, code="not_found", message="file not found", field="file_id")
         state = self._compat.state()
@@ -636,8 +644,8 @@ class StudioApiController:
         if attachment is None:
             raise StudioApiError(status_code=404, code="not_found", message="file not found", field="file_id")
         filename = str(attachment.get("filename") or file_id)
-        media_type = self._media_type(attachment.get("media_type"))
-        if not allow_blocked and self._blocked_file_type(filename, media_type):
+        media_type = self._attachment_media_type(filename, attachment.get("media_type"))
+        if not allow_blocked and not preview and self._blocked_file_type(filename, media_type):
             raise StudioApiError(
                 status_code=415,
                 code="unsupported_media_type",
@@ -658,6 +666,16 @@ class StudioApiController:
         path = (base_path / file_id).resolve()
         if path.parent != base_path or not path.is_file():
             raise StudioApiError(status_code=404, code="not_found", message="file not found", field="file_id")
+        size_bytes = path.stat().st_size
+        preview_mode = self._preview_mode(filename, media_type, size_bytes)
+        if preview and preview_mode is None:
+            raise StudioApiError(
+                status_code=415,
+                code="unsupported_media_type",
+                message="file media type is not available for inline preview",
+                field="file_id",
+                details={"file_id": file_id, "media_type": media_type},
+            )
         return StudioFileResource(path=path, filename=filename, media_type=media_type)
 
     def compat_state(self) -> ConversationStateDict:
@@ -1007,8 +1025,23 @@ class StudioApiController:
     def _media_type(self, value: object) -> str | None:
         return str(value).split(";", maxsplit=1)[0].strip().lower() if value else None
 
+    def _attachment_media_type(self, filename: str, value: object) -> str | None:
+        return self._media_type(value) or guess_conversation_media_type(filename)
+
     def _blocked_file_type(self, filename: str, media_type: str | None) -> bool:
         return (media_type in _BLOCKED_FILE_MEDIA_TYPES) or Path(filename).suffix.lower() in _BLOCKED_FILE_SUFFIXES
+
+    def _preview_mode(self, filename: str, media_type: str | None, size_bytes: int | None) -> str | None:
+        if media_type is None or self._blocked_file_type(filename, media_type):
+            return None
+        if self._text_preview_file_type(media_type):
+            return "text" if size_bytes is not None and size_bytes <= _TEXT_PREVIEW_LIMIT_BYTES else None
+        if media_type in _FRAME_PREVIEW_MEDIA_TYPES or media_type.startswith(_FRAME_PREVIEW_MEDIA_PREFIXES):
+            return "iframe"
+        return None
+
+    def _text_preview_file_type(self, media_type: str) -> bool:
+        return media_type in _TEXT_PREVIEW_MEDIA_TYPES or media_type.startswith("text/")
 
     def _changes_from_git_status(self, output: bytes) -> list[dict[str, Any]]:
         records = [record for record in output.split(b"\0") if record]

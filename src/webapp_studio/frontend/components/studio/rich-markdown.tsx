@@ -13,7 +13,7 @@ import {
   extractTableDataFromElement,
   tableDataToTSV,
 } from "streamdown"
-import { CheckIcon, CopyIcon } from "lucide-react"
+import { CheckIcon, CopyIcon, WrapTextIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -26,15 +26,22 @@ import { cn } from "@/lib/utils"
 type RichMarkdownProps = {
   content: string
   className?: string
+  defaultCodeWrap?: boolean
 }
 
-export function RichMarkdown({ content, className }: RichMarkdownProps) {
+export function RichMarkdown({
+  content,
+  className,
+  defaultCodeWrap = true,
+}: RichMarkdownProps) {
   return (
     <Streamdown
       className={cn("studio-markdown text-sm leading-relaxed", className)}
       components={{
         a: SafeLink,
-        code: CopyableCode,
+        code: (props) => (
+          <CopyableCode {...props} defaultWrap={defaultCodeWrap} />
+        ),
         table: CopyableTable,
       }}
       controls={false}
@@ -48,6 +55,7 @@ export function RichMarkdown({ content, className }: RichMarkdownProps) {
 }
 
 type MarkdownCodeProps = ComponentProps<"code"> & {
+  defaultWrap: boolean
   node?: unknown
   "data-block"?: unknown
 }
@@ -55,12 +63,14 @@ type MarkdownCodeProps = ComponentProps<"code"> & {
 function CopyableCode({
   children,
   className,
+  defaultWrap,
   node,
   ...props
 }: MarkdownCodeProps) {
   void node
   const { "data-block": dataBlock, ...codeProps } = props
   const isBlock = dataBlock !== undefined
+  const [wrapped, setWrapped] = useState(defaultWrap)
 
   if (!isBlock) {
     return (
@@ -81,13 +91,21 @@ function CopyableCode({
   const language = languageFromClassName(className) || "text"
 
   return (
-    <div className="group/markdown-copy relative">
+    <div
+      className="group/markdown-copy relative"
+      data-code-wrap={wrapped ? "true" : "false"}
+    >
       <CodeBlock code={code} language={language} />
-      <MarkdownCopyButton
-        ariaLabel="Copy code block"
-        className="absolute top-1.5 right-2"
-        getValue={() => code}
-      />
+      <div className="absolute top-1.5 right-2 z-10 flex items-center gap-1">
+        <MarkdownCopyButton
+          ariaLabel="Copy code block"
+          getValue={() => code}
+        />
+        <MarkdownWrapButton
+          onClick={() => setWrapped((value) => !value)}
+          wrapped={wrapped}
+        />
+      </div>
     </div>
   )
 }
@@ -182,6 +200,37 @@ function MarkdownCopyButton({
         </Button>
       </TooltipTrigger>
       <TooltipContent>copier</TooltipContent>
+    </Tooltip>
+  )
+}
+
+function MarkdownWrapButton({
+  onClick,
+  wrapped,
+}: {
+  onClick: () => void
+  wrapped: boolean
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          aria-label={
+            wrapped ? "Disable code wrapping" : "Enable code wrapping"
+          }
+          aria-pressed={wrapped}
+          className="z-10 opacity-100 transition-opacity sm:opacity-0 sm:group-focus-within/markdown-copy:opacity-100 sm:group-hover/markdown-copy:opacity-100"
+          onClick={onClick}
+          size="icon-xs"
+          type="button"
+          variant="ghost"
+        >
+          <WrapTextIcon className="size-3" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>
+        {wrapped ? "défilement horizontal" : "retour à la ligne"}
+      </TooltipContent>
     </Tooltip>
   )
 }

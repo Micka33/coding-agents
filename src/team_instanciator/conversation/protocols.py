@@ -13,6 +13,14 @@ class InvokableGraph(Protocol):
     ) -> object:
         ...
 
+    async def ainvoke(
+        self,
+        input: object,
+        config: Mapping[str, object] | None = None,
+        **kwargs: object,
+    ) -> object:
+        ...
+
 
 class GraphRegistry(Protocol):
     def graph(self, agent_id: str) -> InvokableGraph:
