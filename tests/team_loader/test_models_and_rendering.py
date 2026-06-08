@@ -21,9 +21,18 @@ class ModelsAndRenderingTests(unittest.TestCase):
     def test_agent_reference_paths_checkpointer_defaults_custom_tools_and_tool_references(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             team_file = Path(tmp) / "team.yaml"
-            reference = AgentReference.from_mapping("entry", {"kind": "deepagent", "config": "agents/entry.mdc", "entrypoint": True})
+            reference = AgentReference.from_mapping(
+                "entry",
+                {
+                    "kind": "deepagent",
+                    "config": "agents/entry.mdc",
+                    "entrypoint": True,
+                    "enable_general_purpose_subagent": True,
+                },
+            )
 
             self.assertEqual(reference.config_path(team_file), (Path(tmp) / "agents" / "entry.mdc").resolve())
+            self.assertTrue(reference.enable_general_purpose_subagent)
 
         checkpointer = CheckpointerDefault.from_mapping({"postgres_url": {"env": "DATABASE_URL"}})
         self.assertEqual(checkpointer.postgres_url_env, ("DATABASE_URL",))
@@ -113,6 +122,7 @@ class ModelsAndRenderingTests(unittest.TestCase):
                         "    kind: deepagent",
                         "    config: agents/entry.mdc",
                         "    entrypoint: true",
+                        "    enable_general_purpose_subagent: true",
                         "    conversation: {}",
                         "  Worker:",
                         "    kind: deepagent",
@@ -131,6 +141,7 @@ class ModelsAndRenderingTests(unittest.TestCase):
 
             self.assertEqual(loaded.entrypoint().prompt, "Hello Ada 2 {{ missing }}")
             self.assertEqual(loaded.agents["Entry"].variables["count"], 2)
+            self.assertTrue(loaded.agents["Entry"].enable_general_purpose_subagent)
             self.assertEqual(loaded.conversation.human_input.default_targets, ("Entry",))
             self.assertEqual((loaded.relations[0].source, loaded.relations[0].target), ("Entry", "Worker"))
             self.assertEqual(loaded.agent_references["Entry"].conversation.aliases, ())

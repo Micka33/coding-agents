@@ -24,6 +24,7 @@ from src.team_instanciator.configuration.runtime_configuration import RuntimeCon
 from src.team_instanciator.configuration.runtime_configuration_validator import RuntimeConfigurationValidator
 from src.team_instanciator.resolvers.skills_resolver import SkillsResolver
 from src.team_instanciator.factories.subagent_factory import SubagentFactory
+from src.team_instanciator.factories.tool_visibility_factory import ToolVisibilityFactory
 from src.team_instanciator.runtime.thread_id_factory import ThreadIdFactory
 from src.team_instanciator.runtime.tool_call_edge_recorder import ToolCallEdgeRecorder
 from src.team_instanciator.runtime.branch_thread_resolver import BranchThreadResolver
@@ -53,6 +54,8 @@ class TeamInstanciator:
         checkpointer_handle = CheckpointerFactory(configuration).create(team)
         model_resolver = ModelResolver(configuration)
         toolset_resolver = ToolsetResolver(configuration, checkpointer_handle)
+        permissions_factory = PermissionsFactory()
+        tool_visibility_factory = ToolVisibilityFactory(configuration)
         relation_tool_factory = RelationToolFactory()
         thread_id_factory = ThreadIdFactory()
         checkpoint_metadata_factory = CheckpointMetadataFactory()
@@ -66,6 +69,8 @@ class TeamInstanciator:
             toolset_resolver,
             relation_tool_factory,
             thread_id_factory,
+            permissions_factory,
+            tool_visibility_factory,
             checkpoint_metadata_factory,
             tool_call_edge_recorder,
             branch_thread_resolver,
@@ -74,9 +79,10 @@ class TeamInstanciator:
             model_resolver,
             toolset_resolver,
             BackendFactory(configuration),
-            PermissionsFactory(),
+            permissions_factory,
             MemoryResolver(),
             SkillsResolver(configuration),
+            tool_visibility_factory,
         )
         registry = AgentGraphRegistry(
             team,

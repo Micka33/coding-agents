@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import AIMessage
+from langchain_core.outputs import ChatGeneration, ChatResult
 
 from src.team_instanciator.configuration.runtime_configuration import RuntimeConfiguration
 from src.team_instanciator.core.team_instanciator import TeamInstanciator
@@ -52,6 +57,36 @@ class FakeRegistry:
         if self.__class__.graph_exception is not None:
             raise self.__class__.graph_exception
         return SimpleNamespace(id=f"graph:{agent_id}")
+
+
+class ToolCaptureChatModel(BaseChatModel):
+    def __init__(self) -> None:
+        super().__init__()
+        object.__setattr__(self, "bound_tool_names", [])
+
+    @property
+    def _llm_type(self) -> str:
+        return "tool-capture"
+
+    def bind_tools(self, tools, *, tool_choice=None, **kwargs):
+        self.bound_tool_names.append([self._tool_name(tool) for tool in tools])
+        return self
+
+    def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+        return ChatResult(generations=[ChatGeneration(message=AIMessage(content="done"))])
+
+    def _tool_name(self, tool: object) -> str | None:
+        if isinstance(tool, dict):
+            name = tool.get("name")
+            if isinstance(name, str):
+                return name
+            function = tool.get("function")
+            if isinstance(function, dict):
+                function_name = function.get("name")
+                return function_name if isinstance(function_name, str) else None
+            return None
+        name = getattr(tool, "name", None)
+        return name if isinstance(name, str) else None
 
 
 class TeamInstanciatorTests(unittest.TestCase):
@@ -112,6 +147,97 @@ class TeamInstanciatorTests(unittest.TestCase):
         instanciator = TeamInstanciator(config_variables=configuration)
 
         self.assertIs(instanciator._configuration, configuration)
+
+    def test_yaml_instantiation_binds_only_configured_web_tools_to_model(self) -> None:
+        bound_tool_names = self._model_bound_tools(
+            agent_frontmatter="\n".join(
+                [
+                    "---",
+                    "name: Entry",
+                    "toolsets:",
+                    "  - web",
+                    "---",
+                ]
+            ),
+            team_toolsets=[
+                "toolsets:",
+                "  web:",
+                "    - web_search",
+                "    - fetch_url",
+            ],
+        )
+
+        self.assertEqual(bound_tool_names, {"write_todos", "web_search", "fetch_url"})
+
+    def test_yaml_instantiation_binds_read_tools_only_with_scoped_read_tools(self) -> None:
+        bound_tool_names = self._model_bound_tools(
+            agent_frontmatter="\n".join(
+                [
+                    "---",
+                    "name: Entry",
+                    "toolsets:",
+                    "  - scoped_read_tools",
+                    "---",
+                ]
+            ),
+            team_toolsets=[
+                "toolsets:",
+                "  scoped_read_tools:",
+                "    - ls",
+                "    - read_file",
+                "    - glob",
+                "    - grep",
+            ],
+        )
+
+        self.assertEqual(bound_tool_names, {"write_todos", "ls", "read_file", "glob", "grep"})
+
+    def _model_bound_tools(self, *, agent_frontmatter: str, team_toolsets: list[str]) -> set[str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            agents_dir = root / "agents"
+            agents_dir.mkdir()
+            (agents_dir / "entry.mdc").write_text(f"{agent_frontmatter}\nPrompt", encoding="utf-8")
+            team_file = root / "team.yaml"
+            team_file.write_text(
+                "\n".join(
+                    [
+                        "schema_version: 1",
+                        "id: product",
+                        "defaults:",
+                        "  root_dir: .",
+                        "  model:",
+                        "    default: openai:gpt-tool-visibility-test",
+                        "  checkpointer:",
+                        "    default: memory",
+                        "  execution_backend:",
+                        "    default: none",
+                        *team_toolsets,
+                        "agents:",
+                        "  Entry:",
+                        "    kind: deepagent",
+                        "    config: agents/entry.mdc",
+                        "    entrypoint: true",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            model = ToolCaptureChatModel()
+
+            with patch("src.team_instanciator.resolvers.model_resolver.init_chat_model", return_value=model):
+                instantiated = TeamInstanciator().instantiate(team_file)
+                try:
+                    instantiated.invoke(
+                        {"messages": [{"role": "user", "content": "hello"}]},
+                        config={"configurable": {"thread_id": "test-thread"}},
+                    )
+                finally:
+                    instantiated.close()
+
+        self.assertEqual(len(model.bound_tool_names), 1)
+        names = model.bound_tool_names[0]
+        self.assertEqual(len(names), len(set(names)))
+        return {name for name in names if name is not None}
 
 
 if __name__ == "__main__":

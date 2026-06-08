@@ -54,6 +54,10 @@ Suggested rules:
   shell backend.
 - Hide `task` unless the team intentionally exposes subagents for that agent.
 
+Keep Deep Agents' `write_todos` available as internal planning scaffolding. It
+does not grant external file, shell, or delegation capability and is not modeled
+as a `team.yaml` toolset in this change.
+
 `task` is a tool at the model boundary and should be filtered by the same
 visibility middleware. It should not be modeled as a normal `toolsets` entry,
 because its valid targets come from team topology rather than from a reusable
@@ -165,14 +169,18 @@ not list the toolset containing a custom tool, that custom tool is not passed to
 The visibility middleware should therefore filter known Deep Agents built-ins,
 not arbitrary user-provided tools.
 
-One guard is still useful: reject or warn when a custom tool exposes a name that
-collides with a Deep Agents built-in tool, such as `read_file` or `glob`.
-Collisions make tool visibility ambiguous.
+Name collisions need runtime-specific handling. This project intentionally has a
+custom `scoped_read_tools` factory that exposes names such as `read_file` and
+`grep` for LangChain subagents. Those tools must remain valid for non-Deep
+Agents runtimes.
 
-Suggested validation:
+Recommended behavior:
 
-- reject custom tools whose names collide with Deep Agents built-ins;
 - keep selected non-colliding custom tools visible;
+- keep colliding custom tools out of Deep Agents tool lists so the visibility
+  middleware filters only the Deep Agents injected built-ins;
+- continue allowing colliding custom tools for LangChain-backed agents that do
+  not receive Deep Agents built-ins;
 - do not infer read/write policy for custom tools in this change.
 
 ## Attachment Delivery

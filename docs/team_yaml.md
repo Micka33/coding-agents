@@ -61,6 +61,7 @@ agents:
     kind: deepagent
     config: ./agents/engineering-manager.mdc
     entrypoint: true
+    enable_general_purpose_subagent: false
 
   developer:
     kind: subagent
@@ -170,6 +171,23 @@ The current runtime also gives special meaning to these toolset names:
 Other toolset names are valid as ordinary groups, but they do not change
 filesystem permissions or shell backend selection unless the runtime is changed.
 
+For Deep Agents, toolsets also control which Deep Agents built-in tools are
+shown to the model:
+
+| Capability | Visible Deep Agents built-ins |
+| --- | --- |
+| `scoped_read_tools` | `ls`, `read_file`, `glob`, `grep` |
+| `write` | `write_file`, `edit_file` |
+| `shell` with resolved `defaults.execution_backend: local` | `execute` |
+| Declared `relation: subagent` or `enable_general_purpose_subagent: true` | `task` |
+
+The permission layer still denies unauthorized filesystem operations if a call
+reaches the tool layer, but unavailable Deep Agents built-ins are hidden from
+the model before it can choose them.
+
+Deep Agents' `write_todos` planning tool remains available as internal agent
+scaffolding. It is not controlled by a `team.yaml` toolset.
+
 ## Custom Tools
 
 `custom_tools` registers factories that `toolsets` can reference.
@@ -224,6 +242,7 @@ agents:
 | `kind` | Yes | `deepagent` or `subagent`. |
 | `config` | Yes | Path to the agent `.mdc` file, relative to `team.yaml`. |
 | `entrypoint` | No | Exactly one agent must have `entrypoint: true`. |
+| `enable_general_purpose_subagent` | No | Deep Agents only. Defaults to `false`. Set to `true` to expose the default `general-purpose` subagent through the `task` tool. |
 | `conversation` | No | Makes a `deepagent` available on the public mention bus. |
 
 Use `deepagent` for agents that can run as first-class collaborators or
@@ -231,6 +250,18 @@ relation-tool targets. Use `subagent` for agents meant to be delegated to from a
 parent agent.
 
 Public conversation participants must be `kind: deepagent`.
+
+`enable_general_purpose_subagent` is valid only for `kind: deepagent`. It is
+disabled by default so `task` access comes only from explicit team topology
+unless this opt-in is set:
+
+```yaml
+agents:
+  Francis-Bacon:
+    kind: deepagent
+    config: ./agents/francis-bacon.mdc
+    enable_general_purpose_subagent: true
+```
 
 ## Relations
 
@@ -263,6 +294,10 @@ the `message` to the target agent and returns the target's final text.
 
 `relation: subagent` makes the target available through the source agent's
 delegation mechanism.
+
+Declaring `relation: subagent` exposes only the declared target agent through
+delegation. It does not implicitly enable the default Deep Agents
+`general-purpose` subagent.
 
 When `id` is omitted, the loader assigns an order-based id such as
 `relation_001`. Use explicit ids before reordering or renaming relations if you
@@ -326,6 +361,7 @@ Before a team can instantiate:
 - Agent ids must be unique after case-insensitive normalization.
 - There must be exactly one entrypoint.
 - Every agent `kind` must be `deepagent` or `subagent`.
+- `enable_general_purpose_subagent` may be set only on `deepagent` entries.
 - Every referenced toolset and custom tool must exist.
 - Custom tool `exposes` must exactly match returned tool names.
 - Relation endpoints must reference declared agents.

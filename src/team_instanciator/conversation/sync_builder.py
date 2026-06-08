@@ -46,7 +46,15 @@ class AgentSyncBuilder:
                 projected_event_count=0,
             )
 
-        token_estimate = sum(self._token_estimate(event.content) for event in events)
+        token_estimate = sum(
+            self._token_estimate(
+                self._content_with_attachment_context(
+                    event.content,
+                    self._attachment_payloads(target, event),
+                )
+            )
+            for event in events
+        )
         if self._max_delta_tokens is not None and token_estimate > self._max_delta_tokens:
             raise ConversationDeliveryError(
                 f"Undelivered conversation delta for '{target.id}' is estimated at {token_estimate} tokens, "
@@ -64,15 +72,15 @@ class AgentSyncBuilder:
                 continue
             projected_event_count += 1
             additional_kwargs = {"conversation_seq": event.seq}
+            content = event.content
             if event.attachments:
-                additional_kwargs["attachments"] = [
-                    self._attachment_payload(event, attachment)
-                    for attachment in event.attachments
-                ]
+                attachments = self._attachment_payloads(target, event)
+                additional_kwargs["attachments"] = attachments
+                content = self._content_with_attachment_context(event.content, attachments)
             messages.append(
                 HumanMessage(
                     name=event.author_id,
-                    content=event.content,
+                    content=content,
                     additional_kwargs=additional_kwargs,
                     response_metadata={"conversation_seq": event.seq, "conversation_event_id": event.id},
                 )
@@ -115,11 +123,36 @@ class AgentSyncBuilder:
             lines.append(f"- {participant.id}{alias_text} : {description}")
         return "\n".join(lines) if lines else "- None."
 
-    def _attachment_payload(self, event: ConversationEvent, attachment: ConversationFileRef) -> dict[str, object]:
+    def _attachment_payloads(self, target: AgentDefinition, event: ConversationEvent) -> list[dict[str, object]]:
+        return [self._attachment_payload(target, event, attachment) for attachment in event.attachments]
+
+    def _attachment_payload(
+        self,
+        target: AgentDefinition,
+        event: ConversationEvent,
+        attachment: ConversationFileRef,
+    ) -> dict[str, object]:
         payload = attachment.to_dict()
-        if str(payload.get("uri") or "").startswith("conversation://files/"):
+        if "scoped_read_tools" in target.toolsets and str(payload.get("uri") or "").startswith(
+            "conversation://files/"
+        ):
             payload["read_path"] = f"/.coding-agents/conversations/{event.conversation_id}/files/{attachment.id}"
         return payload
+
+    def _content_with_attachment_context(self, content: str, attachments: list[dict[str, object]]) -> str:
+        if not attachments:
+            return content
+        lines = [content, "", "Attachments:"] if content else ["Attachments:"]
+        lines.extend(f"- {self._attachment_summary(attachment)}" for attachment in attachments)
+        return "\n".join(lines)
+
+    def _attachment_summary(self, attachment: dict[str, object]) -> str:
+        fields = ("filename", "id", "uri", "media_type", "size_bytes", "added_by", "read_path")
+        return ", ".join(
+            f"{field}: {attachment[field]}"
+            for field in fields
+            if attachment.get(field) is not None
+        )
 
     def _token_estimate(self, content: str) -> int:
         return max(1, len(content) // 4) if content else 0

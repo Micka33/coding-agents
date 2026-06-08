@@ -49,6 +49,10 @@ class TeamValidator:
         for agent_id, reference in team.agent_references.items():
             if reference.kind not in {"deepagent", "subagent"}:
                 raise TeamLoaderError(f"agents.{agent_id}.kind must be deepagent or subagent.")
+            if reference.enable_general_purpose_subagent and reference.kind != "deepagent":
+                raise TeamLoaderError(
+                    f"agents.{agent_id}.enable_general_purpose_subagent is valid only for kind: deepagent."
+                )
             if not reference.config:
                 raise TeamLoaderError(f"agents.{agent_id}.config is required.")
             canonical_agent_id = agent_lookup.get(agent_id.casefold())

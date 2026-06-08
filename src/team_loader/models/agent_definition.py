@@ -16,6 +16,7 @@ class AgentDefinition:
     kind: str
     config_path: Path
     entrypoint: bool
+    enable_general_purpose_subagent: bool
     description: str | None
     model: str | None
     reasoning_effort: str | None
@@ -42,6 +43,7 @@ class AgentDefinition:
             kind=reference.kind,
             config_path=document.path,
             entrypoint=reference.entrypoint,
+            enable_general_purpose_subagent=reference.enable_general_purpose_subagent,
             description=optional_string(data.get("description")),
             model=optional_string(data.get("model")) or "inherit",
             reasoning_effort=optional_string(data.get("reasoning_effort")) or "inherit",

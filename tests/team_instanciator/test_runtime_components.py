@@ -3,10 +3,12 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 from src.team_instanciator.resolvers.agent_runtime_resolver import AgentRuntimeResolver
 from src.team_instanciator.resolvers.memory_resolver import MemoryResolver
 from src.team_instanciator.factories.permissions_factory import PermissionsFactory
+from src.team_instanciator.factories.tool_visibility_factory import ToolVisibilityFactory
 from src.team_instanciator.resolvers.root_dir_resolver import RootDirResolver
 from src.team_instanciator.configuration.runtime_configuration import RuntimeConfiguration
 from src.team_instanciator.runtime.runtime_lane import RuntimeLane
@@ -14,7 +16,16 @@ from src.team_instanciator.resolvers.skills_resolver import SkillsResolver
 from src.team_instanciator.errors.team_instanciator_error import TeamInstanciatorError
 from src.team_instanciator.manifest.team_runtime_manifest import TeamRuntimeManifest
 from src.team_instanciator.runtime.thread_id_factory import ThreadIdFactory
+from src.team_instanciator.tools.deep_agent_tool_visibility_middleware import DeepAgentToolVisibilityMiddleware
 from tests.support import agent, defaults, relation, team
+
+
+class FakeModelRequest:
+    def __init__(self, tools: list[object]) -> None:
+        self.tools = tools
+
+    def override(self, **overrides):
+        return FakeModelRequest(overrides.get("tools", self.tools))
 
 
 class RuntimeComponentsTests(unittest.TestCase):
@@ -49,6 +60,60 @@ class RuntimeComponentsTests(unittest.TestCase):
 
         self.assertEqual([(permission.operations, permission.mode) for permission in readonly], [(["read"], "allow"), (["write"], "deny")])
         self.assertEqual([(permission.operations, permission.mode) for permission in writer], [(["read"], "deny"), (["write"], "allow")])
+
+    def test_tool_visibility_factory_maps_capabilities_to_deepagents_builtin_exclusions(self) -> None:
+        factory = ToolVisibilityFactory()
+
+        self.assertEqual(
+            factory.excluded_tools(team(), agent(), task_available=False),
+            frozenset(
+                {
+                    "ls",
+                    "read_file",
+                    "glob",
+                    "grep",
+                    "write_file",
+                    "edit_file",
+                    "execute",
+                    "task",
+                }
+            ),
+        )
+        self.assertEqual(
+            factory.excluded_tools(
+                team(team_defaults=defaults(execution_backend_default="local")),
+                agent(toolsets=("scoped_read_tools", "write", "shell")),
+                task_available=True,
+            ),
+            frozenset(),
+        )
+        self.assertIn(
+            "execute",
+            factory.excluded_tools(
+                team(team_defaults=defaults(execution_backend_default="none")),
+                agent(toolsets=("shell",)),
+                task_available=True,
+            ),
+        )
+
+    def test_deep_agent_tool_visibility_middleware_filters_only_excluded_tools(self) -> None:
+        middleware = DeepAgentToolVisibilityMiddleware(
+            excluded_tools=frozenset({"read_file", "grep"})
+        )
+        read_tool = SimpleNamespace(name="read_file")
+        custom_tool = SimpleNamespace(name="custom_lookup")
+        request = FakeModelRequest(
+            [
+                read_tool,
+                custom_tool,
+                {"function": {"name": "grep"}},
+                {"name": "custom_dict"},
+            ]
+        )
+
+        visible_tools = middleware.wrap_model_call(request, lambda visible_request: visible_request.tools)
+
+        self.assertEqual(visible_tools, [custom_tool, {"name": "custom_dict"}])
 
     def test_root_dir_runtime_lane_manifest_and_thread_ids(self) -> None:
         absolute = Path.cwd()

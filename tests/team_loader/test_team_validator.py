@@ -9,8 +9,18 @@ from src.team_loader.models.conversation_settings import AgentConversationSettin
 from tests.support import agent
 
 
-def reference(kind: str = "deepagent", config: str = "entry.mdc", conversation=None) -> SimpleNamespace:
-    return SimpleNamespace(kind=kind, config=config, conversation=conversation)
+def reference(
+    kind: str = "deepagent",
+    config: str = "entry.mdc",
+    conversation=None,
+    enable_general_purpose_subagent: bool = False,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        kind=kind,
+        config=config,
+        conversation=conversation,
+        enable_general_purpose_subagent=enable_general_purpose_subagent,
+    )
 
 
 def valid_team(**overrides) -> SimpleNamespace:
@@ -58,6 +68,10 @@ class TeamValidatorTests(unittest.TestCase):
             "case-insensitive",
         )
         self.assert_invalid(valid_team(agent_references={"entry": reference(kind="worker")}), "kind must be")
+        self.assert_invalid(
+            valid_team(agent_references={"entry": reference(kind="subagent", enable_general_purpose_subagent=True)}),
+            "enable_general_purpose_subagent",
+        )
         self.assert_invalid(valid_team(agent_references={"entry": reference(config="")}), "config is required")
         self.assert_invalid(
             valid_team(

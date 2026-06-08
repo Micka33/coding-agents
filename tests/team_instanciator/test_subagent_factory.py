@@ -93,6 +93,12 @@ class SubagentFactoryTests(unittest.TestCase):
         self.assertEqual(spec["description"], "Reviews")
         self.assertEqual(spec["system_prompt"], "Review prompt")
         self.assertEqual(spec["tools"], ["builtin-tool", "relation-tool"])
+        self.assertEqual(
+            [(permission.operations, permission.mode) for permission in spec["permissions"]],
+            [(["read"], "deny"), (["write"], "deny")],
+        )
+        self.assertIn("read_file", spec["middleware"][0].excluded_tools)
+        self.assertIn("task", spec["middleware"][0].excluded_tools)
         self.assertEqual(relation_factory.calls[0][3], "team")
 
 

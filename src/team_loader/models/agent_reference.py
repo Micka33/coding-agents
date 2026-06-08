@@ -13,6 +13,7 @@ class AgentReference:
     kind: str
     config: str
     entrypoint: bool
+    enable_general_purpose_subagent: bool = False
     conversation: AgentConversationSettings | None = None
 
     @classmethod
@@ -28,6 +29,9 @@ class AgentReference:
             kind=string_value(mapping.get("kind")),
             config=string_value(mapping.get("config")),
             entrypoint=bool(mapping.get("entrypoint", False)),
+            enable_general_purpose_subagent=bool(
+                mapping.get("enable_general_purpose_subagent", False)
+            ),
             conversation=conversation,
         )
 

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import NotRequired, TypedDict
 
+from deepagents.middleware.filesystem import FilesystemPermission
+from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.tools import BaseTool, StructuredTool
 
 from src.team_loader.models.team_definition import TeamDefinition
@@ -11,7 +13,9 @@ from src.team_instanciator.core.agent_graph import RunnableGraph
 from src.team_instanciator.resolvers.agent_runtime_resolver import AgentRuntimeResolver
 from src.team_instanciator.factories.checkpoint_metadata_factory import CheckpointMetadataFactory
 from src.team_instanciator.factories.langchain_agent_factory import LangChainAgentFactory
+from src.team_instanciator.factories.permissions_factory import PermissionsFactory
 from src.team_instanciator.factories.relation_tool_factory import RelationToolFactory
+from src.team_instanciator.factories.tool_visibility_factory import ToolVisibilityFactory
 from src.team_instanciator.runtime.branch_thread_resolver import BranchThreadResolver
 from src.team_instanciator.runtime.runnable_config_metadata_injector import RunnableConfigMetadataInjector
 from src.team_instanciator.runtime.thread_id_factory import ThreadIdFactory
@@ -25,6 +29,8 @@ class SubagentSpec(TypedDict):
     runnable: NotRequired[RunnableGraph]
     system_prompt: NotRequired[str]
     tools: NotRequired[list[BaseTool]]
+    middleware: NotRequired[list[AgentMiddleware]]
+    permissions: NotRequired[list[FilesystemPermission]]
 
 
 class SubagentFactory:
@@ -35,6 +41,8 @@ class SubagentFactory:
         toolset_resolver: ToolsetResolver,
         relation_tool_factory: RelationToolFactory,
         thread_id_factory: ThreadIdFactory,
+        permissions_factory: PermissionsFactory | None = None,
+        tool_visibility_factory: ToolVisibilityFactory | None = None,
         checkpoint_metadata_factory: CheckpointMetadataFactory | None = None,
         tool_call_edge_recorder: ToolCallEdgeRecorder | None = None,
         branch_thread_resolver: BranchThreadResolver | None = None,
@@ -44,6 +52,8 @@ class SubagentFactory:
         self._toolset_resolver = toolset_resolver
         self._relation_tool_factory = relation_tool_factory
         self._thread_id_factory = thread_id_factory
+        self._permissions_factory = permissions_factory or PermissionsFactory()
+        self._tool_visibility_factory = tool_visibility_factory or ToolVisibilityFactory()
         self._checkpoint_metadata_factory = checkpoint_metadata_factory or CheckpointMetadataFactory()
         self._tool_call_edge_recorder = tool_call_edge_recorder
         self._branch_thread_resolver = branch_thread_resolver
@@ -67,6 +77,14 @@ class SubagentFactory:
             "tools": [
                 *self._toolset_resolver.resolve_for_deepagents(team, agent),
                 *self._relation_tools(team, registry, agent_id),
+            ],
+            "permissions": self._permissions_factory.create(agent),
+            "middleware": [
+                self._tool_visibility_factory.create(
+                    team,
+                    agent,
+                    task_available=False,
+                )
             ],
         }
 

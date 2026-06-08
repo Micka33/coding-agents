@@ -898,7 +898,7 @@ class ConversationRuntimeTests(unittest.TestCase):
             attachments=(ConversationFileRef(id="file-1", filename="notes.txt", uri="conversation://files/file-1"),),
         )
         state = store.ensure_agent_state("agent-b")
-        target = agent("agent-b", description="Reviews implementation details.")
+        target = agent("agent-b", description="Reviews implementation details.", toolsets=("scoped_read_tools",))
 
         sync = AgentSyncBuilder(identity_refresh_after_tokens=10_000).build(
             target=target,
@@ -923,11 +923,52 @@ class ConversationRuntimeTests(unittest.TestCase):
         )
         self.assertEqual(sync.messages[1].type, "human")
         self.assertEqual(sync.messages[1].name, "human")
+        self.assertIn("Attachments:", sync.messages[1].content)
+        self.assertIn("filename: notes.txt", sync.messages[1].content)
         self.assertEqual(sync.messages[1].additional_kwargs["attachments"][0]["filename"], "notes.txt")
         self.assertEqual(
             sync.messages[1].additional_kwargs["attachments"][0]["read_path"],
             "/.coding-agents/conversations/thread/files/file-1",
         )
+        self.assertIn(
+            "read_path: /.coding-agents/conversations/thread/files/file-1",
+            sync.messages[1].content,
+        )
+
+    def test_sync_builder_hides_attachment_read_paths_without_scoped_read_tools(self) -> None:
+        store = ConversationStore(team_id="team", conversation_id="thread")
+        event = store.append_event(
+            author_id="human",
+            author_kind="human",
+            content="@agent-b see attached",
+            mentions=("agent-b",),
+            attachments=(
+                ConversationFileRef(
+                    id="file-1",
+                    filename="notes.txt",
+                    uri="conversation://files/file-1",
+                    media_type="text/plain",
+                    size_bytes=42,
+                    added_by="human",
+                ),
+            ),
+        )
+        state = store.ensure_agent_state("agent-b")
+
+        sync = AgentSyncBuilder(identity_refresh_after_tokens=10_000).build(
+            target=agent("agent-b", description="Reviews implementation details."),
+            state=state,
+            events=[event],
+        )
+
+        attachment = sync.messages[1].additional_kwargs["attachments"][0]
+        self.assertEqual(attachment["filename"], "notes.txt")
+        self.assertNotIn("read_path", attachment)
+        self.assertIn("Attachments:", sync.messages[1].content)
+        self.assertIn("filename: notes.txt", sync.messages[1].content)
+        self.assertIn("id: file-1", sync.messages[1].content)
+        self.assertIn("uri: conversation://files/file-1", sync.messages[1].content)
+        self.assertNotIn("read_path", sync.messages[1].content)
 
     def test_sync_builder_identity_lists_other_participants_with_aliases_and_descriptions(self) -> None:
         state = ConversationStore(team_id="team", conversation_id="thread").ensure_agent_state("agent-b")
