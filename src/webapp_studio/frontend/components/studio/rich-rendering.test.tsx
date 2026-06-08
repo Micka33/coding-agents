@@ -1,4 +1,5 @@
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -19,7 +20,7 @@ import { GeneratedUiPanel } from "@/components/studio/generated-ui-panel"
 import { RichMarkdown } from "@/components/studio/rich-markdown"
 import { RightInspector } from "@/components/studio/right-inspector"
 import { StudioSidebar } from "@/components/studio/studio-sidebar"
-import { emptyStudioState } from "@/components/studio/studio-workspace"
+import { emptyStudioState, StudioWorkspace } from "@/components/studio/studio-workspace"
 import { ToolCallList } from "@/components/studio/tool-call-list"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import type { StudioApiClient } from "@/lib/studio/api-client"
@@ -1057,6 +1058,78 @@ describe("chat panel local recovery", () => {
   })
 })
 
+describe("studio workspace responsive layout", () => {
+  it("keeps the composer mounted when the layout crosses the narrow breakpoint", () => {
+    const media = installMatchMedia(false)
+    const fixture = loadStudioMock()
+    localStorage.clear()
+
+    try {
+      render(
+        <TooltipProvider>
+          <StudioWorkspace
+            generatedUi={[]}
+            initialState={fixture.state}
+            liveApi={false}
+          />
+        </TooltipProvider>
+      )
+
+      const textarea = screen.getByLabelText("Message") as HTMLTextAreaElement
+      fireEvent.change(textarea, {
+        target: {
+          selectionEnd: 14,
+          selectionStart: 14,
+          value: "draft survives",
+        },
+      })
+
+      media.setMatches(true)
+
+      expect(screen.getByLabelText("Message")).toBe(textarea)
+      expect(textarea).toHaveValue("draft survives")
+    } finally {
+      media.restore()
+    }
+  })
+
+  it("collapses the inspector shell instead of unmounting it", () => {
+    const media = installMatchMedia(false)
+    const fixture = loadStudioMock()
+    localStorage.clear()
+
+    try {
+      render(
+        <TooltipProvider>
+          <StudioWorkspace
+            generatedUi={[]}
+            initialState={fixture.state}
+            liveApi={false}
+          />
+        </TooltipProvider>
+      )
+
+      const grid = screen.getByTestId("studio-layout-grid")
+      const shell = screen.getByTestId("right-inspector-shell")
+      expect(grid.className).toContain("transition-[grid-template-columns]")
+      expect(shell).toHaveAttribute("aria-hidden", "true")
+      expect(shell).toHaveClass("opacity-0")
+
+      fireEvent.click(screen.getByRole("button", { name: "Files" }))
+
+      expect(shell).toHaveAttribute("aria-hidden", "false")
+      expect(shell).toHaveClass("opacity-100")
+      fireEvent.click(screen.getByRole("button", { name: "Close inspector" }))
+
+      expect(shell).toHaveAttribute("aria-hidden", "true")
+      expect(shell).toHaveClass("opacity-0")
+      expect(screen.queryByRole("button", { name: "Close inspector" })).not.toBeInTheDocument()
+    } finally {
+      media.restore()
+    }
+  })
+})
+
 describe("chat panel transcript affordances", () => {
   it("opens structured file change links in the right inspector", () => {
     const fixture = loadStudioMock()
@@ -1163,6 +1236,17 @@ describe("chat panel mention autocomplete", () => {
         delete (HTMLInputElement.prototype as Partial<HTMLInputElement>).click
       }
     }
+  })
+
+  it("keeps participant mention tags visible on mobile", () => {
+    const fixture = loadStudioMock()
+    localStorage.clear()
+
+    renderChatPanel({ state: fixture.state })
+
+    const tag = screen.getByRole("button", { name: "Mention agent" })
+    expect(tag.parentElement).toHaveClass("flex", "flex-wrap")
+    expect(tag.parentElement).not.toHaveClass("hidden")
   })
 
   it("submits selected local attachments with the draft", async () => {
@@ -1394,7 +1478,12 @@ describe("chat panel mention autocomplete", () => {
 
     await waitFor(() => {
       expect(textarea).toHaveValue("@{src/app.ts} ")
-      expect(screen.getByRole("button", { name: "Remove workspace file src/app.ts" })).toBeInTheDocument()
+      const chip = screen.getByRole("button", { name: "Remove workspace file src/app.ts" })
+      expect(chip).toBeInTheDocument()
+      expect(chip.parentElement).toHaveClass("hidden", "sm:flex")
+      expect(chip.compareDocumentPosition(textarea) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+        Node.DOCUMENT_POSITION_FOLLOWING
+      )
     })
 
     fireEvent.click(screen.getByRole("button", { name: "Send message" }))
@@ -1408,6 +1497,127 @@ describe("chat panel mention autocomplete", () => {
         expect.stringMatching(/^client_/)
       )
     })
+  })
+
+  it("drops workspace chips and submit paths when the marker is deleted", async () => {
+    const fixture = loadStudioMock()
+    const onSearchWorkspaceFiles = vi.fn().mockResolvedValue([
+      {
+        filename: "app.ts",
+        media_type: "text/plain",
+        path: "src/app.ts",
+        size_bytes: 12,
+      },
+    ])
+    const onSubmitDraft = vi.fn()
+    localStorage.clear()
+
+    renderChatPanel({
+      onSearchWorkspaceFiles,
+      onSubmitDraft,
+      state: fixture.state,
+    })
+
+    const textarea = screen.getByLabelText("Message") as HTMLTextAreaElement
+    fireEvent.change(textarea, {
+      target: {
+        selectionEnd: 4,
+        selectionStart: 4,
+        value: "@src",
+      },
+    })
+    fireEvent.mouseDown(await screen.findByRole("option", { name: /src\/app\.ts/ }))
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Remove workspace file src/app.ts" })).toBeInTheDocument()
+    )
+
+    fireEvent.change(textarea, {
+      target: {
+        selectionEnd: 5,
+        selectionStart: 5,
+        value: "hello",
+      },
+    })
+
+    expect(screen.queryByRole("button", { name: "Remove workspace file src/app.ts" })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }))
+
+    await waitFor(() =>
+      expect(onSubmitDraft).toHaveBeenCalledWith(
+        "hello",
+        [],
+        [],
+        expect.stringMatching(/^client_/)
+      )
+    )
+  })
+
+  it("removes the workspace marker when its chip is removed", async () => {
+    const fixture = loadStudioMock()
+    const onSearchWorkspaceFiles = vi.fn().mockResolvedValue([
+      {
+        filename: "app.ts",
+        media_type: "text/plain",
+        path: "src/app.ts",
+        size_bytes: 12,
+      },
+    ])
+    localStorage.clear()
+
+    renderChatPanel({
+      onSearchWorkspaceFiles,
+      state: fixture.state,
+    })
+
+    const textarea = screen.getByLabelText("Message") as HTMLTextAreaElement
+    fireEvent.change(textarea, {
+      target: {
+        selectionEnd: 4,
+        selectionStart: 4,
+        value: "@src",
+      },
+    })
+    fireEvent.mouseDown(await screen.findByRole("option", { name: /src\/app\.ts/ }))
+
+    const chip = await screen.findByRole("button", { name: "Remove workspace file src/app.ts" })
+    fireEvent.click(chip)
+
+    expect(textarea).toHaveValue("")
+    expect(screen.queryByRole("button", { name: "Remove workspace file src/app.ts" })).not.toBeInTheDocument()
+  })
+
+  it("renders restored workspace chips from draft markers", async () => {
+    const fixture = loadStudioMock()
+    const onSearchWorkspaceFiles = vi.fn().mockResolvedValue([
+      {
+        filename: "app.ts",
+        media_type: "text/plain",
+        path: "src/app.ts",
+        size_bytes: 12,
+      },
+    ])
+    const state: StudioState = {
+      ...fixture.state,
+      ui_state: {
+        ...fixture.state.ui_state,
+        draft_content: "please review @{src/app.ts}",
+      },
+    }
+    localStorage.clear()
+
+    renderChatPanel({
+      liveApi: true,
+      onSearchWorkspaceFiles,
+      state,
+    })
+
+    const textarea = screen.getByLabelText("Message") as HTMLTextAreaElement
+    await waitFor(() => {
+      expect(textarea).toHaveValue("please review @{src/app.ts}")
+      expect(screen.getByRole("button", { name: "Remove workspace file src/app.ts" })).toBeInTheDocument()
+    })
+    await waitFor(() => expect(onSearchWorkspaceFiles).toHaveBeenCalledWith("src/app.ts"))
   })
 
   it("preserves selected workspace files when submit fails", async () => {
@@ -1445,6 +1655,48 @@ describe("chat panel mention autocomplete", () => {
       expect(textarea).toHaveValue("@{docs/notes.md} ")
       expect(screen.getByRole("button", { name: "Remove workspace file docs/notes.md" })).toBeInTheDocument()
     })
+  })
+
+  it("does not insert stale file references when Enter is pressed after autocomplete closes", async () => {
+    const fixture = loadStudioMock()
+    const onSearchWorkspaceFiles = vi.fn().mockResolvedValue([
+      {
+        filename: "app.ts",
+        media_type: "text/plain",
+        path: "src/app.ts",
+        size_bytes: 12,
+      },
+    ])
+    localStorage.clear()
+
+    renderChatPanel({
+      onSearchWorkspaceFiles,
+      state: fixture.state,
+    })
+
+    const textarea = screen.getByLabelText("Message") as HTMLTextAreaElement
+    fireEvent.change(textarea, {
+      target: {
+        selectionEnd: 1,
+        selectionStart: 1,
+        value: "@",
+      },
+    })
+    await screen.findByRole("option", { name: /src\/app\.ts/ })
+
+    fireEvent.change(textarea, {
+      target: {
+        selectionEnd: 5,
+        selectionStart: 5,
+        value: "hello",
+      },
+    })
+    await waitFor(() => expect(screen.queryByRole("listbox")).not.toBeInTheDocument())
+
+    fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true })
+
+    expect(textarea).toHaveValue("hello")
+    expect(screen.queryByRole("button", { name: "Remove workspace file src/app.ts" })).not.toBeInTheDocument()
   })
 })
 
@@ -1502,6 +1754,50 @@ function renderSidebar(
       {...props}
     />
   )
+}
+
+function installMatchMedia(matches: boolean) {
+  const descriptor = Object.getOwnPropertyDescriptor(window, "matchMedia")
+  let currentMatches = matches
+  const listeners = new Set<() => void>()
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    value: vi.fn((query: string): MediaQueryList => ({
+      addEventListener: (_event: string, listener: () => void) => {
+        listeners.add(listener)
+      },
+      addListener: (listener: () => void) => {
+        listeners.add(listener)
+      },
+      dispatchEvent: () => true,
+      matches: currentMatches,
+      media: query,
+      onchange: null,
+      removeEventListener: (_event: string, listener: () => void) => {
+        listeners.delete(listener)
+      },
+      removeListener: (listener: () => void) => {
+        listeners.delete(listener)
+      },
+    } as unknown as MediaQueryList)),
+  })
+  return {
+    restore() {
+      if (descriptor) {
+        Object.defineProperty(window, "matchMedia", descriptor)
+      } else {
+        delete (window as Partial<Window>).matchMedia
+      }
+    },
+    setMatches(nextMatches: boolean) {
+      currentMatches = nextMatches
+      act(() => {
+        for (const listener of listeners) {
+          listener()
+        }
+      })
+    },
+  }
 }
 
 function stateWithAgentActivity(): StudioState {

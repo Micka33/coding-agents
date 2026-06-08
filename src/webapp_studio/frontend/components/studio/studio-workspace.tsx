@@ -448,12 +448,15 @@ export function StudioWorkspace({
     handleOpenInspector(lastInspectorView ?? fallbackInspectorView(narrowLayout, state))
   }
 
-  const leftColumn = leftCollapsed ? SIDEBAR_RAIL : leftWidth
   const inspectorOpen = inspectorView.kind !== "empty"
   const inspectorPlacement = narrowLayout ? "sheet" : "side"
-  const desktopGridTemplateColumns = inspectorOpen
-    ? `${leftColumn}px 6px minmax(24rem,1fr) 6px ${rightWidth}px`
-    : `${leftColumn}px 6px minmax(24rem,1fr)`
+  const effectiveLeftCollapsed = narrowLayout || leftCollapsed
+  const leftColumn = effectiveLeftCollapsed ? SIDEBAR_RAIL : leftWidth
+  const leftSplitterColumn = narrowLayout ? 0 : 6
+  const rightSplitterColumn = narrowLayout || !inspectorOpen ? 0 : 6
+  const rightColumn = narrowLayout || !inspectorOpen ? 0 : rightWidth
+  const centerMin = narrowLayout ? "0" : "24rem"
+  const gridTemplateColumns = `${leftColumn}px ${leftSplitterColumn}px minmax(${centerMin},1fr) ${rightSplitterColumn}px ${rightColumn}px`
   const sidebarProps = {
     busy: isPending,
     conversationList,
@@ -492,96 +495,33 @@ export function StudioWorkspace({
     />
   )
 
-  if (narrowLayout) {
-    return (
-      <main className="relative h-svh min-h-svh overflow-hidden bg-background">
-        <div
-          className="grid h-full min-h-0"
-          style={{
-            gridTemplateColumns: `${SIDEBAR_RAIL}px minmax(0,1fr)`,
-          }}
-        >
-          <StudioSidebar
-            {...sidebarProps}
-            collapsed
-            onToggleCollapsed={() => setMobileSidebarOpen(true)}
-          />
-
-          <div className="relative min-h-0 min-w-0">
-            {operationError ? (
-              <div className="absolute left-3 right-3 top-3 z-20 flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 shadow" role="alert">
-                <CircleAlertIcon className="size-4 shrink-0" />
-                <span>{operationError}</span>
-              </div>
-            ) : null}
-            <ChatPanel
-              busy={isPending}
-              changes={changes}
-              inspectorOpen={inspectorOpen}
-              inspectorPlacement={inspectorPlacement}
-              liveApi={liveApi}
-              onEditMessage={handleEditMessage}
-              onOpenInspector={handleOpenInspector}
-              onPersistUiState={handlePersistUiState}
-              onRestoreInspector={handleRestoreInspector}
-              onSearchWorkspaceFiles={handleSearchWorkspaceFiles}
-              onSubmitDraft={handleSubmitDraft}
-              onSwitchBranch={handleSwitchBranch}
-              session={session}
-              state={state}
-              streamStatus={streamStatus}
-            />
-          </div>
-        </div>
-
-        {mobileSidebarOpen ? (
-          <div
-            aria-label="Sidebar drawer"
-            className="absolute inset-0 z-40 bg-black/20"
-            onClick={() => setMobileSidebarOpen(false)}
-            role="presentation"
-          >
-            <div
-              className="h-full max-w-[518px] bg-background shadow-2xl"
-              onClick={(event) => event.stopPropagation()}
-              style={{ width: "min(32rem, calc(100vw - 2rem))" }}
-            >
-              <StudioSidebar
-                {...sidebarProps}
-                collapsed={false}
-                onToggleCollapsed={() => setMobileSidebarOpen(false)}
-              />
-            </div>
-          </div>
-        ) : null}
-
-        {inspectorOpen ? (
-          <div
-            className="absolute inset-x-0 bottom-0 z-30 bg-background shadow-2xl"
-            style={{ height: "min(76svh, 44rem)" }}
-          >
-            {inspector}
-          </div>
-        ) : null}
-      </main>
-    )
-  }
-
   return (
-    <main className="h-svh min-h-svh overflow-hidden bg-background">
+    <main className="relative h-svh min-h-svh overflow-hidden bg-background">
       <div
-        className="grid h-full min-h-0"
+        className="relative grid h-full min-h-0 transition-[grid-template-columns] duration-200 ease-out motion-reduce:transition-none"
+        data-testid="studio-layout-grid"
         style={{
-          gridTemplateColumns: desktopGridTemplateColumns,
+          gridTemplateColumns,
         }}
       >
         <StudioSidebar
           {...sidebarProps}
-          collapsed={leftCollapsed}
-          onToggleCollapsed={() => setLeftCollapsed((value) => !value)}
+          collapsed={effectiveLeftCollapsed}
+          onToggleCollapsed={() => {
+            if (narrowLayout) {
+              setMobileSidebarOpen(true)
+            } else {
+              setLeftCollapsed((value) => !value)
+            }
+          }}
         />
 
-        <Splitter disabled={leftCollapsed} label="Resize sidebar" onMouseDown={(event) => beginResize("left", event)} />
+        <Splitter
+          disabled={effectiveLeftCollapsed}
+          hidden={narrowLayout}
+          label="Resize sidebar"
+          onMouseDown={(event) => beginResize("left", event)}
+        />
 
         <div className="relative min-h-0 min-w-0">
           {operationError ? (
@@ -609,12 +549,55 @@ export function StudioWorkspace({
           />
         </div>
 
-        {inspectorOpen ? (
-          <>
-            <Splitter label="Resize inspector" onMouseDown={(event) => beginResize("right", event)} />
-            {inspector}
-          </>
-        ) : null}
+        <Splitter
+          disabled={!inspectorOpen}
+          hidden={narrowLayout || !inspectorOpen}
+          label="Resize inspector"
+          onMouseDown={(event) => beginResize("right", event)}
+        />
+
+        <div
+          aria-hidden={!inspectorOpen}
+          className={
+            narrowLayout
+              ? `absolute inset-x-0 bottom-0 z-30 overflow-hidden bg-background shadow-2xl transition-transform duration-200 ease-out motion-reduce:transition-none ${
+                  inspectorOpen ? "translate-y-0" : "pointer-events-none translate-y-full"
+                }`
+              : `min-h-0 min-w-0 overflow-hidden transition-opacity duration-200 ease-out motion-reduce:transition-none ${
+                  inspectorOpen ? "opacity-100" : "pointer-events-none opacity-0"
+                }`
+          }
+          data-testid="right-inspector-shell"
+          inert={!inspectorOpen ? true : undefined}
+          style={narrowLayout ? { height: "min(76svh, 44rem)" } : undefined}
+        >
+          {inspector}
+        </div>
+      </div>
+
+      <div
+        aria-hidden={!mobileSidebarOpen}
+        aria-label="Sidebar drawer"
+        className={`absolute inset-0 z-40 bg-black/20 transition-opacity duration-200 ease-out motion-reduce:transition-none ${
+          mobileSidebarOpen ? "opacity-100" : "pointer-events-none opacity-0"
+        }`}
+        inert={!mobileSidebarOpen ? true : undefined}
+        onClick={() => setMobileSidebarOpen(false)}
+        role="presentation"
+      >
+        <div
+          className={`h-full max-w-[518px] bg-background shadow-2xl transition-transform duration-200 ease-out motion-reduce:transition-none ${
+            mobileSidebarOpen ? "translate-x-0" : "-translate-x-full"
+          }`}
+          onClick={(event) => event.stopPropagation()}
+          style={{ width: "min(32rem, calc(100vw - 2rem))" }}
+        >
+          <StudioSidebar
+            {...sidebarProps}
+            collapsed={false}
+            onToggleCollapsed={() => setMobileSidebarOpen(false)}
+          />
+        </div>
       </div>
     </main>
   )
@@ -622,18 +605,24 @@ export function StudioWorkspace({
 
 function Splitter({
   disabled,
+  hidden,
   label,
   onMouseDown,
 }: {
   disabled?: boolean
+  hidden?: boolean
   label: string
   onMouseDown: (event: ReactMouseEvent<HTMLDivElement>) => void
 }) {
   return (
     <div
       aria-disabled={disabled}
+      aria-hidden={hidden}
       aria-label={label}
-      className={`h-full border-x bg-muted/30 ${disabled ? "cursor-default" : "cursor-col-resize hover:bg-muted"}`}
+      className={`h-full border-x bg-muted/30 transition-opacity duration-200 ease-out motion-reduce:transition-none ${
+        disabled ? "cursor-default" : "cursor-col-resize hover:bg-muted"
+      } ${hidden ? "pointer-events-none opacity-0" : "opacity-100"}`}
+      inert={hidden ? true : undefined}
       onMouseDown={disabled ? undefined : onMouseDown}
       role="separator"
     />

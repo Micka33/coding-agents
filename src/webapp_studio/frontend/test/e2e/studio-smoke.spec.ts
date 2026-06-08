@@ -16,7 +16,7 @@ test("studio workspace keeps chat primary with inspector side surfaces", async (
 
   await page.getByRole("button", { name: "Close inspector" }).click()
   await expect(page.getByRole("button", { name: "Close inspector" })).toHaveCount(0)
-  await expect(page.getByText("Select a workspace view.")).toHaveCount(0)
+  await expect(page.getByTestId("right-inspector-shell")).toHaveAttribute("aria-hidden", "true")
   await expect(page.getByRole("button", { name: "Open inspector" })).toHaveCount(1)
 
   await page.getByRole("button", { name: "Open inspector" }).click()

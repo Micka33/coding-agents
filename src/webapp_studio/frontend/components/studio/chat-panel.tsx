@@ -159,12 +159,17 @@ export function ChatPanel({
   const [workspaceFileOptions, setWorkspaceFileOptions] = useState<StudioWorkspaceFileItem[]>([])
   const [workspaceFileOptionsQuery, setWorkspaceFileOptionsQuery] = useState<string | null>(null)
   const [workspaceFileError, setWorkspaceFileError] = useState<{ message: string; query: string } | null>(null)
-  const [selectedWorkspaceFiles, setSelectedWorkspaceFiles] = useState<StudioWorkspaceFileItem[]>([])
+  const [workspaceFileCache, setWorkspaceFileCache] = useState<StudioWorkspaceFileItem[]>([])
   const [activityExpanded, setActivityExpanded] = useState(false)
   const referenceListId = useId()
   const activeAgents = useMemo(
     () => state.conversation.agent_states.filter((agent) => agent.running || agent.queued),
     [state.conversation.agent_states]
+  )
+  const draftWorkspacePaths = useMemo(() => workspaceReferencePathsFromDraft(draft), [draft])
+  const draftWorkspaceFiles = useMemo(
+    () => workspaceFilesForPaths(draftWorkspacePaths, workspaceFileCache),
+    [draftWorkspacePaths, workspaceFileCache]
   )
   const referenceQuery = activeReferenceQuery(draft, selectionEnd)
   const referenceQueryKey = referenceQuery?.key ?? null
@@ -180,7 +185,7 @@ export function ChatPanel({
   const referenceOptions: ReferenceOption[] = [
     ...agentOptions,
     ...visibleWorkspaceFileOptions
-      .filter((file) => !selectedWorkspaceFiles.some((selected) => selected.path === file.path))
+      .filter((file) => !draftWorkspacePaths.includes(file.path))
       .slice(0, 8)
       .map((file): FileReferenceOption => ({ file, kind: "file" })),
   ]
@@ -230,6 +235,38 @@ export function ChatPanel({
       cancelled = true
     }
   }, [dismissedReferenceKey, onSearchWorkspaceFiles, referenceQueryKey, referenceQueryText])
+
+  useEffect(() => {
+    if (!onSearchWorkspaceFiles || draftWorkspacePaths.length === 0) {
+      return
+    }
+    const cachedPaths = new Set(workspaceFileCache.map((file) => file.path))
+    const missingPaths = draftWorkspacePaths.filter((path) => !cachedPaths.has(path))
+    if (missingPaths.length === 0) {
+      return
+    }
+    let cancelled = false
+    Promise.all(
+      missingPaths.map(async (path) => {
+        const files = await Promise.resolve(onSearchWorkspaceFiles(path))
+        return files.find((file) => file.path === path) ?? null
+      })
+    )
+      .then((files) => {
+        if (!cancelled) {
+          setWorkspaceFileCache((cache) =>
+            mergeWorkspaceFileCache(
+              cache,
+              files.filter((file): file is StudioWorkspaceFileItem => file !== null)
+            )
+          )
+        }
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [draftWorkspacePaths, onSearchWorkspaceFiles, workspaceFileCache])
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- Hydrates a per-branch browser draft after the client storage key is known.
@@ -327,10 +364,7 @@ export function ChatPanel({
   }
 
   function insertWorkspaceFileReference(file: StudioWorkspaceFileItem) {
-    const nextWorkspaceFiles = selectedWorkspaceFiles.some((selected) => selected.path === file.path)
-      ? selectedWorkspaceFiles
-      : [...selectedWorkspaceFiles, file]
-    setSelectedWorkspaceFiles(nextWorkspaceFiles)
+    setWorkspaceFileCache((cache) => mergeWorkspaceFileCache(cache, [file]))
     const marker = `@{${file.path}}`
     if (!referenceQuery) {
       const cursor = Math.max(0, Math.min(selectionEnd, draft.length))
@@ -352,6 +386,12 @@ export function ChatPanel({
     setDismissedReferenceKey(null)
   }
 
+  function removeWorkspaceFileReference(path: string) {
+    const nextDraft = removeWorkspaceReferenceFromDraft(draft, path)
+    setDraft(nextDraft)
+    setSelectionEnd(Math.min(selectionEnd, nextDraft.length))
+  }
+
   function insertReference(option: ReferenceOption) {
     if (option.kind === "agent") {
       insertAgentReference(option.participant)
@@ -362,6 +402,9 @@ export function ChatPanel({
 
   function handleReferenceKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.nativeEvent.isComposing) {
+      return
+    }
+    if (!referenceListOpen) {
       return
     }
     if (!referenceOptions.length) {
@@ -385,10 +428,11 @@ export function ChatPanel({
   async function submit(
     content: string,
     files: FileUIPart[],
-    workspaceFiles = selectedWorkspaceFiles,
+    workspaceFileCandidates = workspaceFileCache,
     clientMessageId = `client_${Date.now()}_${Math.random().toString(36).slice(2)}`
   ) {
-    const workspacePaths = workspaceFiles.map((file) => file.path)
+    const workspacePaths = workspaceReferencePathsFromDraft(content)
+    const workspaceFiles = workspaceFilesForPaths(workspacePaths, workspaceFileCandidates)
     const item: LocalOutboxItem = {
       clientMessageId,
       content,
@@ -403,7 +447,6 @@ export function ChatPanel({
       setOutbox((items) => upsertOutboxItem(items, item))
     }
     setDraft("")
-    setSelectedWorkspaceFiles([])
     try {
       await onSubmitDraft(content, files, workspacePaths, clientMessageId)
       if (outboxStorageKey) {
@@ -411,7 +454,7 @@ export function ChatPanel({
       }
     } catch {
       setDraft(content)
-      setSelectedWorkspaceFiles(workspaceFiles)
+      setWorkspaceFileCache((cache) => mergeWorkspaceFileCache(cache, workspaceFiles))
       if (outboxStorageKey) {
         setOutbox((items) =>
           updateOutboxItem(items, clientMessageId, { status: "failed" })
@@ -591,6 +634,24 @@ export function ChatPanel({
                   ) : null}
                 </div>
               ) : null}
+              {draftWorkspaceFiles.length > 0 ? (
+                <div className="hidden flex-wrap gap-1 border-b px-2 py-2 sm:flex">
+                  {draftWorkspaceFiles.map((file) => (
+                    <button
+                      aria-label={`Remove workspace file ${file.path}`}
+                      className="inline-flex max-w-full items-center gap-1 rounded-md border bg-background px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
+                      key={file.path}
+                      onClick={() => removeWorkspaceFileReference(file.path)}
+                      title={file.path}
+                      type="button"
+                    >
+                      <FileTextIcon className="size-3.5 shrink-0" />
+                      <span className="truncate">{file.path}</span>
+                      <XIcon className="size-3 shrink-0" />
+                    </button>
+                  ))}
+                </div>
+              ) : null}
               <PromptInputTextarea
                 aria-label="Message"
                 aria-activedescendant={
@@ -612,34 +673,12 @@ export function ChatPanel({
                 role="combobox"
                 value={draft}
               />
-              {selectedWorkspaceFiles.length > 0 ? (
-                <div className="flex flex-wrap gap-1 border-t px-2 py-2">
-                  {selectedWorkspaceFiles.map((file) => (
-                    <button
-                      aria-label={`Remove workspace file ${file.path}`}
-                      className="inline-flex max-w-full items-center gap-1 rounded-md border bg-background px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
-                      key={file.path}
-                      onClick={() =>
-                        setSelectedWorkspaceFiles((files) =>
-                          files.filter((selected) => selected.path !== file.path)
-                        )
-                      }
-                      title={file.path}
-                      type="button"
-                    >
-                      <FileTextIcon className="size-3.5 shrink-0" />
-                      <span className="truncate">{file.path}</span>
-                      <XIcon className="size-3 shrink-0" />
-                    </button>
-                  ))}
-                </div>
-              ) : null}
             </div>
           </PromptInputBody>
           <PromptInputFooter>
             <PromptInputTools>
               <AttachFileButton />
-              <div className="hidden min-w-0 gap-1 sm:flex">
+              <div className="flex min-w-0 flex-wrap gap-1">
                 {state.participants.map((participant) => (
                   <button
                     aria-label={`Mention ${participant}`}
@@ -1338,6 +1377,84 @@ function isInsideMarkdownCode(value: string, cursor: number) {
   const currentLine = beforeCursor.slice(lineStart)
   const inlineTickCount = currentLine.match(/`/g)?.length ?? 0
   return inlineTickCount % 2 === 1
+}
+
+function workspaceReferencePathsFromDraft(value: string) {
+  const paths: string[] = []
+  const seen = new Set<string>()
+  for (const match of value.matchAll(/@\{([^}]+)\}/g)) {
+    const path = (match[1] ?? "").trim()
+    if (!path || seen.has(path)) {
+      continue
+    }
+    seen.add(path)
+    paths.push(path)
+  }
+  return paths
+}
+
+function workspaceFilesForPaths(paths: string[], files: StudioWorkspaceFileItem[]) {
+  const fileByPath = new Map(files.map((file) => [file.path, file]))
+  return paths.map((path) => fileByPath.get(path) ?? fallbackWorkspaceFile(path))
+}
+
+function fallbackWorkspaceFile(path: string): StudioWorkspaceFileItem {
+  return {
+    filename: path.split("/").filter(Boolean).at(-1) ?? path,
+    media_type: null,
+    path,
+    size_bytes: null,
+  }
+}
+
+function mergeWorkspaceFileCache(
+  current: StudioWorkspaceFileItem[],
+  incoming: StudioWorkspaceFileItem[]
+) {
+  if (incoming.length === 0) {
+    return current
+  }
+  const fileByPath = new Map(current.map((file) => [file.path, file]))
+  let changed = false
+  for (const file of incoming) {
+    const existing = fileByPath.get(file.path)
+    if (
+      existing &&
+      existing.filename === file.filename &&
+      existing.media_type === file.media_type &&
+      existing.size_bytes === file.size_bytes
+    ) {
+      continue
+    }
+    fileByPath.set(file.path, file)
+    changed = true
+  }
+  return changed ? [...fileByPath.values()] : current
+}
+
+function removeWorkspaceReferenceFromDraft(value: string, path: string) {
+  let next = ""
+  let cursor = 0
+  for (const match of value.matchAll(/@\{([^}]+)\}/g)) {
+    if (match.index === undefined || (match[1] ?? "").trim() !== path) {
+      continue
+    }
+    let removeStart = match.index
+    let removeEnd = match.index + match[0].length
+    if (isHorizontalWhitespace(value[removeEnd] ?? "")) {
+      removeEnd += 1
+    } else if (removeStart > 0 && isHorizontalWhitespace(value[removeStart - 1] ?? "")) {
+      removeStart -= 1
+    }
+    removeStart = Math.max(removeStart, cursor)
+    next += value.slice(cursor, removeStart)
+    cursor = removeEnd
+  }
+  return cursor === 0 ? value : next + value.slice(cursor)
+}
+
+function isHorizontalWhitespace(value: string) {
+  return value === " " || value === "\t"
 }
 
 function agentOptionsForState(state: StudioState, query: string): AgentReferenceOption[] {
