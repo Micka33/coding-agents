@@ -28,6 +28,17 @@ conversation:
   #   default_targets:
   #     - Francis-Bacon
 
+mcp_servers:
+  time:
+    transport: stdio
+    command: uvx
+    args:
+      - mcp-server-time
+
+toolsets:
+  time_mcp:
+    - mcp: time
+
 agents:
   Francis-Bacon:
     kind: deepagent

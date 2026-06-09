@@ -5,6 +5,7 @@ import uuid
 
 from src.team_loader.models.team_definition import TeamDefinition
 from src.team_instanciator.factories.checkpoint_metadata_factory import CheckpointMetadataFactory
+from src.team_instanciator.runtime.async_checkpointer_loop import AsyncCheckpointerLoop
 from src.team_instanciator.runtime.graph_invocation import invoke_graph_sync
 from src.team_instanciator.runtime.model_attempt_callback import with_model_attempt_callback
 from src.team_instanciator.runtime.runnable_config_metadata_injector import RunnableConfigMetadataInjector
@@ -32,6 +33,7 @@ class MentionRouter:
         thread_id_factory: ThreadIdFactory,
         checkpoint_metadata_factory: CheckpointMetadataFactory,
         root_thread_id: str,
+        async_runner: AsyncCheckpointerLoop | None = None,
         metadata_injector: RunnableConfigMetadataInjector | None = None,
     ) -> None:
         self._team = team
@@ -43,6 +45,7 @@ class MentionRouter:
         self._thread_id_factory = thread_id_factory
         self._checkpoint_metadata_factory = checkpoint_metadata_factory
         self._root_thread_id = root_thread_id
+        self._async_runner = async_runner
         self._metadata_injector = metadata_injector or RunnableConfigMetadataInjector()
         self._dispatch_lock = threading.Lock()
         self._background_lock = threading.Lock()
@@ -149,7 +152,7 @@ class MentionRouter:
             self._thread_id_factory.branch(self._root_thread_id, branch_id),
             agent_id,
         )
-        logical_thread_key = self._thread_id_factory.logical_thread_key(proposed_thread_id)
+        logical_thread_key = self._thread_id_factory.logical_mention(agent_id)
         branch_thread = self._store.ensure_branch_thread(
             branch_id=branch_id,
             logical_thread_key=logical_thread_key,
@@ -192,6 +195,7 @@ class MentionRouter:
                 {"configurable": {"thread_id": thread_id}},
                 {
                     **self._checkpoint_metadata_factory.mention(self._team, target),
+                    "conversation_id": self._store.conversation_id,
                     "branch_id": branch_id,
                     "logical_thread_key": logical_thread_key,
                     "physical_thread_id": thread_id,
@@ -208,6 +212,7 @@ class MentionRouter:
                     run_id=run_id,
                     branch_id=branch_id,
                 ),
+                async_runner=self._async_runner,
             )
             if self._store.is_stop_requested(agent_id, run_id, branch_id=branch_id):
                 self._store.complete_run(

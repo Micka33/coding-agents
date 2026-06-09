@@ -4,13 +4,85 @@ import sqlite3
 import unittest
 
 from src.team_instanciator.conversation.store import ConversationStore
+from src.team_instanciator.runtime.thread_id_factory import ThreadIdFactory
+from src.team_instanciator.runtime.tool_call_edge import ToolCallEdge
+from src.team_instanciator.runtime.tool_call_edge_recorder import ToolCallEdgeRecorder
 
 
 class ConversationStoreEdgeTests(unittest.TestCase):
+    def test_shared_sqlite_scopes_tool_edges_and_thread_ids_by_team(self) -> None:
+        with sqlite3.connect(":memory:", check_same_thread=False) as connection:
+            alpha = ConversationStore(team_id="alpha", conversation_id="thread", connection=connection)
+            beta = ConversationStore(team_id="beta", conversation_id="thread", connection=connection)
+            thread_factory = ThreadIdFactory()
+            alpha_thread_id = thread_factory.mention(
+                thread_factory.branch(thread_factory.root(team_id="alpha", conversation_id="thread"), "branch_main"),
+                "agent",
+            )
+            beta_thread_id = thread_factory.mention(
+                thread_factory.branch(thread_factory.root(team_id="beta", conversation_id="thread"), "branch_main"),
+                "agent",
+            )
+            recorder = ToolCallEdgeRecorder(connection)
+
+            self.assertNotEqual(alpha_thread_id, beta_thread_id)
+
+            alpha_edge = ToolCallEdge(
+                id="call_shared",
+                team_id="alpha",
+                conversation_id="thread",
+                commit_id="commit_alpha",
+                branch_id="branch_main",
+                parent_logical_thread_key="mention:agent",
+                parent_physical_thread_id=alpha_thread_id,
+                relation_id="rel_worker",
+                target_agent_id="worker",
+                child_logical_thread_key="mention:agent:relation:rel_worker:agent:worker",
+                child_physical_thread_id=f"{alpha_thread_id}:relation:rel_worker:agent:worker",
+                run_id="run_alpha",
+                status="running",
+            )
+            beta_edge = ToolCallEdge(
+                id="call_shared",
+                team_id="beta",
+                conversation_id="thread",
+                commit_id="commit_beta",
+                branch_id="branch_main",
+                parent_logical_thread_key="mention:agent",
+                parent_physical_thread_id=beta_thread_id,
+                relation_id="rel_worker",
+                target_agent_id="worker",
+                child_logical_thread_key="mention:agent:relation:rel_worker:agent:worker",
+                child_physical_thread_id=f"{beta_thread_id}:relation:rel_worker:agent:worker",
+                run_id="run_beta",
+                status="running",
+            )
+
+            recorder.record_started(alpha_edge)
+            recorder.record_started(beta_edge)
+            recorder.record_finished(alpha_edge, "success")
+            recorder.record_finished(beta_edge, "failed")
+
+            self.assertEqual(
+                connection.execute(
+                    "select team_id, status from tool_call_edges where id = 'call_shared' order by team_id"
+                ).fetchall(),
+                [("alpha", "success"), ("beta", "failed")],
+            )
+            self.assertEqual(
+                [edge.commit_id for edge in alpha.list_tool_call_edges(branch_id="branch_main", run_id="run_alpha")],
+                ["commit_alpha"],
+            )
+            self.assertEqual(
+                [edge.commit_id for edge in beta.list_tool_call_edges(branch_id="branch_main", run_id="run_beta")],
+                ["commit_beta"],
+            )
+
     def test_in_memory_lookup_frontier_side_effect_and_schema_fallbacks(self) -> None:
         store = ConversationStore(team_id="team", conversation_id="thread")
         event = store.append_event(author_id="human", author_kind="human", content="@agent")
 
+        self.assertEqual(store._committed_causal_commit_ids({"run"}), {"run"})
         self.assertIsNone(store.get_event("missing"))
         self.assertIsNone(
             store.record_model_attempt_finished(
@@ -91,7 +163,18 @@ class ConversationStoreEdgeTests(unittest.TestCase):
         store._delete_persisted_conversation_history()
         store._upsert_history_schema_version()
         store._ensure_branch_scoped_agent_state()
+        store._ensure_tool_call_edges_schema()
         self.assertFalse(store._table_exists("team_conversation_events"))
+
+    def test_sqlite_tool_call_edges_schema_is_recreated_when_unscoped(self) -> None:
+        with sqlite3.connect(":memory:", check_same_thread=False) as connection:
+            connection.execute("create table tool_call_edges (id text primary key, commit_id text not null)")
+
+            ConversationStore(team_id="team", conversation_id="thread", connection=connection)
+
+            columns = {str(row[1]) for row in connection.execute("pragma table_info(tool_call_edges)").fetchall()}
+            self.assertIn("team_id", columns)
+            self.assertIn("conversation_id", columns)
 
     def test_sqlite_missing_event_unstable_delivery_branch_thread_and_legacy_agent_state(self) -> None:
         with sqlite3.connect(":memory:", check_same_thread=False) as connection:

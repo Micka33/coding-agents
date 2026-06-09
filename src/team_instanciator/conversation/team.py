@@ -58,6 +58,7 @@ class MentionAwareTeam:
         self.conversation_id = conversation_id
         self.thread_id_factory = thread_id_factory
         self.checkpoint_metadata_factory = checkpoint_metadata_factory
+        self.async_runner = checkpointer_handle.async_runner
         self._metadata_injector = RunnableConfigMetadataInjector()
         self.store = ConversationStore(
             team_id=team.id,
@@ -76,6 +77,7 @@ class MentionAwareTeam:
             for agent_id, reference in team.agent_references.items()
             if reference.conversation is not None
         }
+        self.root_thread_id = self.thread_id_factory.root(team_id=team.id, conversation_id=conversation_id)
         self.router = MentionRouter(
             team=team,
             registry=registry,
@@ -89,7 +91,8 @@ class MentionAwareTeam:
             reply_extractor=PublicReplyExtractor(),
             thread_id_factory=thread_id_factory,
             checkpoint_metadata_factory=checkpoint_metadata_factory,
-            root_thread_id=conversation_id,
+            root_thread_id=self.root_thread_id,
+            async_runner=self.async_runner,
         )
         self.runtime = ConversationRuntimeController(self)
         self._serde = JsonPlusSerializer()
@@ -234,11 +237,7 @@ class MentionAwareTeam:
         if not content.strip():
             raise ValueError("content is required for prompt injection.")
         branch_id = self.store.current_branch_id()
-        proposed_thread_id = self.thread_id_factory.mention(
-            self.thread_id_factory.branch(self.conversation_id, branch_id),
-            agent_id,
-        )
-        logical_thread_key = self.thread_id_factory.logical_thread_key(proposed_thread_id)
+        logical_thread_key = self.thread_id_factory.logical_mention(agent_id)
         source_frontier = self._latest_usable_thread_frontier(
             branch_id=branch_id,
             logical_thread_key=logical_thread_key,
@@ -295,6 +294,7 @@ class MentionAwareTeam:
                 config,
                 {
                     **self.checkpoint_metadata_factory.mention(self.team, self.team.agents[agent_id]),
+                    "conversation_id": self.conversation_id,
                     "branch_id": branch_id,
                     "logical_thread_key": logical_thread_key,
                     "physical_thread_id": source_frontier.physical_thread_id,
@@ -313,6 +313,7 @@ class MentionAwareTeam:
                     run_id=run_id,
                     branch_id=branch_id,
                 ),
+                async_runner=self.async_runner,
             )
         except Exception as exc:
             self.store.complete_run(
@@ -416,7 +417,19 @@ class MentionAwareTeam:
                     ]
                 },
             )
-        result = invoke_graph_sync(graph, None, config=config)
+        branch_id = self.store.current_branch_id()
+        logical_thread_key = self.thread_id_factory.logical_thread_key(thread_id)
+        config = self._metadata_injector.inject(
+            config,
+            {
+                **self.checkpoint_metadata_factory.mention(self.team, self.team.agents[agent_id]),
+                "conversation_id": self.conversation_id,
+                "branch_id": branch_id,
+                "logical_thread_key": logical_thread_key,
+                "physical_thread_id": thread_id,
+            },
+        )
+        result = invoke_graph_sync(graph, None, config=config, async_runner=self.async_runner)
         reply = PublicReplyExtractor().extract(result)
         if reply is None:
             raise ValueError("Checkpoint replay returned no final textual AI reply.")
@@ -428,10 +441,9 @@ class MentionAwareTeam:
             origin_logical_message_id=origin_event.logical_message_id if origin_event is not None else None,
             origin_event_seq=origin_event_seq,
             head_checkpoint_id=checkpoint_id,
-            parent_branch_id=self.store.current_branch_id(),
+            parent_branch_id=branch_id,
         )
         self.store.switch_branch(branch.id)
-        logical_thread_key = self.thread_id_factory.logical_thread_key(thread_id)
         self.store.create_control_event(
             branch_id=branch.id,
             logical_thread_key=logical_thread_key,
@@ -517,9 +529,13 @@ class MentionAwareTeam:
             state["deliveries"] = [item for item in state["deliveries"] if item["agent_id"] == agent_id]
             state["runs"] = [item for item in state["runs"] if item["agent_id"] == agent_id]
         if agent_id:
-            private_thread_id = self.thread_id_factory.mention(
-                self.thread_id_factory.branch(self.conversation_id, self.store.current_branch_id()),
-                agent_id,
+            logical_thread_key = self.thread_id_factory.logical_mention(agent_id)
+            branch_id = self.store.current_branch_id()
+            branch_thread = self.store.get_branch_thread(branch_id=branch_id, logical_thread_key=logical_thread_key)
+            private_thread_id = (
+                branch_thread.physical_thread_id
+                if branch_thread is not None
+                else self.thread_id_factory.mention(self.thread_id_factory.branch(self.root_thread_id, branch_id), agent_id)
             )
             state["private_thread_id"] = private_thread_id
             state["private_messages"] = self._private_messages(private_thread_id)
@@ -537,7 +553,7 @@ class MentionAwareTeam:
         media_type: str | None = None,
     ) -> ConversationFileRef:
         file_id = f"file_{uuid.uuid4().hex}"
-        destination_dir = self.root_dir / ".coding-agents" / "conversations" / self.conversation_id / "files"
+        destination_dir = self.root_dir / ".coding-agents" / "conversations" / self.team.id / self.conversation_id / "files"
         destination_dir.mkdir(parents=True, exist_ok=True)
         destination = destination_dir / file_id
         destination.write_bytes(content)
@@ -675,10 +691,10 @@ class MentionAwareTeam:
         return "Checkpoint resume"
 
     def _agent_id_from_thread(self, thread_id: str) -> str | None:
-        marker = ":mention:"
-        if marker not in thread_id:
+        parsed = self.thread_id_factory.parse(thread_id)
+        if parsed.agent_id is None:
             return None
-        agent_id = thread_id.rsplit(marker, maxsplit=1)[-1]
+        agent_id = parsed.agent_id
         return agent_id if agent_id in self.parser.participants else None
 
     def _message_summary(
@@ -743,7 +759,7 @@ class MentionAwareTeam:
 
         source = Path(file).expanduser().resolve()
         file_id = f"file_{uuid.uuid4().hex}"
-        destination_dir = self.root_dir / ".coding-agents" / "conversations" / self.conversation_id / "files"
+        destination_dir = self.root_dir / ".coding-agents" / "conversations" / self.team.id / self.conversation_id / "files"
         destination_dir.mkdir(parents=True, exist_ok=True)
         destination = destination_dir / file_id
         shutil.copy2(source, destination)

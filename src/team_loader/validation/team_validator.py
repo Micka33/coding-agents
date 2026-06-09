@@ -16,6 +16,7 @@ class TeamValidator:
     def validate(self, team: TeamDefinition) -> None:
         self._validate_schema(team)
         self._validate_working_directories(team)
+        self._validate_skill_sources(team)
         self._validate_custom_tools(team)
         self._validate_mcp_servers(team)
         self._validate_toolsets(team)
@@ -58,6 +59,26 @@ class TeamValidator:
                 raise TeamLoaderError(
                     f"agents.{agent_id}.relative_working_directory must be an existing directory: {agent_directory}"
                 )
+
+    def _validate_skill_sources(self, team: TeamDefinition) -> None:
+        raw_sources = team.raw.get("skill_sources") if is_json_object(getattr(team, "raw", None)) else None
+        if raw_sources is None:
+            return
+        if not isinstance(raw_sources, list):
+            raise TeamLoaderError("team.yaml skill_sources must be a list of strings.")
+        team_dir = Path(getattr(team, "path", "team.yaml")).expanduser().resolve().parent
+        for index, source in enumerate(raw_sources, start=1):
+            if not isinstance(source, str) or not source:
+                raise TeamLoaderError(f"team.yaml skill_sources[{index}] must be a non-empty string.")
+            source_path = Path(source).expanduser()
+            if source_path.is_absolute():
+                continue
+            try:
+                (team_dir / source_path).resolve().relative_to(team_dir)
+            except ValueError as error:
+                raise TeamLoaderError(
+                    f"team.yaml skill_sources[{index}] must stay within the team directory when relative."
+                ) from error
 
     def _validate_custom_tools(self, team: TeamDefinition) -> None:
         for custom_tool in team.custom_tools.values():
@@ -143,6 +164,29 @@ class TeamValidator:
                     raise TeamLoaderError(f"Agent '{agent_id}' references unknown toolset '{toolset}'.")
             if agent.state.persistence not in {"inherit", "disposable", "persistent"}:
                 raise TeamLoaderError(f"Agent '{agent_id}' has invalid state.persistence '{agent.state.persistence}'.")
+            self._validate_agent_skills(agent_id, getattr(agent, "skills", "inherit"))
+
+    def _validate_agent_skills(self, agent_id: str, skills: object) -> None:
+        if skills is None or (isinstance(skills, str) and skills in {"inherit", "none"}):
+            return
+        if isinstance(skills, list):
+            self._validate_skill_id_list(agent_id, skills, "skills")
+            return
+        if is_json_object(skills):
+            unsupported = sorted(key for key in skills if key != "only")
+            if unsupported:
+                raise TeamLoaderError(f"Agent '{agent_id}' skills contains unsupported key: {unsupported[0]}.")
+            only = skills.get("only")
+            if not isinstance(only, list):
+                raise TeamLoaderError(f"Agent '{agent_id}' skills.only must be a list of strings.")
+            self._validate_skill_id_list(agent_id, only, "skills.only")
+            return
+        raise TeamLoaderError(f"Agent '{agent_id}' skills must be inherit, none, a legacy list, or an only mapping.")
+
+    def _validate_skill_id_list(self, agent_id: str, values: list[object], field: str) -> None:
+        for value in values:
+            if not isinstance(value, str) or not value:
+                raise TeamLoaderError(f"Agent '{agent_id}' {field} entries must be non-empty strings.")
 
     def _validate_relations(self, team: TeamDefinition) -> None:
         agent_lookup = self._case_insensitive_lookup(team.agent_references)

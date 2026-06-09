@@ -9,6 +9,7 @@ from langchain.tools import ToolRuntime
 from src.team_loader.models.relation_definition import RelationDefinition
 
 from src.team_instanciator.conversation.protocols import GraphRegistry
+from src.team_instanciator.runtime.async_checkpointer_loop import AsyncCheckpointerLoop
 from src.team_instanciator.runtime.branch_thread_resolver import BranchThreadResolver
 from src.team_instanciator.runtime.graph_invocation import invoke_graph_sync
 from src.team_instanciator.runtime.runnable_config_metadata_injector import RunnableConfigMetadataInjector
@@ -17,7 +18,7 @@ from src.team_instanciator.runtime.tool_call_edge import ToolCallEdge
 from src.team_instanciator.runtime.tool_call_edge_recorder import ToolCallEdgeRecorder
 
 
-_LOGICAL_THREAD_LOCKS: dict[tuple[str, str], threading.Lock] = {}
+_LOGICAL_THREAD_LOCKS: dict[tuple[str, str, str, str], threading.Lock] = {}
 _LOGICAL_THREAD_LOCKS_GUARD = threading.Lock()
 
 
@@ -26,32 +27,37 @@ class RelationTool:
         self,
         relation: RelationDefinition,
         registry: GraphRegistry,
-        parent_thread_id: str,
         thread_id_factory: ThreadIdFactory,
         checkpoint_metadata: Mapping[str, object],
         tool_call_edge_recorder: ToolCallEdgeRecorder | None = None,
         branch_thread_resolver: BranchThreadResolver | None = None,
+        async_runner: AsyncCheckpointerLoop | None = None,
         metadata_injector: RunnableConfigMetadataInjector | None = None,
     ) -> None:
         self._relation = relation
         self._registry = registry
-        self._fallback_parent_thread_id = parent_thread_id
         self._thread_id_factory = thread_id_factory
         self._checkpoint_metadata = dict(checkpoint_metadata)
         self._tool_call_edge_recorder = tool_call_edge_recorder or ToolCallEdgeRecorder()
         self._branch_thread_resolver = branch_thread_resolver
+        self._async_runner = async_runner
         self._metadata_injector = metadata_injector or RunnableConfigMetadataInjector()
 
     def run(self, message: str, runtime: ToolRuntime) -> str:
         """Send a message to a related agent."""
 
         graph = self._registry.graph(self._relation.target)
-        parent_thread_id = self._parent_thread_id(runtime)
-        thread_id = self._thread_id_factory.relation(parent_thread_id, self._relation)
         runtime_metadata = self._runtime_metadata(runtime)
-        branch_id = self._thread_id_factory.branch_id_from_thread_id(parent_thread_id) or self._metadata_value(runtime_metadata, "branch_id") or ""
-        parent_logical_thread_key = self._thread_id_factory.logical_thread_key(parent_thread_id)
-        child_logical_thread_key = self._thread_id_factory.logical_thread_key(thread_id)
+        team_id = self._required_metadata(runtime_metadata, "team_id")
+        conversation_id = self._required_metadata(runtime_metadata, "conversation_id")
+        branch_id = self._required_metadata(runtime_metadata, "branch_id")
+        parent_logical_thread_key = self._required_metadata(runtime_metadata, "logical_thread_key")
+        parent_thread_id = self._parent_thread_id(runtime)
+        parsed_parent = self._thread_id_factory.parse(parent_thread_id)
+        if parsed_parent.team_id != team_id or parsed_parent.conversation_id != conversation_id:
+            raise ValueError("Relation tool runtime scope does not match parent thread id.")
+        thread_id = self._thread_id_factory.relation(parent_thread_id, self._relation)
+        child_logical_thread_key = self._thread_id_factory.logical_relation(parent_logical_thread_key, self._relation)
         edge_id = self._tool_call_id(runtime) or f"edge_{uuid.uuid4().hex}"
         commit_id = f"commit_{edge_id}"
         thread_id = self._physical_thread_id(
@@ -69,12 +75,15 @@ class RelationTool:
             "relation_id": self._thread_id_factory.relation_id(self._relation),
             "logical_thread_key": child_logical_thread_key,
             "physical_thread_id": thread_id,
+            "conversation_id": conversation_id,
             "run_id": self._metadata_value(runtime_metadata, "run_id") or "",
             "tool_call_edge_id": edge_id,
             "commit_id": commit_id,
         }
         edge = ToolCallEdge(
             id=edge_id,
+            team_id=team_id,
+            conversation_id=conversation_id,
             commit_id=commit_id,
             branch_id=branch_id,
             parent_logical_thread_key=parent_logical_thread_key,
@@ -86,7 +95,7 @@ class RelationTool:
             run_id=metadata["run_id"] or None,
             status="running",
         )
-        lock = self._logical_thread_lock(branch_id, child_logical_thread_key)
+        lock = self._logical_thread_lock(team_id, conversation_id, branch_id, child_logical_thread_key)
         with lock:
             self._tool_call_edge_recorder.record_started(edge)
             try:
@@ -97,11 +106,12 @@ class RelationTool:
                         self._base_child_config(runtime, thread_id),
                         metadata,
                     ),
+                    async_runner=self._async_runner,
                 )
             except Exception:
-                self._tool_call_edge_recorder.record_finished(edge_id, "failed")
+                self._tool_call_edge_recorder.record_finished(edge, "failed")
                 raise
-            self._tool_call_edge_recorder.record_finished(edge_id, "success")
+            self._tool_call_edge_recorder.record_finished(edge, "success")
         return self._last_message_text(result)
 
     def _base_child_config(self, runtime: ToolRuntime, thread_id: str) -> dict[str, object]:
@@ -117,7 +127,7 @@ class RelationTool:
         thread_id = configurable.get("thread_id")
         if isinstance(thread_id, str) and thread_id:
             return thread_id
-        return self._fallback_parent_thread_id
+        raise ValueError("Relation tool requires runtime.config.configurable.thread_id.")
 
     def _runtime_metadata(self, runtime: ToolRuntime) -> Mapping[str, object]:
         metadata = runtime.config.get("metadata", {}) if runtime.config else {}
@@ -127,12 +137,18 @@ class RelationTool:
         value = metadata.get(key)
         return value if isinstance(value, str) and value else None
 
+    def _required_metadata(self, metadata: Mapping[str, object], key: str) -> str:
+        value = self._metadata_value(metadata, key)
+        if value is None:
+            raise ValueError(f"Relation tool requires runtime metadata '{key}'.")
+        return value
+
     def _tool_call_id(self, runtime: ToolRuntime) -> str | None:
         value = getattr(runtime, "tool_call_id", None)
         return value if isinstance(value, str) and value else None
 
-    def _logical_thread_lock(self, branch_id: str, logical_thread_key: str) -> threading.Lock:
-        key = (branch_id, logical_thread_key)
+    def _logical_thread_lock(self, team_id: str, conversation_id: str, branch_id: str, logical_thread_key: str) -> threading.Lock:
+        key = (team_id, conversation_id, branch_id, logical_thread_key)
         with _LOGICAL_THREAD_LOCKS_GUARD:
             lock = _LOGICAL_THREAD_LOCKS.get(key)
             if lock is None:

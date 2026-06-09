@@ -136,6 +136,8 @@ def team(
     conversation: Any | None = None,
     working_directory: str | Path = ".",
     load_cwd: str | Path | None = None,
+    path: str | Path = "team.yaml",
+    skill_sources: tuple[str, ...] = (),
 ) -> FakeTeam:
     resolved_agents = agents or {"entry": agent("entry", entrypoint=True)}
     return FakeTeam(
@@ -148,9 +150,10 @@ def team(
         relations=relations,
         custom_tools=custom_tools or {},
         mcp_servers=mcp_servers or {},
+        skill_sources=skill_sources,
         toolsets=toolsets or {},
         agent_references=agent_references if agent_references is not None else resolved_agents,
         conversation=conversation,
-        path=Path("team.yaml"),
+        path=Path(path),
         raw={},
     )

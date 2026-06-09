@@ -8,6 +8,7 @@ from urllib.parse import unquote
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
 from src.team_instanciator.conversation.payloads import ConversationStateDict
+from src.team_instanciator.runtime.thread_id_factory import ThreadIdFactory
 from src.webapp.api.conversation_protocol import WebConversation
 from src.webapp_studio.backend.api.time_utils import utc_now_iso
 from src.webapp_studio.backend.contracts.checkpoint_summary import CheckpointSummary
@@ -16,14 +17,16 @@ from src.webapp_studio.backend.contracts.checkpoint_summary import CheckpointSum
 class CheckpointHistoryReader:
     def __init__(self) -> None:
         self._serde = JsonPlusSerializer()
+        self._thread_id_factory = ThreadIdFactory()
 
     def checkpoints(self, conversation: WebConversation, state: ConversationStateDict) -> list[CheckpointSummary]:
         connection = self._connection(conversation)
         if connection is None:
             return []
+        team_id = state["team_id"]
         conversation_id = state["conversation_id"]
         branch_id = self._current_branch_id(conversation)
-        thread_ids = self._thread_ids(state, conversation_id=conversation_id, branch_id=branch_id)
+        thread_ids = self._thread_ids(state, team_id=team_id, conversation_id=conversation_id, branch_id=branch_id)
         if not thread_ids:
             return []
         placeholders = ",".join("?" for _ in thread_ids)
@@ -43,10 +46,12 @@ class CheckpointHistoryReader:
             raise
         return [self._checkpoint_summary(connection, row, seq=index) for index, row in enumerate(rows, start=1)]
 
-    def _thread_ids(self, state: ConversationStateDict, *, conversation_id: str, branch_id: str) -> list[str]:
+    def _thread_ids(self, state: ConversationStateDict, *, team_id: str, conversation_id: str, branch_id: str) -> list[str]:
         thread_ids: list[str] = []
+        root_thread_id = self._thread_id_factory.root(team_id=team_id, conversation_id=conversation_id)
+        branch_thread_id = self._thread_id_factory.branch(root_thread_id, branch_id)
         for participant in state.get("participants", []):
-            thread_ids.append(f"{conversation_id}:branch:{branch_id}:mention:{participant}")
+            thread_ids.append(self._thread_id_factory.mention(branch_thread_id, str(participant)))
         for branch_thread in state.get("branch_threads", []):
             if not isinstance(branch_thread, dict):
                 continue

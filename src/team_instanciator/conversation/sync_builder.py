@@ -136,7 +136,7 @@ class AgentSyncBuilder:
         if "scoped_read_tools" in target.toolsets and str(payload.get("uri") or "").startswith(
             "conversation://files/"
         ):
-            payload["read_path"] = f"/.coding-agents/conversations/{event.conversation_id}/files/{attachment.id}"
+            payload["read_path"] = f"/.coding-agents/conversations/{event.team_id}/{event.conversation_id}/files/{attachment.id}"
         return payload
 
     def _content_with_attachment_context(self, content: str, attachments: list[dict[str, object]]) -> str:

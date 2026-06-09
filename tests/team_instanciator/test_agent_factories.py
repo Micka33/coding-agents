@@ -89,7 +89,7 @@ class AgentFactoryTests(unittest.TestCase):
         self.assertEqual(kwargs["checkpointer"], "checkpointer")
         self.assertIs(kwargs["debug"], True)
         self.assertNotIn("task", kwargs["middleware"][0].excluded_tools)
-        self.assertIn("read_file", kwargs["middleware"][0].excluded_tools)
+        self.assertNotIn("read_file", kwargs["middleware"][0].excluded_tools)
 
     def test_deep_agent_factory_adds_general_purpose_subagent_only_when_enabled(self) -> None:
         team_config = team()

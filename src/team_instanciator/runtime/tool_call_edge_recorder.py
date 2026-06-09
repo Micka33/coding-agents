@@ -20,6 +20,8 @@ class ToolCallEdgeRecorder:
             self._connection.execute(
                 """
                 insert into tool_call_edges (
+                    team_id,
+                    conversation_id,
                     id,
                     commit_id,
                     branch_id,
@@ -32,8 +34,8 @@ class ToolCallEdgeRecorder:
                     run_id,
                     status
                 )
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                on conflict(id) do update set
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                on conflict(team_id, conversation_id, id) do update set
                     commit_id = excluded.commit_id,
                     branch_id = excluded.branch_id,
                     parent_logical_thread_key = excluded.parent_logical_thread_key,
@@ -46,6 +48,8 @@ class ToolCallEdgeRecorder:
                     status = excluded.status
                 """,
                 (
+                    edge.team_id,
+                    edge.conversation_id,
                     edge.id,
                     edge.commit_id,
                     edge.branch_id,
@@ -61,11 +65,18 @@ class ToolCallEdgeRecorder:
             )
             self._connection.commit()
 
-    def record_finished(self, edge_id: str, status: ToolCallEdgeStatus) -> None:
+    def record_finished(self, edge: ToolCallEdge, status: ToolCallEdgeStatus) -> None:
         if self._connection is None:
             return
         with self._lock:
-            self._connection.execute("update tool_call_edges set status = ? where id = ?", (status, edge_id))
+            self._connection.execute(
+                """
+                update tool_call_edges
+                set status = ?
+                where team_id = ? and conversation_id = ? and id = ?
+                """,
+                (status, edge.team_id, edge.conversation_id, edge.id),
+            )
             self._connection.commit()
 
     def _initialize_sqlite(self) -> None:
@@ -74,7 +85,9 @@ class ToolCallEdgeRecorder:
         self._connection.execute(
             """
             create table if not exists tool_call_edges (
-                id text primary key,
+                team_id text not null,
+                conversation_id text not null,
+                id text not null,
                 commit_id text not null,
                 branch_id text not null,
                 parent_logical_thread_key text not null,
@@ -84,7 +97,8 @@ class ToolCallEdgeRecorder:
                 child_logical_thread_key text not null,
                 child_physical_thread_id text not null,
                 run_id text,
-                status text not null
+                status text not null,
+                primary key (team_id, conversation_id, id)
             )
             """
         )

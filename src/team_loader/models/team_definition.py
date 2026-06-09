@@ -5,7 +5,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from src.type_defs import JsonObject
-from src.team_loader.models._coercion import as_json_object, int_value, optional_string, string_value
+from src.team_loader.models._coercion import as_json_object, int_value, optional_string, string_tuple, string_value
 from src.team_loader.models.agent_definition import AgentDefinition
 from src.team_loader.models.agent_reference import AgentReference
 from src.team_loader.models.human_input_settings import HumanInputSettings
@@ -28,6 +28,7 @@ class TeamDefinition:
     defaults: TeamDefaults
     custom_tools: dict[str, CustomToolDefinition]
     mcp_servers: dict[str, McpServerDefinition]
+    skill_sources: tuple[str, ...]
     toolsets: dict[str, ToolsetDefinition]
     agent_references: dict[str, AgentReference]
     agents: dict[str, AgentDefinition]
@@ -88,6 +89,7 @@ class TeamDefinition:
             defaults=defaults,
             custom_tools=custom_tools,
             mcp_servers=mcp_servers,
+            skill_sources=string_tuple(mapping.get("skill_sources")),
             toolsets=toolsets,
             agent_references=agent_references,
             agents=agents,

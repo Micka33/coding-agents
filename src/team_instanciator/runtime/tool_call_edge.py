@@ -10,6 +10,8 @@ ToolCallEdgeStatus = Literal["running", "success", "failed"]
 @dataclass(frozen=True)
 class ToolCallEdge:
     id: str
+    team_id: str
+    conversation_id: str
     commit_id: str
     branch_id: str
     parent_logical_thread_key: str

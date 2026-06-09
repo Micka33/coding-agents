@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 
+from src.team_instanciator.configuration.runtime_configuration import RuntimeConfiguration
 from src.team_instanciator.factories.subagent_factory import SubagentFactory
+from src.team_instanciator.resolvers.skills_resolver import SkillsResolver
 from src.team_instanciator.runtime.thread_id_factory import ThreadIdFactory
 from tests.support import agent, relation, team
 
@@ -84,7 +88,7 @@ class SubagentFactoryTests(unittest.TestCase):
             ThreadIdFactory(),
         )
         team_config = team(
-            agents={"reviewer": agent("reviewer", description="Reviews", prompt="Review prompt")},
+            agents={"reviewer": agent("reviewer", description="Reviews", prompt="Review prompt", skills="none")},
             relations=(relation(source="reviewer", target="reviewer", tool_name="ask_self"),),
         )
 
@@ -99,7 +103,31 @@ class SubagentFactoryTests(unittest.TestCase):
         )
         self.assertIn("read_file", spec["middleware"][0].excluded_tools)
         self.assertIn("task", spec["middleware"][0].excluded_tools)
-        self.assertEqual(relation_factory.calls[0][3], "team")
+        self.assertIsInstance(relation_factory.calls[0][3], ThreadIdFactory)
+        self.assertNotIn("skills", spec)
+
+    def test_deepagents_runtime_includes_resolved_skill_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            launch_cwd = Path(tmp) / "repo"
+            (launch_cwd / ".agents" / "skills" / "project").mkdir(parents=True)
+            (launch_cwd / ".agents" / "skills" / "project" / "SKILL.md").write_text("project", encoding="utf-8")
+            factory = SubagentFactory(
+                RuntimeResolver("deepagents_spec"),
+                LangChainFactory(),
+                ToolsetResolver(),
+                RelationToolFactory(),
+                ThreadIdFactory(),
+                skills_resolver=SkillsResolver(RuntimeConfiguration({"CODEX_HOME": ""})),
+            )
+            team_config = team(
+                working_directory=launch_cwd,
+                load_cwd=launch_cwd,
+                agents={"reviewer": agent("reviewer", skills={"only": ["project"]})},
+            )
+
+            spec = factory.create(team_config, registry="registry", agent_id="reviewer")
+
+        self.assertEqual(spec["skills"], [("/skills/reviewer/project", "Project")])
 
 
 if __name__ == "__main__":

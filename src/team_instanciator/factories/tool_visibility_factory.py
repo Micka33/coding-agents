@@ -3,18 +3,25 @@ from __future__ import annotations
 from src.team_loader.models.agent_definition import AgentDefinition
 from src.team_loader.models.team_definition import TeamDefinition
 from src.team_instanciator.configuration.runtime_configuration import RuntimeConfiguration
+from src.team_instanciator.resolvers.skill_source_resolver import SkillSourceResolver
 from src.team_instanciator.tools.deep_agent_tool_visibility_middleware import DeepAgentToolVisibilityMiddleware
 
 
 class ToolVisibilityFactory:
-    READ_TOOLS = frozenset({"ls", "read_file", "glob", "grep"})
+    READ_FILE_TOOL = "read_file"
+    READ_TOOLS = frozenset({"ls", READ_FILE_TOOL, "glob", "grep"})
     WRITE_TOOLS = frozenset({"write_file", "edit_file"})
     SHELL_TOOLS = frozenset({"execute"})
     DELEGATION_TOOLS = frozenset({"task"})
     DEEPAGENTS_BUILTIN_TOOLS = READ_TOOLS | WRITE_TOOLS | SHELL_TOOLS | DELEGATION_TOOLS
 
-    def __init__(self, configuration: RuntimeConfiguration | None = None) -> None:
+    def __init__(
+        self,
+        configuration: RuntimeConfiguration | None = None,
+        skill_source_resolver: SkillSourceResolver | None = None,
+    ) -> None:
         self._configuration = configuration or RuntimeConfiguration()
+        self._skill_source_resolver = skill_source_resolver or SkillSourceResolver(self._configuration)
 
     def create(
         self,
@@ -38,6 +45,8 @@ class ToolVisibilityFactory:
         toolsets = set(agent.toolsets)
         if "scoped_read_tools" not in toolsets:
             excluded.update(self.READ_TOOLS)
+            if self._skills_available(team, agent):
+                excluded.discard(self.READ_FILE_TOOL)
         if "write" not in toolsets:
             excluded.update(self.WRITE_TOOLS)
         if "shell" not in toolsets or self._execution_backend(team) != "local":
@@ -53,3 +62,6 @@ class ToolVisibilityFactory:
             if configured:
                 return str(configured)
         return team.defaults.execution_backend.default or "none"
+
+    def _skills_available(self, team: TeamDefinition, agent: AgentDefinition) -> bool:
+        return bool(self._skill_source_resolver.resolve_agent_sources(team, agent))

@@ -98,6 +98,18 @@ class FakeRegistry:
 
 
 class ConversationRuntimeTests(unittest.TestCase):
+    def _mention_thread_id(
+        self,
+        runtime: MentionAwareTeam,
+        agent_id: str,
+        *,
+        branch_id: str = "branch_main",
+    ) -> str:
+        return runtime.thread_id_factory.mention(
+            runtime.thread_id_factory.branch(runtime.root_thread_id, branch_id),
+            agent_id,
+        )
+
     def test_parser_resolves_aliases_and_ignores_code_unknown_nonparticipants_and_self_mentions(self) -> None:
         parser = MentionParser({"agent-a", "agent-b"}, {"architect": "agent-b"})
 
@@ -336,12 +348,16 @@ class ConversationRuntimeTests(unittest.TestCase):
         with sqlite3.connect(":memory:", check_same_thread=False) as connection:
             store = ConversationStore(team_id="team", conversation_id="thread", connection=connection)
             event = store.append_event(author_id="human", author_kind="human", content="@agent please", mentions=("agent",))
-            delivered_thread_id = "thread:branch:branch_main:mention:delivered"
-            orphan_thread_id = "thread:branch:branch_main:mention:orphan"
+            thread_id_factory = ThreadIdFactory()
+            root_thread_id = thread_id_factory.root(team_id="team", conversation_id="thread")
+            delivered_thread_id = thread_id_factory.mention(thread_id_factory.branch(root_thread_id, "branch_main"), "delivered")
+            delivered_logical_key = thread_id_factory.logical_thread_key(delivered_thread_id)
+            orphan_thread_id = thread_id_factory.mention(thread_id_factory.branch(root_thread_id, "branch_main"), "orphan")
+            orphan_logical_key = thread_id_factory.logical_thread_key(orphan_thread_id)
 
             store.ensure_branch_thread(
                 branch_id="branch_main",
-                logical_thread_key=delivered_thread_id,
+                logical_thread_key=delivered_logical_key,
                 physical_thread_id=delivered_thread_id,
                 created_by_commit_id="run_delivered",
             )
@@ -350,32 +366,36 @@ class ConversationRuntimeTests(unittest.TestCase):
                 run_id="run_delivered",
                 snapshot_seq=event.seq,
                 branch_id="branch_main",
-                logical_thread_key=delivered_thread_id,
+                logical_thread_key=delivered_logical_key,
                 physical_thread_id=delivered_thread_id,
             )
             delivered_child_thread_id = f"{delivered_thread_id}:relation:rel_child:agent:child"
+            delivered_child_logical_key = f"{delivered_logical_key}:relation:rel_child:agent:child"
             store.ensure_branch_thread(
                 branch_id="branch_main",
-                logical_thread_key=delivered_child_thread_id,
+                logical_thread_key=delivered_child_logical_key,
                 physical_thread_id=delivered_child_thread_id,
                 created_by_commit_id="commit_edge_delivered",
             )
-            ToolCallEdgeRecorder(connection).record_started(
-                ToolCallEdge(
-                    id="edge_delivered",
-                    commit_id="commit_edge_delivered",
-                    branch_id="branch_main",
-                    parent_logical_thread_key=delivered_thread_id,
-                    parent_physical_thread_id=delivered_thread_id,
-                    relation_id="rel_child",
-                    target_agent_id="child",
-                    child_logical_thread_key=delivered_child_thread_id,
-                    child_physical_thread_id=delivered_child_thread_id,
-                    run_id="run_delivered",
-                    status="running",
-                )
+            delivered_edge = ToolCallEdge(
+                id="edge_delivered",
+                team_id="team",
+                conversation_id="thread",
+                commit_id="commit_edge_delivered",
+                branch_id="branch_main",
+                parent_logical_thread_key=delivered_logical_key,
+                parent_physical_thread_id=delivered_thread_id,
+                relation_id="rel_child",
+                target_agent_id="child",
+                child_logical_thread_key=delivered_child_logical_key,
+                child_physical_thread_id=delivered_child_thread_id,
+                run_id="run_delivered",
+                status="running",
             )
-            ToolCallEdgeRecorder(connection).record_finished("edge_delivered", "success")
+            ToolCallEdgeRecorder(connection).record_started(
+                delivered_edge
+            )
+            ToolCallEdgeRecorder(connection).record_finished(delivered_edge, "success")
             connection.execute(
                 """
                 insert into team_conversation_deliveries (
@@ -410,7 +430,7 @@ class ConversationRuntimeTests(unittest.TestCase):
 
             store.ensure_branch_thread(
                 branch_id="branch_main",
-                logical_thread_key=orphan_thread_id,
+                logical_thread_key=orphan_logical_key,
                 physical_thread_id=orphan_thread_id,
                 created_by_commit_id="run_orphan",
             )
@@ -419,7 +439,7 @@ class ConversationRuntimeTests(unittest.TestCase):
                 run_id="run_orphan",
                 snapshot_seq=event.seq,
                 branch_id="branch_main",
-                logical_thread_key=orphan_thread_id,
+                logical_thread_key=orphan_logical_key,
                 physical_thread_id=orphan_thread_id,
             )
             store.record_model_attempt_started(
@@ -437,13 +457,15 @@ class ConversationRuntimeTests(unittest.TestCase):
             ToolCallEdgeRecorder(connection).record_started(
                 ToolCallEdge(
                     id="edge_orphan",
+                    team_id="team",
+                    conversation_id="thread",
                     commit_id="commit_edge_orphan",
                     branch_id="branch_main",
-                    parent_logical_thread_key="thread:mention:parent",
-                    parent_physical_thread_id="thread:branch:branch_main:mention:parent",
+                    parent_logical_thread_key="mention:parent",
+                    parent_physical_thread_id=thread_id_factory.mention(thread_id_factory.branch(root_thread_id, "branch_main"), "parent"),
                     relation_id="rel_orphan",
                     target_agent_id="orphan",
-                    child_logical_thread_key=orphan_thread_id,
+                    child_logical_thread_key=orphan_logical_key,
                     child_physical_thread_id=orphan_thread_id,
                     run_id="run_orphan",
                     status="running",
@@ -460,17 +482,17 @@ class ConversationRuntimeTests(unittest.TestCase):
             self.assertIsNone(reloaded.ensure_agent_state("delivered", branch_id="branch_main").current_run_id)
             self.assertEqual(reloaded.ensure_agent_state("delivered", branch_id="branch_main").last_delivered_seq, event.seq)
             self.assertIsNotNone(
-                reloaded.get_branch_thread(branch_id="branch_main", logical_thread_key=delivered_thread_id)
+                reloaded.get_branch_thread(branch_id="branch_main", logical_thread_key=delivered_logical_key)
             )
             self.assertIsNotNone(
-                reloaded.get_branch_thread(branch_id="branch_main", logical_thread_key=delivered_child_thread_id)
+                reloaded.get_branch_thread(branch_id="branch_main", logical_thread_key=delivered_child_logical_key)
             )
             self.assertEqual(orphan_run.commit_state if orphan_run else None, "orphaned")
             self.assertEqual(orphan_run.stop_kind if orphan_run else None, "incomplete-commit")
             self.assertFalse(orphan_run.usable_for_continue if orphan_run else True)
-            self.assertIsNone(reloaded.get_branch_thread(branch_id="branch_main", logical_thread_key=orphan_thread_id))
+            self.assertIsNone(reloaded.get_branch_thread(branch_id="branch_main", logical_thread_key=orphan_logical_key))
             self.assertEqual(
-                [thread.status for thread in reloaded.list_branch_threads(branch_id="branch_main") if thread.logical_thread_key == orphan_thread_id],
+                [thread.status for thread in reloaded.list_branch_threads(branch_id="branch_main") if thread.logical_thread_key == orphan_logical_key],
                 ["orphaned"],
             )
             self.assertFalse(reloaded.ensure_agent_state("orphan", branch_id="branch_main").running)
@@ -811,7 +833,24 @@ class ConversationRuntimeTests(unittest.TestCase):
             "prompt-injection",
         )
 
-        ToolCallEdgeRecorder(None).record_finished("edge", "success")
+        ToolCallEdgeRecorder(None).record_finished(
+            ToolCallEdge(
+                id="edge",
+                team_id="team",
+                conversation_id="thread",
+                commit_id="commit_edge",
+                branch_id="branch_main",
+                parent_logical_thread_key="mention:parent",
+                parent_physical_thread_id="parent-thread",
+                relation_id="rel_child",
+                target_agent_id="child",
+                child_logical_thread_key="mention:child",
+                child_physical_thread_id="child-thread",
+                run_id=None,
+                status="running",
+            ),
+            "success",
+        )
         ToolCallEdgeRecorder(None)._initialize_sqlite()
 
         store = SimpleNamespace(
@@ -844,11 +883,12 @@ class ConversationRuntimeTests(unittest.TestCase):
             content="@agent-b original",
             mentions=("agent-b",),
         )
+        thread_id = self._mention_thread_id(runtime, "agent-b")
 
         result = runtime.resume_checkpoint(
             checkpoint_id="checkpoint_01",
             checkpoint_ns="",
-            thread_id="thread:mention:agent-b",
+            thread_id=thread_id,
             mode="resume",
             origin_event_id=origin.id,
             origin_event_seq=origin.seq,
@@ -865,11 +905,12 @@ class ConversationRuntimeTests(unittest.TestCase):
     def test_checkpoint_edit_updates_graph_state_before_replay(self) -> None:
         graph = FakeGraph("edited")
         runtime = self._conversation_runtime({"agent-b": graph})
+        thread_id = self._mention_thread_id(runtime, "agent-b")
 
         result = runtime.runtime.resume_checkpoint(
             checkpoint_id="checkpoint_01",
             checkpoint_ns="",
-            thread_id="thread:mention:agent-b",
+            thread_id=thread_id,
             mode="edit",
             edited_content="replacement",
         )
@@ -888,11 +929,11 @@ class ConversationRuntimeTests(unittest.TestCase):
             runtime.runtime.resume_checkpoint(
                 checkpoint_id="checkpoint_01",
                 checkpoint_ns="",
-                thread_id="thread:mention:agent-b",
+                thread_id=thread_id,
                 mode="edit",
             )
         with self.assertRaisesRegex(ValueError, "mention thread"):
-            runtime.resume_checkpoint(checkpoint_id="checkpoint_01", checkpoint_ns="", thread_id="thread")
+            runtime.resume_checkpoint(checkpoint_id="checkpoint_01", checkpoint_ns="", thread_id=runtime.root_thread_id)
 
         no_update = SimpleNamespace(invoke=lambda _input, config=None: {"messages": [AIMessage(content="ok")]})
         runtime.registry.graphs["agent-b"] = no_update
@@ -900,20 +941,20 @@ class ConversationRuntimeTests(unittest.TestCase):
             runtime.resume_checkpoint(
                 checkpoint_id="checkpoint_01",
                 checkpoint_ns="",
-                thread_id="thread:mention:agent-b",
+                thread_id=thread_id,
                 mode="edit",
                 edited_content="replacement",
             )
 
         runtime.registry.graphs["agent-b"] = FakeGraph("")
         with self.assertRaisesRegex(ValueError, "no final textual"):
-            runtime.resume_checkpoint(checkpoint_id="checkpoint_01", checkpoint_ns="", thread_id="thread:mention:agent-b")
+            runtime.resume_checkpoint(checkpoint_id="checkpoint_01", checkpoint_ns="", thread_id=thread_id)
 
         runtime.registry.graphs["agent-b"] = FakeGraph("regenerated")
         regenerated = runtime.resume_checkpoint(
             checkpoint_id="checkpoint_01",
             checkpoint_ns="",
-            thread_id="thread:mention:agent-b",
+            thread_id=thread_id,
             mode="regenerate",
         )
         self.assertEqual(regenerated.branch.label, "Checkpoint regenerate")
@@ -950,6 +991,7 @@ class ConversationRuntimeTests(unittest.TestCase):
         graph = FakeGraph("continued", callback=write_checkpoint)
         runtime = self._conversation_runtime({"agent-b": graph}, connection=connection)
         runtime_holder["runtime"] = runtime
+        thread_id = self._mention_thread_id(runtime, "agent-b")
 
         stopped = runtime.append_human_message("@agent-b pause", author_id="mickael")
         injected = runtime.runtime.inject_agent_prompt("agent-b", "please continue")
@@ -960,9 +1002,10 @@ class ConversationRuntimeTests(unittest.TestCase):
             """
             select checkpoint_id, parent_checkpoint_id
             from checkpoints
-            where thread_id = 'thread:branch:branch_main:mention:agent-b'
+            where thread_id = ?
             order by checkpoint_id asc
-            """
+            """,
+            (thread_id,),
         ).fetchall()
 
         self.assertEqual(stopped.deliveries[0].status, "stopped")
@@ -1081,10 +1124,10 @@ class ConversationRuntimeTests(unittest.TestCase):
         self.assertEqual(sync.messages[1].additional_kwargs["attachments"][0]["filename"], "notes.txt")
         self.assertEqual(
             sync.messages[1].additional_kwargs["attachments"][0]["read_path"],
-            "/.coding-agents/conversations/thread/files/file-1",
+            "/.coding-agents/conversations/team/thread/files/file-1",
         )
         self.assertIn(
-            "read_path: /.coding-agents/conversations/thread/files/file-1",
+            "read_path: /.coding-agents/conversations/team/thread/files/file-1",
             sync.messages[1].content,
         )
 
@@ -1258,9 +1301,11 @@ class ConversationRuntimeTests(unittest.TestCase):
         branch = runtime.store.create_branch(label="Alternative", origin_event_seq=first.seq, origin_event_id=first.id)
         runtime.store.switch_branch(branch.id)
         second = runtime.append_human_message("@agent-b edited", author_id="mickael").event
+        main_thread_id = self._mention_thread_id(runtime, "agent-b", branch_id="branch_main")
+        branch_thread_id = self._mention_thread_id(runtime, "agent-b", branch_id=branch.id)
 
-        self.assertEqual(graph.calls[0][1]["configurable"]["thread_id"], "thread:branch:branch_main:mention:agent-b")
-        self.assertEqual(graph.calls[1][1]["configurable"]["thread_id"], f"thread:branch:{branch.id}:mention:agent-b")
+        self.assertEqual(graph.calls[0][1]["configurable"]["thread_id"], main_thread_id)
+        self.assertEqual(graph.calls[1][1]["configurable"]["thread_id"], branch_thread_id)
         self.assertEqual(runtime.store.list_runs(branch_id="branch_main")[0].physical_thread_id, graph.calls[0][1]["configurable"]["thread_id"])
         self.assertEqual(runtime.store.list_runs(branch_id=branch.id)[0].physical_thread_id, graph.calls[1][1]["configurable"]["thread_id"])
         self.assertEqual(runtime.store.list_runs(branch_id=branch.id)[0].commit_state, "committed")
@@ -1299,8 +1344,8 @@ class ConversationRuntimeTests(unittest.TestCase):
         self.assertEqual(edited.event.frontier_before_event_id, original.frontier_before_event_id)
         self.assertEqual([event.content for event in current_events], ["hello", "@agent-b edited", "edited reply"])
         self.assertEqual([event.content for event in main_events], ["hello", "@agent-b original", "edited reply"])
-        self.assertEqual(graph.calls[0][1]["configurable"]["thread_id"], "thread:branch:branch_main:mention:agent-b")
-        self.assertEqual(graph.calls[1][1]["configurable"]["thread_id"], f"thread:branch:{current_branch_id}:mention:agent-b")
+        self.assertEqual(graph.calls[0][1]["configurable"]["thread_id"], self._mention_thread_id(runtime, "agent-b", branch_id="branch_main"))
+        self.assertEqual(graph.calls[1][1]["configurable"]["thread_id"], self._mention_thread_id(runtime, "agent-b", branch_id=current_branch_id))
 
         with self.assertRaisesRegex(ValueError, "only human"):
             runtime.edit_human_message(current_events[-1].id, "@agent-b invalid")
@@ -1343,7 +1388,7 @@ class ConversationRuntimeTests(unittest.TestCase):
         original_second = runtime.append_human_message("@agent-b second", author_id="mickael").event
         runtime.edit_human_message(original_second.id, "@agent-b edited", author_id="mickael")
 
-        main_thread_id = "thread:branch:branch_main:mention:agent-b"
+        main_thread_id = self._mention_thread_id(runtime, "agent-b", branch_id="branch_main")
         branch_thread_id = graph.calls[2][1]["configurable"]["thread_id"]
         branch_id = runtime.store.current_branch_id()
         branch_thread = runtime.store.list_branch_threads(branch_id=branch_id)[0]
@@ -1369,7 +1414,7 @@ class ConversationRuntimeTests(unittest.TestCase):
 
         self.assertEqual([frontier.checkpoint_id for frontier in main_frontiers], ["checkpoint-1", "checkpoint-2"])
         self.assertEqual(branch_thread.physical_thread_id, branch_thread_id)
-        self.assertEqual(branch_thread.logical_thread_key, "thread:mention:agent-b")
+        self.assertEqual(branch_thread.logical_thread_key, "mention:agent-b")
         self.assertEqual(branch_thread.forked_from_branch_id, "branch_main")
         self.assertEqual(branch_thread.forked_from_thread_id, main_thread_id)
         self.assertEqual(branch_thread.forked_from_checkpoint_id, "checkpoint-1")
@@ -1506,13 +1551,15 @@ class ConversationRuntimeTests(unittest.TestCase):
             content="@agent-b pause",
             mentions=("agent-b",),
         )
-        thread_id = "thread:branch:branch_main:mention:agent-b"
+        thread_id_factory = ThreadIdFactory()
+        root_thread_id = thread_id_factory.root(team_id="team", conversation_id="thread")
+        thread_id = thread_id_factory.mention(thread_id_factory.branch(root_thread_id, "branch_main"), "agent-b")
         store.mark_run_started(
             "agent-b",
             run_id="run_interrupted",
             snapshot_seq=event.seq,
             branch_id="branch_main",
-            logical_thread_key="thread:mention:agent-b",
+            logical_thread_key=thread_id_factory.logical_thread_key(thread_id),
             physical_thread_id=thread_id,
         )
         self._insert_checkpoint(
@@ -1564,8 +1611,10 @@ class ConversationRuntimeTests(unittest.TestCase):
                 child_physical_thread_id = f"{parent_physical_thread_id}:relation:rel_level_{level}:agent:agent-{level}"
                 edge_id = f"edge_level_{level}"
                 recorder.record_started(
-                    ToolCallEdge(
+                    edge := ToolCallEdge(
                         id=edge_id,
+                        team_id="team",
+                        conversation_id="thread",
                         commit_id=f"commit_{edge_id}",
                         branch_id=branch_id,
                         parent_logical_thread_key=parent_logical_thread_key,
@@ -1578,7 +1627,7 @@ class ConversationRuntimeTests(unittest.TestCase):
                         status="running",
                     )
                 )
-                recorder.record_finished(edge_id, "success")
+                recorder.record_finished(edge, "success")
                 self._insert_checkpoint(
                     connection,
                     thread_id=child_physical_thread_id,
@@ -1611,13 +1660,20 @@ class ConversationRuntimeTests(unittest.TestCase):
         level_five_branch_thread = runtime.store.ensure_branch_thread(
             branch_id=branch_id,
             logical_thread_key=level_five_frontier.logical_thread_key,
-            physical_thread_id=f"thread:branch:{branch_id}:mention:agent-b:relation:rel_level_1:agent:agent-1:relation:rel_level_2:agent:agent-2:relation:rel_level_3:agent:agent-3:relation:rel_level_4:agent:agent-4:relation:rel_level_5:agent:agent-5",
+            physical_thread_id=(
+                f"{self._mention_thread_id(runtime, 'agent-b', branch_id=branch_id)}"
+                ":relation:rel_level_1:agent:agent-1"
+                ":relation:rel_level_2:agent:agent-2"
+                ":relation:rel_level_3:agent:agent-3"
+                ":relation:rel_level_4:agent:agent-4"
+                ":relation:rel_level_5:agent:agent-5"
+            ),
         )
 
         self.assertEqual(len(first_reply_frontiers), 6)
         self.assertEqual({frontier.run_id for frontier in first_reply_frontiers}, {graph.calls[0][1]["metadata"]["run_id"]})
         self.assertEqual(level_five_frontier.checkpoint_id, "checkpoint-level-5")
-        self.assertEqual(level_five_frontier.parent_logical_thread_key, "thread:mention:agent-b:relation:rel_level_1:agent:agent-1:relation:rel_level_2:agent:agent-2:relation:rel_level_3:agent:agent-3:relation:rel_level_4:agent:agent-4")
+        self.assertEqual(level_five_frontier.parent_logical_thread_key, "mention:agent-b:relation:rel_level_1:agent:agent-1:relation:rel_level_2:agent:agent-2:relation:rel_level_3:agent:agent-3:relation:rel_level_4:agent:agent-4")
         self.assertEqual(level_five_branch_thread.forked_from_branch_id, "branch_main")
         self.assertEqual(level_five_branch_thread.forked_from_checkpoint_id, "checkpoint-level-5")
 
@@ -1684,7 +1740,7 @@ class ConversationRuntimeTests(unittest.TestCase):
 
             attachment = graph.calls[0][0]["messages"][1].additional_kwargs["attachments"][0]
             self.assertEqual(attachment["filename"], "notes.txt")
-            self.assertTrue((root / ".coding-agents" / "conversations" / "thread" / "files" / attachment["id"]).is_file())
+            self.assertTrue((root / ".coding-agents" / "conversations" / "team" / "thread" / "files" / attachment["id"]).is_file())
 
     def test_mentions_while_running_collapse_into_one_follow_up_without_skipping_cursor(self) -> None:
         runtime_holder = {}
@@ -1860,7 +1916,7 @@ class ConversationRuntimeTests(unittest.TestCase):
         runtime.router._append_public_reply(
             "agent-b",
             "@agent-c disabled",
-            source_thread_id="thread:mention:agent-b",
+            source_thread_id=self._mention_thread_id(runtime, "agent-b"),
             source_message_id=None,
             branch_id="branch_main",
             context=DispatchContext(),
@@ -1926,10 +1982,7 @@ class ConversationRuntimeTests(unittest.TestCase):
                 connection.execute(
                     "insert into writes values (?, '', 'messages', ?, 'task', ?, ?, ?)",
                     (
-                        runtime.thread_id_factory.mention(
-                            runtime.thread_id_factory.branch("thread", "branch_main"),
-                            "agent-b",
-                        ),
+                        self._mention_thread_id(runtime, "agent-b"),
                         f"checkpoint-{index}",
                         index,
                         type_name,
@@ -1950,10 +2003,7 @@ class ConversationRuntimeTests(unittest.TestCase):
             root = Path(tmp)
             connection = sqlite3.connect(":memory:", check_same_thread=False)
             runtime = self._conversation_runtime({"agent-b": FakeGraph("answer")}, root=root, connection=connection)
-            thread_id = runtime.thread_id_factory.mention(
-                runtime.thread_id_factory.branch("thread", "branch_main"),
-                "agent-b",
-            )
+            thread_id = self._mention_thread_id(runtime, "agent-b")
             checkpoint_type, checkpoint_blob = runtime._serde.dumps_typed(
                 {"id": "checkpoint-1", "ts": "2026-06-01T10:00:02+00:00"}
             )
@@ -2135,8 +2185,7 @@ class ConversationRuntimeTests(unittest.TestCase):
         )
 
     def _record_usable_frontier(self, runtime: MentionAwareTeam, agent_id: str) -> None:
-        branch_thread_id = runtime.thread_id_factory.branch(runtime.conversation_id, "branch_main")
-        physical_thread_id = runtime.thread_id_factory.mention(branch_thread_id, agent_id)
+        physical_thread_id = self._mention_thread_id(runtime, agent_id)
         runtime.store.record_thread_frontier(
             frontier_id=f"frontier_{agent_id}",
             branch_id="branch_main",

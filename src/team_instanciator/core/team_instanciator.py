@@ -23,6 +23,7 @@ from src.team_instanciator.factories.relation_tool_factory import RelationToolFa
 from src.team_instanciator.configuration.runtime_configuration import RuntimeConfiguration
 from src.team_instanciator.configuration.runtime_configuration_validator import RuntimeConfigurationValidator
 from src.team_instanciator.resolvers.skills_resolver import SkillsResolver
+from src.team_instanciator.resolvers.skill_source_resolver import SkillSourceResolver
 from src.team_instanciator.factories.subagent_factory import SubagentFactory
 from src.team_instanciator.factories.tool_visibility_factory import ToolVisibilityFactory
 from src.team_instanciator.runtime.thread_id_factory import ThreadIdFactory
@@ -52,15 +53,17 @@ class TeamInstanciator:
         team = self._team_loader.load(team_file, variables)
         RuntimeConfigurationValidator(configuration).validate(team)
         checkpointer_handle = CheckpointerFactory(configuration).create(team)
+        skill_source_resolver = SkillSourceResolver(configuration)
         model_resolver = ModelResolver(configuration)
         toolset_resolver = ToolsetResolver(configuration, checkpointer_handle)
-        permissions_factory = PermissionsFactory()
-        tool_visibility_factory = ToolVisibilityFactory(configuration)
+        permissions_factory = PermissionsFactory(skill_source_resolver)
+        tool_visibility_factory = ToolVisibilityFactory(configuration, skill_source_resolver)
+        skills_resolver = SkillsResolver(configuration, skill_source_resolver)
         relation_tool_factory = RelationToolFactory()
         thread_id_factory = ThreadIdFactory()
         checkpoint_metadata_factory = CheckpointMetadataFactory()
         tool_call_edge_recorder = ToolCallEdgeRecorder(checkpointer_handle.connection)
-        branch_thread_resolver = BranchThreadResolver(checkpointer_handle.connection, team.id)
+        branch_thread_resolver = BranchThreadResolver(checkpointer_handle.connection, team.id, thread_id_factory)
         working_directory_resolver = WorkingDirectoryResolver()
         runtime_manifest = TeamRuntimeManifestBuilder(thread_id_factory).build(team)
         langchain_agent_factory = LangChainAgentFactory(model_resolver, toolset_resolver)
@@ -75,14 +78,16 @@ class TeamInstanciator:
             checkpoint_metadata_factory,
             tool_call_edge_recorder,
             branch_thread_resolver,
+            checkpointer_handle.async_runner,
+            skills_resolver,
         )
         deep_agent_factory = DeepAgentFactory(
             model_resolver,
             toolset_resolver,
-            BackendFactory(configuration),
+            BackendFactory(configuration, skill_source_resolver),
             permissions_factory,
             MemoryResolver(),
-            SkillsResolver(configuration),
+            skills_resolver,
             tool_visibility_factory,
         )
         registry = AgentGraphRegistry(

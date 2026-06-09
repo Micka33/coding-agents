@@ -50,4 +50,4 @@ class RuntimeLane:
             return parent_thread_id
         if self.thread_id_pattern is None:
             return None
-        return self.thread_id_pattern.replace("{parent_thread_id}", parent_thread_id)
+        return self.thread_id_pattern.replace("{parent_thread_id}", parent_thread_id).replace("{parent_logical_key}", parent_thread_id)

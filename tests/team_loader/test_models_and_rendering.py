@@ -38,6 +38,10 @@ class ModelsAndRenderingTests(unittest.TestCase):
 
         checkpointer = CheckpointerDefault.from_mapping({"postgres_url": {"env": "DATABASE_URL"}})
         self.assertEqual(checkpointer.postgres_url_env, ("DATABASE_URL",))
+        self.assertEqual(
+            CheckpointerDefault.from_mapping({"postgres_url": {"env": ["DATABASE_URL", "", 123]}}).postgres_url_env,
+            ("DATABASE_URL", "123"),
+        )
         self.assertEqual(CustomToolDefinition.from_mapping("bad", {"args": "ignored", "exposes": "ignored"}).args, {})
         CustomToolDefinition("probe", "module:function", {}, ("one",)).validate_returned_tools(("one",))
         with self.assertRaisesRegex(ValueError, "missing: one; extra: two"):
@@ -140,6 +144,8 @@ class ModelsAndRenderingTests(unittest.TestCase):
                         "schema_version: 1",
                         "id: product",
                         f"working_directory: {root}",
+                        "skill_sources:",
+                        "  - skills",
                         "mcp_servers:",
                         "  time:",
                         "    transport: stdio",
@@ -175,6 +181,7 @@ class ModelsAndRenderingTests(unittest.TestCase):
 
             self.assertEqual(loaded.entrypoint().prompt, "Hello Ada 2 {{ missing }}")
             self.assertEqual(loaded.working_directory, str(root))
+            self.assertEqual(loaded.skill_sources, ("skills",))
             self.assertEqual(loaded.mcp_servers["time"].command, "uvx")
             self.assertEqual(loaded.mcp_servers["time"].args, ("mcp-server-time",))
             self.assertEqual(loaded.agents["Entry"].relative_working_directory, "agents")

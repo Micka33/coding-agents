@@ -21,6 +21,29 @@ class InstantiatedTeamTests(unittest.TestCase):
 
         self.assertTrue(handle.closed)
 
+    def test_close_waits_for_conversation_before_closing_checkpointer(self) -> None:
+        class FakeConversation:
+            def __init__(self) -> None:
+                self.waited = False
+
+            def wait_for_idle(self) -> None:
+                self.waited = True
+
+        handle = FakeClosable()
+        conversation = FakeConversation()
+        instantiated = InstantiatedTeam(
+            team(),
+            FakeGraph(),
+            handle,
+            runtime_manifest="manifest",
+            conversation=conversation,
+        )
+
+        instantiated.close()
+
+        self.assertTrue(conversation.waited)
+        self.assertTrue(handle.closed)
+
     def test_conversation_for_returns_none_default_or_requested_thread(self) -> None:
         default_conversation = object()
         requested_conversation = object()

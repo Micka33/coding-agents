@@ -86,6 +86,7 @@ relations:
 | `defaults` | No | Shared runtime defaults for models, storage, execution, and memory. |
 | `custom_tools` | No | Tool factories that can be reused from toolsets. |
 | `mcp_servers` | No | Local or hosted MCP servers that can be reused from toolsets. |
+| `skill_sources` | No | Additional team-local skill source roots. |
 | `toolsets` | No | Named groups of tools that agents request from `.mdc` frontmatter. |
 | `agents` | Yes | Canonical agent ids and paths to their `.mdc` files. |
 | `relations` | No | Directed links that expose agents as tools or subagents. |
@@ -113,6 +114,12 @@ SQLite checkpointer storage and project skills are not scoped by
 directory captured when the CLI is launched. Project skills resolve from
 `.agents/skills` under that same current working directory.
 
+Team skill sources are prompt/runtime configuration, not workspace scope.
+`<team.yaml directory>/skills` is included automatically when it exists.
+Additional `skill_sources` entries resolve relative to the directory containing
+`team.yaml`; relative entries must stay inside that team directory. Absolute
+entries are allowed.
+
 `agents.<id>.relative_working_directory` is resolved relative to the team
 `working_directory`. It defaults to `"."`, must be relative, must point to an
 existing directory, and must stay inside the team `working_directory`. Agent
@@ -126,6 +133,39 @@ Configuration strings can use single-brace substitutions:
 | `{working_directory}` | `working_directory` | Inserts the configured working-directory string. |
 | `{name}` | `--var name=value` or `TeamInstanciator.instantiate(..., variables={...})` | Inserts the run variable. |
 | Unknown placeholders | None | Left unchanged. |
+
+## Skill Sources
+
+Skills are discovered from source roots. Each source root contains skill
+directories with `SKILL.md` files:
+
+```text
+<source-root>/langchain-rag/SKILL.md
+```
+
+The runtime loads existing sources in this order:
+
+1. `$CODEX_HOME/skills`
+2. `<cli-cwd>/.agents/skills`
+3. `<team.yaml directory>/skills`
+4. configured `skill_sources`, in declaration order
+
+Later sources have higher priority when two sources contain the same skill id.
+
+Use `skill_sources` only for additional team-local roots:
+
+```yaml
+skill_sources:
+  - ./extra-skills
+```
+
+Relative entries resolve from the directory containing `team.yaml` and must stay
+inside that directory. Missing configured sources do not fail loading, but they
+produce a diagnostic.
+
+Agents select skill policy from `.mdc` frontmatter. See
+[`agent_mdc.md`](agent_mdc.md#skills) and [`agent_skills.md`](agent_skills.md)
+for details.
 
 ## Defaults
 

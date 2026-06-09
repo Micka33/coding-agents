@@ -17,6 +17,8 @@ from src.team_instanciator.factories.permissions_factory import PermissionsFacto
 from src.team_instanciator.factories.relation_tool_factory import RelationToolFactory
 from src.team_instanciator.factories.tool_visibility_factory import ToolVisibilityFactory
 from src.team_instanciator.factories.tool_name_validator import ToolNameValidator
+from src.team_instanciator.resolvers.skills_resolver import SkillsResolver
+from src.team_instanciator.runtime.async_checkpointer_loop import AsyncCheckpointerLoop
 from src.team_instanciator.runtime.branch_thread_resolver import BranchThreadResolver
 from src.team_instanciator.runtime.runnable_config_metadata_injector import RunnableConfigMetadataInjector
 from src.team_instanciator.runtime.thread_id_factory import ThreadIdFactory
@@ -32,6 +34,7 @@ class SubagentSpec(TypedDict):
     tools: NotRequired[list[BaseTool]]
     middleware: NotRequired[list[AgentMiddleware]]
     permissions: NotRequired[list[FilesystemPermission]]
+    skills: NotRequired[list[tuple[str, str]]]
 
 
 class SubagentFactory:
@@ -47,6 +50,8 @@ class SubagentFactory:
         checkpoint_metadata_factory: CheckpointMetadataFactory | None = None,
         tool_call_edge_recorder: ToolCallEdgeRecorder | None = None,
         branch_thread_resolver: BranchThreadResolver | None = None,
+        async_runner: AsyncCheckpointerLoop | None = None,
+        skills_resolver: SkillsResolver | None = None,
     ) -> None:
         self._runtime_resolver = runtime_resolver
         self._langchain_agent_factory = langchain_agent_factory
@@ -58,6 +63,8 @@ class SubagentFactory:
         self._checkpoint_metadata_factory = checkpoint_metadata_factory or CheckpointMetadataFactory()
         self._tool_call_edge_recorder = tool_call_edge_recorder
         self._branch_thread_resolver = branch_thread_resolver
+        self._async_runner = async_runner
+        self._skills_resolver = skills_resolver or SkillsResolver()
         self._metadata_injector = RunnableConfigMetadataInjector()
         self._tool_name_validator = ToolNameValidator()
 
@@ -77,12 +84,12 @@ class SubagentFactory:
             *self._relation_tools(team, registry, agent_id),
         ]
         self._tool_name_validator.validate_unique(agent.id, tools)
-        return {
+        spec: SubagentSpec = {
             "name": agent.id,
             "description": agent.description or agent.id,
             "system_prompt": agent.prompt,
             "tools": tools,
-            "permissions": self._permissions_factory.create(agent),
+            "permissions": self._permissions_factory.create(agent, team),
             "middleware": [
                 self._tool_visibility_factory.create(
                     team,
@@ -91,6 +98,10 @@ class SubagentFactory:
                 )
             ],
         }
+        skills = self._skills_resolver.resolve(team, agent)
+        if skills is not None:
+            spec["skills"] = skills
+        return spec
 
     def _relation_tools(self, team: TeamDefinition, registry: GraphRegistry, agent_id: str) -> list[StructuredTool]:
         return [
@@ -98,11 +109,11 @@ class SubagentFactory:
                 team,
                 relation,
                 registry,
-                self._thread_id_factory.root(team.id),
                 self._thread_id_factory,
                 self._checkpoint_metadata_factory,
                 self._tool_call_edge_recorder,
                 self._branch_thread_resolver,
+                self._async_runner,
             )
             for relation in team.relations
             if relation.source == agent_id and relation.relation == "tool"

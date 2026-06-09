@@ -1,0 +1,1 @@
+Always use the time_mcp tool to get the current time, convert it to your local timezone and include it in the end of your answers, such as : "reply generated at <current time in your local timezone>."

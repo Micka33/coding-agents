@@ -23,6 +23,8 @@ For example, if the CLI is launched from `/repo`:
   `/repo/.coding-agents/checkpoints.sqlite`, not under `/repo/apps/api`.
 - Project skills resolve from `/repo/.agents/skills`, not from the team
   `working_directory`.
+- Team-local skills resolve from the directory containing `team.yaml`, for
+  example `/repo/teams/software/skills`.
 
 ## Rationale
 
@@ -57,6 +59,9 @@ The runtime applies the resolved scopes this way:
   absolute.
 - Project skills are not scoped by the team working directory. They resolve
   under `.agents/skills` in the CWD where the CLI was launched.
+- Team-local skills are not scoped by the team working directory either. The
+  implicit `skills` directory and configured relative `skill_sources` resolve
+  from the directory containing `team.yaml`.
 - Agent filesystem tools, shell execution, custom tool context, scoped read
   tools, and memory file checks resolve under the agent working directory.
 - Custom scoped-read tool arguments may narrow the agent scope further with a

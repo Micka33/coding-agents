@@ -1573,14 +1573,16 @@ class ConversationStore:
     ) -> list[ToolCallEdge]:
         if self._connection is None or not self._table_exists("tool_call_edges"):
             return []
-        clauses = ["branch_id = ?", "run_id = ?"]
-        params: list[object] = [branch_id, run_id]
+        clauses = ["team_id = ?", "conversation_id = ?", "branch_id = ?", "run_id = ?"]
+        params: list[object] = [self.team_id, self.conversation_id, branch_id, run_id]
         if status is not None:
             clauses.append("status = ?")
             params.append(status)
         rows = self._connection.execute(
             f"""
             select
+                team_id,
+                conversation_id,
                 id,
                 commit_id,
                 branch_id,
@@ -1600,20 +1602,22 @@ class ConversationStore:
         ).fetchall()
         edges = []
         for row in rows:
-            status_value = str(row[10])
+            status_value = str(row[12])
             status = cast(ToolCallEdgeStatus, status_value) if status_value in {"running", "success", "failed"} else "failed"
             edges.append(
                 ToolCallEdge(
-                    id=str(row[0]),
-                    commit_id=str(row[1]),
-                    branch_id=str(row[2]),
-                    parent_logical_thread_key=str(row[3]),
-                    parent_physical_thread_id=str(row[4]),
-                    relation_id=str(row[5]),
-                    target_agent_id=str(row[6]),
-                    child_logical_thread_key=str(row[7]),
-                    child_physical_thread_id=str(row[8]),
-                    run_id=str(row[9]) if row[9] is not None else None,
+                    id=str(row[2]),
+                    team_id=str(row[0]),
+                    conversation_id=str(row[1]),
+                    commit_id=str(row[3]),
+                    branch_id=str(row[4]),
+                    parent_logical_thread_key=str(row[5]),
+                    parent_physical_thread_id=str(row[6]),
+                    relation_id=str(row[7]),
+                    target_agent_id=str(row[8]),
+                    child_logical_thread_key=str(row[9]),
+                    child_physical_thread_id=str(row[10]),
+                    run_id=str(row[11]) if row[11] is not None else None,
                     status=status,
                 )
             )
@@ -1664,9 +1668,9 @@ class ConversationStore:
                         """
                         update tool_call_edges
                         set status = 'failed'
-                        where run_id = ? and status = 'running'
+                        where team_id = ? and conversation_id = ? and run_id = ? and status = 'running'
                         """,
-                        (run_id,),
+                        (self.team_id, self.conversation_id, run_id),
                     )
                     failed_tool_call_edges += cursor.rowcount if cursor.rowcount is not None else 0
                 self._connection.commit()
@@ -1686,8 +1690,9 @@ class ConversationStore:
             """
             select commit_id, run_id
             from tool_call_edges
-            where status = 'success'
-            """
+            where team_id = ? and conversation_id = ? and status = 'success'
+            """,
+            (self.team_id, self.conversation_id),
         ).fetchall()
         for commit_id, run_id in rows:
             if run_id is None or str(run_id) in committed_run_ids:
@@ -2272,6 +2277,7 @@ class ConversationStore:
             )
             """
         )
+        self._ensure_tool_call_edges_schema()
         connection.execute(
             """
             create table if not exists team_conversation_thread_frontiers (
@@ -2384,6 +2390,36 @@ class ConversationStore:
         connection.commit()
         self.reconcile_incomplete_commits()
         self.get_runtime_state()
+
+    def _ensure_tool_call_edges_schema(self) -> None:
+        connection = self._connection
+        if connection is None:
+            return
+        if self._table_exists("tool_call_edges"):
+            columns = {str(row[1]) for row in connection.execute("pragma table_info(tool_call_edges)").fetchall()}
+            required_columns = {"team_id", "conversation_id", "id", "commit_id"}
+            if not required_columns.issubset(columns):
+                connection.execute("drop table tool_call_edges")
+        connection.execute(
+            """
+            create table if not exists tool_call_edges (
+                team_id text not null,
+                conversation_id text not null,
+                id text not null,
+                commit_id text not null,
+                branch_id text not null,
+                parent_logical_thread_key text not null,
+                parent_physical_thread_id text not null,
+                relation_id text not null,
+                target_agent_id text not null,
+                child_logical_thread_key text not null,
+                child_physical_thread_id text not null,
+                run_id text,
+                status text not null,
+                primary key (team_id, conversation_id, id)
+            )
+            """
+        )
 
     def _next_seq(self) -> int:
         if self._connection is None:

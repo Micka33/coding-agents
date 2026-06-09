@@ -5,9 +5,22 @@ import threading
 from collections.abc import Awaitable, Mapping
 from typing import Any
 
+from src.team_instanciator.runtime.async_checkpointer_loop import AsyncCheckpointerLoop
 
-def invoke_graph_sync(graph: Any, input: Any, *, config: Mapping[str, object] | None = None, **kwargs: Any) -> Any:
+
+def invoke_graph_sync(
+    graph: Any,
+    input: Any,
+    *,
+    config: Mapping[str, object] | None = None,
+    async_runner: AsyncCheckpointerLoop | None = None,
+    **kwargs: Any,
+) -> Any:
     ainvoke = getattr(graph, "ainvoke", None)
+    if async_runner is not None:
+        if not callable(ainvoke):
+            raise TypeError("Async checkpointer invocations require graph.ainvoke support.")
+        return async_runner.run(lambda: ainvoke(input, config=config, **kwargs))
     if callable(ainvoke):
         return _run_coroutine_sync(ainvoke(input, config=config, **kwargs))
     return graph.invoke(input, config=config, **kwargs)

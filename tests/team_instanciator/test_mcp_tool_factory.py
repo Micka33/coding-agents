@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import os
+import sys
 import unittest
+from builtins import __import__ as real_import
 from datetime import timedelta
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
 
 from langchain_core.tools import StructuredTool
@@ -213,15 +215,103 @@ class McpToolFactoryTests(unittest.TestCase):
         with self.assertRaisesRegex(TeamInstanciatorError, "must accept"):
             factory.create(bad_definition, self._context({}))
 
+    def test_http_auth_and_config_validation_errors_are_reported(self) -> None:
+        for definition, message in (
+            (
+                self._http_definition(auth=None),
+                "",
+            ),
+            (
+                self._http_definition(transport="ftp"),
+                "Unsupported MCP transport",
+            ),
+            (
+                self._http_definition(headers={"X-Missing": McpConfigValue()}),
+                "Missing MCP config value",
+            ),
+            (
+                self._http_definition(auth=SimpleNamespace(type="bearer", env="", header=None, factory=None, args={})),
+                "Missing required environment value name",
+            ),
+            (
+                self._http_definition(auth=SimpleNamespace(type="oauth", env=None, header=None, factory=None, args={})),
+                "Unsupported MCP auth type",
+            ),
+        ):
+            factory = McpToolFactory(CapturingClientFactory([tool_named("one")]))
+            if message:
+                with self.assertRaisesRegex(TeamInstanciatorError, message):
+                    factory.create(definition, self._context({}))
+            else:
+                self.assertEqual([tool.name for tool in factory.create(definition, self._context({}))], ["one"])
+
+    def test_custom_auth_factory_loading_errors_are_reported(self) -> None:
+        for factory_path, message in (
+            ("module", "Unsupported MCP auth factory"),
+            ("missing_mcp_auth_module:factory", "Could not import MCP auth module"),
+            (f"{__name__}:missing_factory", "MCP auth factory not found"),
+            (f"{__name__}:AUTH_OBJECT", "MCP auth factory is not callable"),
+        ):
+            with self.subTest(factory_path=factory_path):
+                definition = self._http_definition(
+                    auth=SimpleNamespace(type="custom", env=None, header=None, factory=factory_path, args={})
+                )
+                with self.assertRaisesRegex(TeamInstanciatorError, message):
+                    McpToolFactory(CapturingClientFactory([tool_named("one")])).create(definition, self._context({}))
+
+    def test_auth_signature_with_uninspectable_callable_is_accepted(self) -> None:
+        factory = McpToolFactory(CapturingClientFactory([tool_named("one")]))
+
+        with patch("src.team_instanciator.factories.mcp_tool_factory.inspect.signature", side_effect=ValueError):
+            factory._validate_auth_signature(self._http_definition(), custom_auth_factory, self._context({}), {})
+
     def test_reports_bad_client_and_non_tool_results(self) -> None:
         with self.assertRaisesRegex(TeamInstanciatorError, "get_tools"):
             McpToolFactory(lambda _connections: object()).create(self._stdio_definition(), self._context({}))
+
+        self.assertEqual(
+            [tool.name for tool in McpToolFactory(lambda _connections: FakeClient(tool_named("single"))).create(
+                self._stdio_definition(), self._context({})
+            )],
+            ["single"],
+        )
+
+        with self.assertRaisesRegex(TeamInstanciatorError, "must return a tool or sequence"):
+            McpToolFactory(lambda _connections: FakeClient("bad")).create(self._stdio_definition(), self._context({}))
 
         with self.assertRaisesRegex(TeamInstanciatorError, "non-tool"):
             McpToolFactory(lambda _connections: FakeClient(["bad"])).create(self._stdio_definition(), self._context({}))
 
         with self.assertRaisesRegex(TeamInstanciatorError, "Could not load MCP tools from server 'time': network down"):
             McpToolFactory(lambda _connections: FailingClient()).create(self._stdio_definition(), self._context({}))
+
+    def test_default_client_reports_missing_optional_dependency(self) -> None:
+        class FakeMultiServerMCPClient:
+            def __init__(self, connections) -> None:
+                self.connections = connections
+
+        package = ModuleType("langchain_mcp_adapters")
+        client_module = ModuleType("langchain_mcp_adapters.client")
+        client_module.MultiServerMCPClient = FakeMultiServerMCPClient
+        with patch.dict(
+            sys.modules,
+            {
+                "langchain_mcp_adapters": package,
+                "langchain_mcp_adapters.client": client_module,
+            },
+        ):
+            client = McpToolFactory()._default_client({"docs": {"transport": "stdio"}})
+
+        self.assertEqual(client.connections, {"docs": {"transport": "stdio"}})
+
+        def fail_langchain_mcp_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "langchain_mcp_adapters.client":
+                raise ImportError("missing")
+            return real_import(name, globals, locals, fromlist, level)
+
+        with patch("builtins.__import__", side_effect=fail_langchain_mcp_import):
+            with self.assertRaisesRegex(TeamInstanciatorError, "langchain-mcp-adapters"):
+                McpToolFactory()._default_client({})
 
     def _stdio_definition(self) -> McpServerDefinition:
         return McpServerDefinition(
@@ -233,6 +323,27 @@ class McpToolFactoryTests(unittest.TestCase):
             env={},
             headers={},
             auth=None,
+            timeout=None,
+            cwd=None,
+            exposes=None,
+        )
+
+    def _http_definition(
+        self,
+        *,
+        transport: str = "streamable_http",
+        headers: dict[str, McpConfigValue] | None = None,
+        auth: object | None = None,
+    ) -> McpServerDefinition:
+        return McpServerDefinition(
+            id="docs",
+            transport=transport,
+            command=None,
+            args=(),
+            url="https://mcp.example.test/mcp",
+            env={},
+            headers=headers or {},
+            auth=auth,
             timeout=None,
             cwd=None,
             exposes=None,

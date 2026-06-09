@@ -29,6 +29,8 @@ class InstantiatedTeam:
         return self.conversation.with_conversation_id(conversation_id)
 
     def close(self) -> None:
+        if self.conversation is not None:
+            self.conversation.wait_for_idle()
         self.checkpointer_handle.close()
 
     def __enter__(self) -> InstantiatedTeam:

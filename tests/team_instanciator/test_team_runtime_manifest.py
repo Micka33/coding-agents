@@ -64,7 +64,7 @@ class TeamRuntimeManifestTests(unittest.TestCase):
 
         mention_lanes = [lane for lane in manifest.lanes if lane.kind == "mention"]
         self.assertEqual([lane.lane_id for lane in mention_lanes], ["mention:entry", "mention:architect"])
-        self.assertEqual(mention_lanes[0].thread_id_pattern, "{parent_thread_id}:mention:entry")
+        self.assertEqual(mention_lanes[0].thread_id_pattern, "mention:entry")
 
     def test_builder_skips_nonparticipants_when_conversation_is_enabled(self) -> None:
         team_config = team(
@@ -129,7 +129,7 @@ class TeamRuntimeManifestTests(unittest.TestCase):
                 ("relation:rel_worker", "tool-relation"),
             ],
         )
-        self.assertEqual(relation_row, ("rel_worker", "{parent_thread_id}:relation:rel_worker:agent:worker"))
+        self.assertEqual(relation_row, ("rel_worker", "{parent_logical_key}:relation:rel_worker:agent:worker"))
         handle.close()
 
 

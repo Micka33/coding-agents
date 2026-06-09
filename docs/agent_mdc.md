@@ -46,7 +46,7 @@ relations, mentions, or display names.
 | `variables` | `{}` | Values available to the Markdown body as `{{ variable }}`. |
 | `toolsets` | `[]` | Toolset names declared in `team.yaml`. |
 | `state.persistence` | `inherit` | Accepted values: `inherit`, `disposable`, `persistent`. Currently validated and stored, but not used to change runtime behavior. |
-| `skills` | `inherit` | A list resolves to skill directories. `inherit`, `none`, and non-list values pass no explicit skill list. |
+| `skills` | `inherit` | `inherit` uses the team's effective skill source roots, `none` disables skills, and `only` restricts the visible catalog by skill id. Legacy lists are treated as `only`. |
 | `memory` | `inherit` | `inherit` uses team default memory files, `none` disables memory, and a list uses those files. |
 | `debug` | `inherit` | Only literal `true` enables debug in the current factories. |
 
@@ -147,21 +147,34 @@ subagent.
 
 ```yaml
 skills:
-  - langchain-rag
-  - github:gh-fix-ci
+  only:
+    - langchain-rag
+    - github-gh-fix-ci
 ```
 
-When `skills` is a list, each string resolves in this order:
+`inherit` or an omitted `skills` key gives the agent the team's effective skill
+source roots. The runtime resolves source roots from user, project, and team
+locations, then passes virtual source roots such as `/skills/project` to Deep
+Agents.
 
-1. `<cli-cwd>/.agents/skills/<skill-id>` if it contains `SKILL.md`
-2. `$CODEX_HOME/skills/<skill-id>` if it contains `SKILL.md`
-3. `<cli-cwd>/.agents/skills/<skill-id>` as a fallback path
+Use `none` to disable skills for an agent:
 
-Missing fallback paths are not validated by the resolver.
+```yaml
+skills: none
+```
 
-Use `inherit` or omit the key when the agent does not need an explicit skill
-list. In the current instantiator, `skills: none` also passes no explicit skill
-list.
+Use `only` when an agent should see just a subset of the discovered catalog.
+Each listed id must exist in at least one effective source root.
+
+Legacy list syntax is accepted during migration and is interpreted as `only`:
+
+```yaml
+skills:
+  - langchain-rag
+```
+
+Do not put filesystem paths in `.mdc` files. `team.yaml` owns skill source
+locations; `.mdc` frontmatter only chooses the policy for this agent.
 
 ## Memory
 

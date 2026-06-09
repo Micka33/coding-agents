@@ -20,20 +20,20 @@ class RecordingDeepAgentFactory:
 
 class RecordingRelationToolFactory:
     def __init__(self) -> None:
-        self.calls: list[tuple[Any, Any, Any, str, Any, Any, Any, Any]] = []
+        self.calls: list[tuple[Any, Any, Any, Any, Any, Any, Any, Any]] = []
 
     def create(
         self,
         team_config: Any,
         relation_config: Any,
         registry: Any,
-        parent_thread_id: str,
         thread_id_factory: Any,
         metadata_factory: Any,
         tool_call_edge_recorder: Any = None,
         branch_thread_resolver: Any = None,
+        async_runner: Any = None,
     ) -> str:
-        self.calls.append((team_config, relation_config, registry, parent_thread_id, thread_id_factory, metadata_factory, tool_call_edge_recorder, branch_thread_resolver))
+        self.calls.append((team_config, relation_config, registry, thread_id_factory, metadata_factory, tool_call_edge_recorder, branch_thread_resolver, async_runner))
         return f"tool:{relation_config.tool_name}"
 
 
@@ -82,7 +82,7 @@ class AgentGraphRegistryTests(unittest.TestCase):
         self.assertEqual(deep_factory.calls[0][4], [{"name": "reviewer"}])
         self.assertEqual(deep_factory.calls[1][3], ["tool:ask_entry"])
         self.assertIsNone(deep_factory.calls[1][4])
-        self.assertEqual(relation_factory.calls[0][3], "product")
+        self.assertEqual(relation_factory.calls[0][0], team_config)
         self.assertEqual(subagent_factory.calls, [(team_config, registry, "reviewer")])
 
         entry_graph.invoke("hello", config={"metadata": {}})

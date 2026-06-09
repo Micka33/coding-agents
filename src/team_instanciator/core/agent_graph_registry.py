@@ -67,11 +67,11 @@ class AgentGraphRegistry:
                 self._team,
                 relation,
                 self,
-                self._thread_id_factory.root(self._team.id),
                 self._thread_id_factory,
                 self._checkpoint_metadata_factory,
                 self._tool_call_edge_recorder,
                 self._branch_thread_resolver,
+                self._checkpointer_handle.async_runner,
             )
             for relation in self._relations_from(agent, "tool")
         ]

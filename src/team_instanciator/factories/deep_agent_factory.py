@@ -55,7 +55,7 @@ class DeepAgentFactory:
     ) -> RunnableGraph:
         model = self._model_resolver.resolve(team, agent)
         self._disable_default_general_purpose_subagent(model)
-        permissions = self._permissions_factory.create(agent)
+        permissions = self._permissions_factory.create(agent, team)
         effective_subagents = self._subagents(team, agent, permissions, subagents)
         resolved_tools = [*self._toolset_resolver.resolve_for_deepagents(team, agent), *tools]
         self._tool_name_validator.validate_unique(agent.id, resolved_tools)

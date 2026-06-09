@@ -133,6 +133,28 @@ class TeamValidatorTests(unittest.TestCase):
                 mcp_servers={
                     "docs": McpServerDefinition.from_mapping(
                         "docs",
+                        {"transport": "http", "url": "https://example.test/mcp", "auth": {"type": "api_key", "header": "X-Key"}},
+                    )
+                }
+            ),
+            "auth.env",
+        )
+        self.assert_invalid(
+            valid_team(
+                mcp_servers={
+                    "docs": McpServerDefinition.from_mapping(
+                        "docs",
+                        {"transport": "http", "url": "https://example.test/mcp", "auth": {"type": "oauth"}},
+                    )
+                }
+            ),
+            "auth.type",
+        )
+        self.assert_invalid(
+            valid_team(
+                mcp_servers={
+                    "docs": McpServerDefinition.from_mapping(
+                        "docs",
                         {"transport": "http", "url": "https://example.test/mcp", "auth": {"type": "custom", "factory": "module"}},
                     )
                 }
@@ -190,7 +212,18 @@ class TeamValidatorTests(unittest.TestCase):
                 "existing directory",
             )
 
+    def test_skill_source_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            team_file = root / "team.yaml"
+            TeamValidator().validate(valid_team(path=team_file, raw={"skill_sources": ["skills", str(root / "shared")]}))
+            self.assert_invalid(valid_team(path=team_file, raw={"skill_sources": "skills"}), "skill_sources")
+            self.assert_invalid(valid_team(path=team_file, raw={"skill_sources": [""]}), "non-empty string")
+            self.assert_invalid(valid_team(path=team_file, raw={"skill_sources": ["../shared"]}), "must stay within")
+
     def test_agent_errors(self) -> None:
+        TeamValidator().validate(valid_team(agents={"entry": agent("entry", entrypoint=True, skills=["project"])}))
+        TeamValidator().validate(valid_team(agents={"entry": agent("entry", entrypoint=True, skills={"only": ["project"]})}))
         self.assert_invalid(valid_team(agent_references={}, agents={}), "at least one agent")
         self.assert_invalid(valid_team(agents={"entry": agent("entry", entrypoint=False)}), "exactly one entrypoint")
         self.assert_invalid(
@@ -216,6 +249,10 @@ class TeamValidatorTests(unittest.TestCase):
         self.assert_invalid(valid_team(agents={"entry": agent("other", entrypoint=True)}), "id must match")
         self.assert_invalid(valid_team(agents={"entry": agent("entry", entrypoint=True, toolsets=("missing",))}), "unknown toolset")
         self.assert_invalid(valid_team(agents={"entry": agent("entry", entrypoint=True, state_persistence="forever")}), "invalid state")
+        self.assert_invalid(valid_team(agents={"entry": agent("entry", entrypoint=True, skills="project")}), "skills must")
+        self.assert_invalid(valid_team(agents={"entry": agent("entry", entrypoint=True, skills={"except": []})}), "unsupported key")
+        self.assert_invalid(valid_team(agents={"entry": agent("entry", entrypoint=True, skills={"only": "project"})}), "skills.only")
+        self.assert_invalid(valid_team(agents={"entry": agent("entry", entrypoint=True, skills={"only": [1]})}), "non-empty strings")
 
     def test_relation_errors(self) -> None:
         TeamValidator().validate(

@@ -29,6 +29,7 @@ class ClosableCheckpointer:
     def __init__(self) -> None:
         self.checkpointer = "checkpointer"
         self.connection = None
+        self.async_runner = None
         self.closed = False
 
     def close(self) -> None:
@@ -156,6 +157,7 @@ class TeamInstanciatorTests(unittest.TestCase):
                     "name: Entry",
                     "toolsets:",
                     "  - web",
+                    "skills: none",
                     "---",
                 ]
             ),

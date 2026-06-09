@@ -9,6 +9,7 @@ from src.team_instanciator.conversation.protocols import GraphRegistry
 from src.team_instanciator.factories.checkpoint_metadata_factory import CheckpointMetadataFactory
 from src.team_instanciator.tools.relation_tool import RelationTool
 from src.team_instanciator.errors.team_instanciator_error import TeamInstanciatorError
+from src.team_instanciator.runtime.async_checkpointer_loop import AsyncCheckpointerLoop
 from src.team_instanciator.runtime.branch_thread_resolver import BranchThreadResolver
 from src.team_instanciator.runtime.thread_id_factory import ThreadIdFactory
 from src.team_instanciator.runtime.tool_call_edge_recorder import ToolCallEdgeRecorder
@@ -20,11 +21,11 @@ class RelationToolFactory:
         team: TeamDefinition,
         relation: RelationDefinition,
         registry: GraphRegistry,
-        parent_thread_id: str,
         thread_id_factory: ThreadIdFactory,
         checkpoint_metadata_factory: CheckpointMetadataFactory | None = None,
         tool_call_edge_recorder: ToolCallEdgeRecorder | None = None,
         branch_thread_resolver: BranchThreadResolver | None = None,
+        async_runner: AsyncCheckpointerLoop | None = None,
     ) -> StructuredTool:
         if not relation.tool_name:
             raise TeamInstanciatorError(f"Relation tool from '{relation.source}' to '{relation.target}' has no tool_name.")
@@ -32,11 +33,11 @@ class RelationToolFactory:
         relation_tool = RelationTool(
             relation,
             registry,
-            parent_thread_id,
             thread_id_factory,
             metadata_factory.tool_relation(team, relation),
             tool_call_edge_recorder,
             branch_thread_resolver,
+            async_runner,
         )
         return StructuredTool.from_function(
             relation_tool.run,
