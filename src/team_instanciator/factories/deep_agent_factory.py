@@ -20,6 +20,7 @@ from src.team_instanciator.resolvers.model_resolver import ModelResolver
 from src.team_instanciator.factories.permissions_factory import PermissionsFactory
 from src.team_instanciator.factories.subagent_factory import SubagentSpec
 from src.team_instanciator.factories.tool_visibility_factory import ToolVisibilityFactory
+from src.team_instanciator.factories.tool_name_validator import ToolNameValidator
 from src.team_instanciator.resolvers.skills_resolver import SkillsResolver
 from src.team_instanciator.resolvers.toolset_resolver import ToolsetResolver
 
@@ -42,6 +43,7 @@ class DeepAgentFactory:
         self._memory_resolver = memory_resolver
         self._skills_resolver = skills_resolver
         self._tool_visibility_factory = tool_visibility_factory or ToolVisibilityFactory()
+        self._tool_name_validator = ToolNameValidator()
 
     def create(
         self,
@@ -55,10 +57,12 @@ class DeepAgentFactory:
         self._disable_default_general_purpose_subagent(model)
         permissions = self._permissions_factory.create(agent)
         effective_subagents = self._subagents(team, agent, permissions, subagents)
+        resolved_tools = [*self._toolset_resolver.resolve_for_deepagents(team, agent), *tools]
+        self._tool_name_validator.validate_unique(agent.id, resolved_tools)
         return create_deep_agent(
             name=agent.id,
             model=model,
-            tools=[*self._toolset_resolver.resolve_for_deepagents(team, agent), *tools],
+            tools=resolved_tools,
             system_prompt=agent.prompt,
             subagents=effective_subagents,
             backend=self._backend_factory.create(team, agent),

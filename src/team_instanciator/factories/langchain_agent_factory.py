@@ -8,17 +8,21 @@ from src.team_loader.models.team_definition import TeamDefinition
 from src.team_instanciator.core.agent_graph import RunnableGraph
 from src.team_instanciator.resolvers.model_resolver import ModelResolver
 from src.team_instanciator.resolvers.toolset_resolver import ToolsetResolver
+from src.team_instanciator.factories.tool_name_validator import ToolNameValidator
 
 
 class LangChainAgentFactory:
     def __init__(self, model_resolver: ModelResolver, toolset_resolver: ToolsetResolver) -> None:
         self._model_resolver = model_resolver
         self._toolset_resolver = toolset_resolver
+        self._tool_name_validator = ToolNameValidator()
 
     def create(self, team: TeamDefinition, agent: AgentDefinition) -> RunnableGraph:
+        tools = self._toolset_resolver.resolve_for_langchain(team, agent)
+        self._tool_name_validator.validate_unique(agent.id, tools)
         return create_agent(
             model=self._model_resolver.resolve(team, agent),
-            tools=self._toolset_resolver.resolve_for_langchain(team, agent),
+            tools=tools,
             system_prompt=agent.prompt,
             name=agent.id,
             debug=agent.debug is True,

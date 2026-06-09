@@ -98,6 +98,22 @@ class TeamRuntimeManifestTests(unittest.TestCase):
         store = TeamRuntimeManifestStore()
 
         store.persist(CheckpointerHandle("checkpointer"), manifest)
+        connection.execute(
+            """
+            create table team_runtime_lanes (
+                team_id text not null,
+                lane_id text not null,
+                kind text not null,
+                agent_id text,
+                agent_name text,
+                source_agent_id text,
+                target_agent_id text,
+                tool_name text,
+                thread_id_pattern text,
+                primary key (team_id, lane_id)
+            )
+            """
+        )
         store.persist(handle, manifest)
         store.persist(handle, manifest)
 

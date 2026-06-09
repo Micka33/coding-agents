@@ -457,9 +457,7 @@ class StudioSessionController:
         path = Path(str(raw_sqlite_path))
         if path.is_absolute():
             return path
-        root_dir = Path(str(defaults_mapping.get("root_dir") or "."))
-        root_path = root_dir if root_dir.is_absolute() else (self._workspace_dir / root_dir)
-        return (root_path / path).resolve()
+        return (self._workspace_dir / path).resolve()
 
     def _configured_value(self, env_name: object, default: object) -> object:
         if env_name:

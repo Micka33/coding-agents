@@ -16,6 +16,7 @@ from src.team_instanciator.factories.langchain_agent_factory import LangChainAge
 from src.team_instanciator.factories.permissions_factory import PermissionsFactory
 from src.team_instanciator.factories.relation_tool_factory import RelationToolFactory
 from src.team_instanciator.factories.tool_visibility_factory import ToolVisibilityFactory
+from src.team_instanciator.factories.tool_name_validator import ToolNameValidator
 from src.team_instanciator.runtime.branch_thread_resolver import BranchThreadResolver
 from src.team_instanciator.runtime.runnable_config_metadata_injector import RunnableConfigMetadataInjector
 from src.team_instanciator.runtime.thread_id_factory import ThreadIdFactory
@@ -58,6 +59,7 @@ class SubagentFactory:
         self._tool_call_edge_recorder = tool_call_edge_recorder
         self._branch_thread_resolver = branch_thread_resolver
         self._metadata_injector = RunnableConfigMetadataInjector()
+        self._tool_name_validator = ToolNameValidator()
 
     def create(self, team: TeamDefinition, registry: GraphRegistry, agent_id: str) -> SubagentSpec:
         agent = team.agents[agent_id]
@@ -70,14 +72,16 @@ class SubagentFactory:
                     {"configurable": self._metadata_injector.inject(None, metadata)["metadata"]}
                 ),
             }
+        tools = [
+            *self._toolset_resolver.resolve_for_deepagents(team, agent),
+            *self._relation_tools(team, registry, agent_id),
+        ]
+        self._tool_name_validator.validate_unique(agent.id, tools)
         return {
             "name": agent.id,
             "description": agent.description or agent.id,
             "system_prompt": agent.prompt,
-            "tools": [
-                *self._toolset_resolver.resolve_for_deepagents(team, agent),
-                *self._relation_tools(team, registry, agent_id),
-            ],
+            "tools": tools,
             "permissions": self._permissions_factory.create(agent),
             "middleware": [
                 self._tool_visibility_factory.create(

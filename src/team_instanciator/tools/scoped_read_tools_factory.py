@@ -24,11 +24,13 @@ if TYPE_CHECKING:
 
 
 def create_scoped_read_tools(context: CustomToolContext, args: JsonObject) -> list[StructuredTool]:
-    raw_root = args.get("root_dir", context.root_dir)
-    custom_root = Path(str(raw_root))
-    if not custom_root.is_absolute():
-        custom_root = (context.root_dir / custom_root).resolve()
-    return ScopedReadToolsFactory().create(custom_root)
+    raw_directory = args.get("relative_working_directory", ".")
+    custom_root = Path(str(raw_directory))
+    if custom_root.is_absolute():
+        raise ValueError("relative_working_directory must be relative.")
+    scoped_root = (context.root_dir / custom_root).resolve()
+    scoped_root.relative_to(context.root_dir.resolve())
+    return ScopedReadToolsFactory().create(scoped_root)
 
 
 class ScopedReadToolsFactory:

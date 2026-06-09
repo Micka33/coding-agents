@@ -12,6 +12,7 @@ class AgentReference:
     id: str
     kind: str
     config: str
+    relative_working_directory: str
     entrypoint: bool
     enable_general_purpose_subagent: bool = False
     conversation: AgentConversationSettings | None = None
@@ -28,6 +29,7 @@ class AgentReference:
             id=agent_id,
             kind=string_value(mapping.get("kind")),
             config=string_value(mapping.get("config")),
+            relative_working_directory=string_value(mapping.get("relative_working_directory"), "."),
             entrypoint=bool(mapping.get("entrypoint", False)),
             enable_general_purpose_subagent=bool(
                 mapping.get("enable_general_purpose_subagent", False)

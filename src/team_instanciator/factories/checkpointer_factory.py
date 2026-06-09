@@ -8,9 +8,9 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 from src.team_loader.models.team_definition import TeamDefinition
+from src.team_loader.resolvers.working_directory_resolver import WorkingDirectoryResolver
 
 from src.team_instanciator.runtime.checkpointer_handle import CheckpointerHandle
-from src.team_instanciator.resolvers.root_dir_resolver import RootDirResolver
 from src.team_instanciator.configuration.runtime_configuration import RuntimeConfiguration
 from src.team_instanciator.errors.team_instanciator_error import TeamInstanciatorError
 
@@ -18,7 +18,7 @@ from src.team_instanciator.errors.team_instanciator_error import TeamInstanciato
 class CheckpointerFactory:
     def __init__(self, configuration: RuntimeConfiguration | None = None) -> None:
         self._configuration = configuration or RuntimeConfiguration()
-        self._root_dir_resolver = RootDirResolver()
+        self._working_directory_resolver = WorkingDirectoryResolver()
 
     def create(self, team: TeamDefinition) -> CheckpointerHandle:
         backend = self._backend_name(team)
@@ -42,7 +42,7 @@ class CheckpointerFactory:
         raw_path = self._sqlite_path(team)
         path = Path(raw_path)
         if not path.is_absolute():
-            path = self._root_dir_resolver.resolve(team) / path
+            path = self._working_directory_resolver.resolve_launch_cwd(team) / path
         path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(path, check_same_thread=False)
         return CheckpointerHandle(SqliteSaver(connection), connection)

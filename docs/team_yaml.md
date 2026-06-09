@@ -12,9 +12,9 @@ Agent prompts live in `.mdc` files referenced from `team.yaml`. See
 schema_version: 1
 id: software
 description: A software development team.
+working_directory: "."
 
 defaults:
-  root_dir: "."
   model:
     env: CODING_AGENTS_MODEL
     default: openai:gpt-5.5
@@ -60,6 +60,7 @@ agents:
   engineering-manager:
     kind: deepagent
     config: ./agents/engineering-manager.mdc
+    relative_working_directory: "."
     entrypoint: true
     enable_general_purpose_subagent: false
 
@@ -81,8 +82,10 @@ relations:
 | `schema_version` | Yes | Must be `1`. |
 | `id` | Yes | Stable team id. It is also the default root thread id. |
 | `description` | No | Display summary for people and tooling. |
+| `working_directory` | No | Team runtime scope. Defaults to `"."`. |
 | `defaults` | No | Shared runtime defaults for models, storage, execution, and memory. |
 | `custom_tools` | No | Tool factories that can be reused from toolsets. |
+| `mcp_servers` | No | Local or hosted MCP servers that can be reused from toolsets. |
 | `toolsets` | No | Named groups of tools that agents request from `.mdc` frontmatter. |
 | `agents` | Yes | Canonical agent ids and paths to their `.mdc` files. |
 | `relations` | No | Directed links that expose agents as tools or subagents. |
@@ -101,15 +104,26 @@ case-insensitively and then stored with the canonical casing from `agents`.
 `agents.<id>.config` is resolved relative to the directory containing
 `team.yaml`.
 
-`defaults.root_dir` is the runtime workspace root used for filesystem tools,
-memory files, and project skills. Relative values are resolved from the current
-working directory of the process, not from the `team.yaml` file.
+`working_directory` is the team workspace scope. Relative values are resolved
+from the current working directory captured when the team is loaded, not from
+the `team.yaml` file. Absolute values are allowed.
+
+SQLite checkpointer storage and project skills are not scoped by
+`working_directory`. Relative SQLite paths resolve from the current working
+directory captured when the CLI is launched. Project skills resolve from
+`.agents/skills` under that same current working directory.
+
+`agents.<id>.relative_working_directory` is resolved relative to the team
+`working_directory`. It defaults to `"."`, must be relative, must point to an
+existing directory, and must stay inside the team `working_directory`. Agent
+filesystem tools, shell commands, and memory checks run from this resolved agent
+directory.
 
 Configuration strings can use single-brace substitutions:
 
 | Placeholder | Source | Behavior |
 | --- | --- | --- |
-| `{root_dir}` | `defaults.root_dir` | Inserts the configured root string. |
+| `{working_directory}` | `working_directory` | Inserts the configured working-directory string. |
 | `{name}` | `--var name=value` or `TeamInstanciator.instantiate(..., variables={...})` | Inserts the run variable. |
 | Unknown placeholders | None | Left unchanged. |
 
@@ -119,7 +133,6 @@ Configuration strings can use single-brace substitutions:
 
 | Key | When omitted | Behavior |
 | --- | --- | --- |
-| `root_dir` | `"."` | Workspace root for runtime file access. |
 | `model.env` | None | Runtime config key or environment variable to read first. |
 | `model.default` | None | Fallback model for agents with `model: inherit`. Inherited agents must resolve a model from `env` or `default`. |
 | `reasoning_effort.env` | None | Runtime config key or environment variable to read first. |
@@ -127,11 +140,11 @@ Configuration strings can use single-brace substitutions:
 | `checkpointer.env` | None | Runtime config key or environment variable selecting the checkpointer backend. |
 | `checkpointer.default` | `memory` | Supported backends are `memory` and `sqlite`. `postgres` is parsed but currently raises at instantiation. |
 | `checkpointer.sqlite_path.env` | None | Runtime config key or environment variable for the SQLite file. |
-| `checkpointer.sqlite_path.default` | `.team-instanciator/checkpoints.sqlite` | SQLite path when the backend is `sqlite`. Relative paths are under `root_dir`. |
+| `checkpointer.sqlite_path.default` | `.team-instanciator/checkpoints.sqlite` | SQLite path when the backend is `sqlite`. Relative paths are under the CLI launch current working directory. |
 | `execution_backend.env` | None | Runtime config key or environment variable selecting command execution. |
 | `execution_backend.default` | `none` | Use `local` to enable a local shell backend for agents with the `shell` toolset. |
 | `memory.error_when_missing` | `false` | If `true`, missing inherited memory files fail instantiation. |
-| `memory.candidates` | `[]` | Files offered as inherited Deep Agents memory. A leading `/` is treated as relative to `root_dir`. |
+| `memory.candidates` | `[]` | Files offered as inherited Deep Agents memory. A leading `/` is treated as relative to each agent's resolved working directory. |
 
 Runtime config values can come from process environment, `.env`, CLI
 `--config key=value`, or `config_variables`.
@@ -156,9 +169,9 @@ Built-in tool names:
 | --- | --- |
 | `web_search` | Searches with Tavily when `TAVILY_API_KEY` is configured; otherwise returns an empty result with a note. |
 | `fetch_url` | Fetches textual URL content. |
-| `write_file` | Writes a file under `root_dir`. |
-| `edit_file` | Replaces the first matching text occurrence in a file under `root_dir`. |
-| `execute` | Runs a local shell command from `root_dir`. |
+| `write_file` | Writes a file under the agent's resolved working directory. |
+| `edit_file` | Replaces the first matching text occurrence in a file under the agent's resolved working directory. |
+| `execute` | Runs a local shell command from the agent's resolved working directory. |
 
 The current runtime also gives special meaning to these toolset names:
 
@@ -222,6 +235,99 @@ user-facing options such as labels, limits, allowed paths, or feature toggles.
 `exposes` must exactly match the names returned by the factory. Missing or extra
 tools fail instantiation.
 
+## MCP Servers
+
+`mcp_servers` registers Model Context Protocol servers that `toolsets` can
+reference directly.
+
+```yaml
+mcp_servers:
+  time:
+    transport: stdio
+    command: uvx
+    args:
+      - mcp-server-time
+
+toolsets:
+  time:
+    - mcp: time
+```
+
+The public `mcp-server-time` reference server exposes `get_current_time` and
+`convert_time`. Because `exposes` is omitted in the example above, every tool
+advertised by the server is visible to agents that request the `time` toolset.
+
+Use `exposes` as an allowlist when only some server tools should be visible:
+
+```yaml
+mcp_servers:
+  company_docs:
+    transport: http
+    url: https://mcp.example.com/mcp
+    auth:
+      type: bearer
+      env: COMPANY_DOCS_MCP_TOKEN
+    headers:
+      X-Tenant:
+        env: COMPANY_TENANT_ID
+      X-Client: coding-agents
+    exposes:
+      - search_docs
+      - fetch_doc
+
+toolsets:
+  docs:
+    - mcp: company_docs
+```
+
+`transport` values:
+
+| Transport | Required fields | Optional fields |
+| --- | --- | --- |
+| `stdio` | `command` | `args`, `env`, `cwd` |
+| `http` | `url` | `headers`, `auth`, `timeout` |
+| `streamable_http` | `url` | `headers`, `auth`, `timeout` |
+| `sse` | `url` | `headers`, `auth`, `timeout` |
+
+`http` is accepted as user-facing shorthand for `streamable_http`.
+`timeout` is in seconds and defaults to `30`. For `stdio`, configured `env`
+values are merged over the runtime/process environment.
+
+Authentication supports common HTTP cases:
+
+```yaml
+auth:
+  type: bearer
+  env: MCP_TOKEN
+```
+
+```yaml
+auth:
+  type: api_key
+  header: X-API-Key
+  env: MCP_API_KEY
+```
+
+Header values can be strings or `{env: NAME}` references. Secret values should
+come from environment variables, `.env`, CLI `--config`, or `config_variables`,
+not from checked-in `team.yaml` files.
+
+Advanced HTTP auth can use a factory:
+
+```yaml
+auth:
+  type: custom
+  factory: my_package.auth:create_httpx_auth
+  args:
+    audience: docs
+```
+
+The factory must accept `(context, args)` and return an auth object compatible
+with the MCP HTTP client path.
+
+Local `stdio` MCP servers execute the configured command. Treat MCP server
+configuration as trusted team configuration, similar to shell-enabled teams.
+
 ## Agents
 
 Each entry under `agents` declares one canonical agent id.
@@ -241,6 +347,7 @@ agents:
 | --- | --- | --- |
 | `kind` | Yes | `deepagent` or `subagent`. |
 | `config` | Yes | Path to the agent `.mdc` file, relative to `team.yaml`. |
+| `relative_working_directory` | No | Path relative to the team `working_directory`. Defaults to `"."`. |
 | `entrypoint` | No | Exactly one agent must have `entrypoint: true`. |
 | `enable_general_purpose_subagent` | No | Deep Agents only. Defaults to `false`. Set to `true` to expose the default `general-purpose` subagent through the `task` tool. |
 | `conversation` | No | Makes a `deepagent` available on the public mention bus. |
@@ -362,8 +469,14 @@ Before a team can instantiate:
 - There must be exactly one entrypoint.
 - Every agent `kind` must be `deepagent` or `subagent`.
 - `enable_general_purpose_subagent` may be set only on `deepagent` entries.
-- Every referenced toolset and custom tool must exist.
+- Every referenced toolset, custom tool, and MCP server must exist.
 - Custom tool `exposes` must exactly match returned tool names.
+- MCP `exposes` is optional. If present, it must list at least one tool and
+  every listed tool must be returned by the MCP server.
+- MCP `stdio` servers require `command`; HTTP-style servers require `url`.
+- MCP auth config must use a supported type and required environment values
+  must be available at instantiation time.
+- Final tool names for each agent must not collide.
 - Relation endpoints must reference declared agents.
 - `tool` relations require `tool_name`; `subagent` relations must not set it.
 - Conversation participants must be `deepagent`.

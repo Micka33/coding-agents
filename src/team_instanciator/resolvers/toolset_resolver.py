@@ -6,6 +6,7 @@ from langchain_core.tools import BaseTool
 
 from src.team_loader.models.agent_definition import AgentDefinition
 from src.team_loader.models.team_definition import TeamDefinition
+from src.team_loader.resolvers.working_directory_resolver import WorkingDirectoryResolver
 
 from src.team_instanciator.factories.builtin_tool_factory import BuiltinToolFactory
 from src.team_instanciator.runtime.checkpointer_handle import CheckpointerHandle
@@ -13,7 +14,7 @@ from src.team_instanciator.tools.conversation_history import ConversationHistory
 from src.team_instanciator.tools.custom_tool_context import CustomToolContext
 from src.team_instanciator.tools.env_view import EnvView
 from src.team_instanciator.factories.custom_tool_factory import CustomToolFactory
-from src.team_instanciator.resolvers.root_dir_resolver import RootDirResolver
+from src.team_instanciator.factories.mcp_tool_factory import McpToolFactory
 from src.team_instanciator.configuration.runtime_configuration import RuntimeConfiguration
 
 
@@ -32,7 +33,8 @@ class ToolsetResolver:
         self._checkpointer_handle = checkpointer_handle
         self._builtin_factory = BuiltinToolFactory(self._configuration)
         self._custom_factory = CustomToolFactory()
-        self._root_dir_resolver = RootDirResolver()
+        self._mcp_factory = McpToolFactory()
+        self._working_directory_resolver = WorkingDirectoryResolver()
 
     def resolve_for_langchain(self, team: TeamDefinition, agent: AgentDefinition) -> list[BaseTool]:
         return self._resolve(team, agent, include_deepagents_builtin=True)
@@ -42,18 +44,30 @@ class ToolsetResolver:
 
     def _resolve(self, team: TeamDefinition, agent: AgentDefinition, include_deepagents_builtin: bool) -> list[BaseTool]:
         tools: list[BaseTool] = []
-        root_dir = self._root_dir(team)
+        root_dir = self._agent_working_directory(team, agent)
         for toolset_name in agent.toolsets:
             toolset = team.toolsets[toolset_name]
             for reference in toolset.tools:
-                if reference.custom:
+                custom = getattr(reference, "custom", None)
+                mcp = getattr(reference, "mcp", None)
+                if custom:
                     custom_tools = self._custom_factory.create(
-                        team.custom_tools[reference.custom],
+                        team.custom_tools[custom],
                         self._custom_context(team, agent, root_dir),
                     )
                     tools.extend(
                         tool
                         for tool in custom_tools
+                        if self._should_include_resolved_tool(tool.name, include_deepagents_builtin)
+                    )
+                elif mcp:
+                    mcp_tools = self._mcp_factory.create(
+                        team.mcp_servers[mcp],
+                        self._custom_context(team, agent, root_dir),
+                    )
+                    tools.extend(
+                        tool
+                        for tool in mcp_tools
                         if self._should_include_resolved_tool(tool.name, include_deepagents_builtin)
                     )
                 elif reference.name and self._should_include_reference(reference.name, include_deepagents_builtin):
@@ -70,8 +84,8 @@ class ToolsetResolver:
             return True
         return name not in self._DEEPAGENTS_BUILTIN_TOOL_NAMES
 
-    def _root_dir(self, team: TeamDefinition) -> Path:
-        return self._root_dir_resolver.resolve(team)
+    def _agent_working_directory(self, team: TeamDefinition, agent: AgentDefinition) -> Path:
+        return self._working_directory_resolver.resolve_agent(team, agent)
 
     def _custom_context(self, team: TeamDefinition, agent: AgentDefinition, root_dir: Path) -> CustomToolContext:
         checkpointer = self._checkpointer_handle.checkpointer if self._checkpointer_handle else None

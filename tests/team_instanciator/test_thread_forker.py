@@ -67,6 +67,15 @@ class ThreadForkerTests(unittest.TestCase):
                         target_physical_thread_id=target_thread_id,
                     )
 
+    def test_fork_checkpoint_requires_sqlite_checkpointer_tables(self) -> None:
+        with sqlite3.connect(":memory:") as connection:
+            with self.assertRaisesRegex(ValueError, "sqlite checkpointer tables"):
+                ThreadForker(connection).fork_checkpoint(
+                    source_physical_thread_id="source",
+                    source_checkpoint_id="checkpoint",
+                    target_physical_thread_id="target",
+                )
+
     def _create_checkpoint_tables(self, connection: sqlite3.Connection) -> None:
         connection.execute(
             """

@@ -11,6 +11,7 @@ from src.team_loader.errors.team_loader_error import TeamLoaderError
 class ToolReference:
     name: str | None = None
     custom: str | None = None
+    mcp: str | None = None
 
     @classmethod
     def from_value(cls, value: object) -> ToolReference:
@@ -19,4 +20,6 @@ class ToolReference:
         mapping = as_json_object(value)
         if set(mapping) == {"custom"} and isinstance(mapping["custom"], str):
             return cls(custom=mapping["custom"])
+        if set(mapping) == {"mcp"} and isinstance(mapping["mcp"], str):
+            return cls(mcp=mapping["mcp"])
         raise TeamLoaderError(f"Invalid tool reference: {value!r}")

@@ -153,9 +153,9 @@ skills:
 
 When `skills` is a list, each string resolves in this order:
 
-1. `<root_dir>/.agents/skills/<skill-id>` if it contains `SKILL.md`
+1. `<cli-cwd>/.agents/skills/<skill-id>` if it contains `SKILL.md`
 2. `$CODEX_HOME/skills/<skill-id>` if it contains `SKILL.md`
-3. `<root_dir>/.agents/skills/<skill-id>` as a fallback path
+3. `<cli-cwd>/.agents/skills/<skill-id>` as a fallback path
 
 Missing fallback paths are not validated by the resolver.
 
@@ -171,9 +171,9 @@ memory:
   - /docs/development-agent-team-architecture.md
 ```
 
-Memory values are file paths under `defaults.root_dir`. A leading `/` is
-stripped before resolving the file, so `/AGENTS.md` means
-`<root_dir>/AGENTS.md`.
+Memory values are file paths under the agent's resolved working directory. A
+leading `/` is stripped before resolving the file, so `/AGENTS.md` means
+`<agent-working-directory>/AGENTS.md`.
 
 | Value | Behavior |
 | --- | --- |

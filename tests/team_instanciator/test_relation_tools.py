@@ -27,6 +27,16 @@ class Registry:
 
 
 class RelationToolTests(unittest.TestCase):
+    def test_base_child_config_carries_callbacks_when_present(self) -> None:
+        tool = RelationTool.__new__(RelationTool)
+
+        config = tool._base_child_config(
+            SimpleNamespace(config={"callbacks": ["callback"]}),
+            "thread:branch:branch_main:mention:entry",
+        )
+
+        self.assertEqual(config["callbacks"], ["callback"])
+
     def test_run_invokes_target_graph_with_relation_thread_id_and_metadata(self) -> None:
         graph = FakeGraph({"messages": [SimpleNamespace(content="answer")]})
         registry = Registry(graph)

@@ -28,10 +28,14 @@ from src.team_instanciator.conversation import (
     ConversationStore,
     MentionAwareTeam,
     MentionParser,
+    MentionRouter,
     PublicReplyExtractor,
 )
 from src.team_instanciator.conversation.dispatch_context import DispatchContext
+from src.team_instanciator.conversation.conversation_control_event import ConversationControlEvent
+from src.team_instanciator.conversation.conversation_model_attempt import ConversationModelAttempt
 from src.team_instanciator.conversation.store import ORPHANED_RUN_DELIVERY_ERROR
+from src.team_instanciator.conversation.thread_frontier import ThreadFrontier
 from src.team_instanciator.runtime.thread_id_factory import ThreadIdFactory
 from src.team_instanciator.runtime.tool_call_edge import ToolCallEdge
 from src.team_instanciator.runtime.tool_call_edge_recorder import ToolCallEdgeRecorder
@@ -718,10 +722,118 @@ class ConversationRuntimeTests(unittest.TestCase):
         self.assertEqual(controller.list_branches()[0].id, branch.id)
         self.assertEqual(controller.current_branch_id(), branch.id)
         self.assertIsNone(controller.switch_branch("missing"))
+        self.assertIsNone(controller.archive_branch("missing"))
+        self.assertEqual(
+            controller.get_studio_branch_ui_state(participant_id="human", branch_id=branch.id)["branch_id"],
+            branch.id,
+        )
+        self.assertEqual(
+            controller.save_studio_branch_ui_state(
+                participant_id="human",
+                branch_id=branch.id,
+                draft_content="draft",
+            )["draft_content"],
+            "draft",
+        )
 
         interrupt = controller.create_interrupt(kind="approve", payload={"action": "send"}, agent_id="agent")
         self.assertEqual(controller.list_interrupts()[0].id, interrupt.id)
         self.assertEqual(controller.resume_interrupt(interrupt.id, decision="approve").status, "resolved")
+        branch_interrupt = controller.create_interrupt(
+            kind="approve",
+            payload={"action": "branch"},
+            agent_id="agent",
+            branch_id=branch.id,
+        )
+        self.assertEqual(controller.list_interrupts(branch_id=branch.id)[0].id, branch_interrupt.id)
+        self.assertEqual(
+            controller.resume_interrupt(branch_interrupt.id, decision="approve", branch_id=branch.id).status,
+            "resolved",
+        )
+
+        edit_controller = ConversationRuntimeController(
+            SimpleNamespace(
+                edit_human_message=lambda event_id, content, **kwargs: (event_id, content, kwargs),
+            )
+        )
+
+        self.assertEqual(
+            edit_controller.edit_human_message("event_01", "edited", author_id="human", wait=False),
+            ("event_01", "edited", {"author_id": "human", "wait": False}),
+        )
+
+    def test_runtime_value_objects_and_router_frontier_skip_edges(self) -> None:
+        self.assertEqual(
+            ConversationModelAttempt(
+                id="attempt",
+                team_id="team",
+                conversation_id="thread",
+                branch_id="branch_main",
+                run_id="run",
+                agent_id="agent",
+                provider="openai",
+                model="gpt",
+                attempt_number=1,
+                max_attempts=2,
+                timeout_mode="stream",
+                timeout_seconds=1.5,
+                started_at="2026-06-01T10:00:00Z",
+            ).to_dict()["status"],
+            "running",
+        )
+        self.assertEqual(
+            ThreadFrontier(
+                frontier_id="frontier",
+                team_id="team",
+                conversation_id="thread",
+                branch_id="branch_main",
+                event_id="event",
+                event_boundary="after",
+                logical_thread_key="mention:agent",
+                physical_thread_id="thread:branch:branch_main:mention:agent",
+                checkpoint_id=None,
+            ).to_dict()["frontier_id"],
+            "frontier",
+        )
+        self.assertEqual(
+            ConversationControlEvent(
+                id="control",
+                team_id="team",
+                conversation_id="thread",
+                branch_id="branch_main",
+                logical_thread_key="mention:agent",
+                physical_thread_id="thread:branch:branch_main:mention:agent",
+                parent_run_id=None,
+                kind="prompt-injection",
+                content="continue",
+                created_at="2026-06-01T10:00:00Z",
+            ).to_dict()["kind"],
+            "prompt-injection",
+        )
+
+        ToolCallEdgeRecorder(None).record_finished("edge", "success")
+        ToolCallEdgeRecorder(None)._initialize_sqlite()
+
+        store = SimpleNamespace(
+            list_tool_call_edges=lambda **_kwargs: [
+                SimpleNamespace(
+                    child_physical_thread_id="child-thread",
+                    child_logical_thread_key="mention:child",
+                    parent_logical_thread_key="mention:parent",
+                )
+            ],
+            latest_checkpoint_id=lambda _thread_id: None,
+            record_thread_frontier=lambda **_kwargs: (_ for _ in ()).throw(AssertionError("should skip")),
+        )
+        router = MentionRouter.__new__(MentionRouter)
+        router._store = store
+
+        router._record_tool_call_frontiers(
+            frontier_id="frontier",
+            event_id="event",
+            branch_id="branch_main",
+            run_id="run",
+        )
 
     def test_checkpoint_resume_replays_graph_into_branch_scoped_event(self) -> None:
         graph = FakeGraph("resumed")
@@ -868,8 +980,49 @@ class ConversationRuntimeTests(unittest.TestCase):
     def test_prompt_injection_requires_usable_continue_frontier(self) -> None:
         runtime = self._conversation_runtime({"agent-b": FakeGraph("continued")})
 
+        with self.assertRaisesRegex(ValueError, "content is required"):
+            runtime.runtime.inject_agent_prompt("agent-b", " ")
         with self.assertRaisesRegex(ValueError, "usable checkpoint"):
             runtime.runtime.inject_agent_prompt("agent-b", "please continue")
+
+    def test_prompt_injection_reports_graph_support_failures_and_empty_replies(self) -> None:
+        runtime = self._conversation_runtime({"agent-b": FakeGraph("continued")})
+        self._record_usable_frontier(runtime, "agent-b")
+        runtime.registry.graphs["agent-b"] = SimpleNamespace(
+            invoke=lambda _input, config=None: {"messages": [AIMessage(content="ok")]}
+        )
+
+        with self.assertRaisesRegex(ValueError, "update_state"):
+            runtime.runtime.inject_agent_prompt("agent-b", "please continue")
+
+        def fail_graph(_graph: FakeGraph, _input: Any, _config: Any) -> None:
+            raise RuntimeError("graph failed")
+
+        failing_runtime = self._conversation_runtime({"agent-b": FakeGraph("ignored", callback=fail_graph)})
+        self._record_usable_frontier(failing_runtime, "agent-b")
+
+        with self.assertRaisesRegex(RuntimeError, "graph failed"):
+            failing_runtime.runtime.inject_agent_prompt("agent-b", "please continue")
+
+        self.assertEqual(failing_runtime.store.list_deliveries()[0].status, "failed")
+
+        empty_runtime = self._conversation_runtime({"agent-b": FakeGraph("")})
+        self._record_usable_frontier(empty_runtime, "agent-b")
+
+        with self.assertRaisesRegex(ValueError, "no final textual"):
+            empty_runtime.runtime.inject_agent_prompt("agent-b", "please continue")
+
+        self.assertEqual(empty_runtime.store.list_deliveries()[0].status, "empty")
+
+    def test_team_private_scalar_and_checkpoint_timestamp_helpers(self) -> None:
+        runtime = self._conversation_runtime({"agent-b": FakeGraph("answer")})
+        list_type, list_value = runtime._serde.dumps_typed(["not mapping"])
+
+        self.assertEqual(runtime._optional_int(5), 5)
+        self.assertEqual(runtime._optional_int("42"), 42)
+        self.assertIsNone(runtime._checkpoint_created_at(None, b"value"))
+        self.assertIsNone(runtime._checkpoint_created_at("json", b"not json"))
+        self.assertIsNone(runtime._checkpoint_created_at(list_type, list_value))
 
     def test_store_private_helpers_are_noops_without_sqlite_connection(self) -> None:
         store = ConversationStore(team_id="team", conversation_id="thread")
@@ -1151,6 +1304,8 @@ class ConversationRuntimeTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "only human"):
             runtime.edit_human_message(current_events[-1].id, "@agent-b invalid")
+        with self.assertRaisesRegex(ValueError, "visible in the current branch"):
+            runtime.edit_human_message("missing", "@agent-b invalid")
 
     def test_mention_aware_team_forks_mention_thread_from_prefork_frontier_checkpoint(self) -> None:
         connection = sqlite3.connect(":memory:", check_same_thread=False)
@@ -1977,6 +2132,20 @@ class ConversationRuntimeTests(unittest.TestCase):
             conversation_id="thread",
             thread_id_factory=ThreadIdFactory(),
             checkpoint_metadata_factory=CheckpointMetadataFactory(),
+        )
+
+    def _record_usable_frontier(self, runtime: MentionAwareTeam, agent_id: str) -> None:
+        branch_thread_id = runtime.thread_id_factory.branch(runtime.conversation_id, "branch_main")
+        physical_thread_id = runtime.thread_id_factory.mention(branch_thread_id, agent_id)
+        runtime.store.record_thread_frontier(
+            frontier_id=f"frontier_{agent_id}",
+            branch_id="branch_main",
+            event_id="event_01",
+            event_boundary="after",
+            logical_thread_key=runtime.thread_id_factory.logical_thread_key(physical_thread_id),
+            physical_thread_id=physical_thread_id,
+            checkpoint_id=f"checkpoint_{agent_id}",
+            usable_for_continue=True,
         )
 
 

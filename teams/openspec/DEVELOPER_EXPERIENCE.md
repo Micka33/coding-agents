@@ -8,8 +8,8 @@ order.
 
 ## Launch Model
 
-Run the studio from the target project root so `root_dir: "."` resolves to the
-project that should receive OpenSpec files:
+Run the studio from the target project root so `working_directory: "."` resolves
+to the project that should receive OpenSpec files:
 
 ```bash
 uv run webapp-studio /Users/mickael/Documents/github/coding-agents/teams/openspec/team.yaml --thread-id openspec

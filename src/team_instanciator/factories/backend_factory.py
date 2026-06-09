@@ -6,18 +6,18 @@ from deepagents.backends import CompositeBackend, FilesystemBackend, LocalShellB
 
 from src.team_loader.models.agent_definition import AgentDefinition
 from src.team_loader.models.team_definition import TeamDefinition
+from src.team_loader.resolvers.working_directory_resolver import WorkingDirectoryResolver
 
-from src.team_instanciator.resolvers.root_dir_resolver import RootDirResolver
 from src.team_instanciator.configuration.runtime_configuration import RuntimeConfiguration
 
 
 class BackendFactory:
     def __init__(self, configuration: RuntimeConfiguration | None = None) -> None:
         self._configuration = configuration or RuntimeConfiguration()
-        self._root_dir_resolver = RootDirResolver()
+        self._working_directory_resolver = WorkingDirectoryResolver()
 
     def create(self, team: TeamDefinition, agent: AgentDefinition) -> CompositeBackend | FilesystemBackend:
-        root_dir = self._root_dir_resolver.resolve(team)
+        root_dir = self._working_directory_resolver.resolve_agent(team, agent)
         filesystem = FilesystemBackend(root_dir=root_dir, virtual_mode=True)
         if self._execution_backend(team) == "local" and "shell" in agent.toolsets:
             shell = LocalShellBackend(root_dir=root_dir, virtual_mode=True, env={"PATH": os.environ.get("PATH", "")})

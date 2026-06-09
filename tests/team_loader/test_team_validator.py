@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 
 from src.team_loader.errors.team_loader_error import TeamLoaderError
+from src.team_loader.models.mcp_server_definition import McpServerDefinition
 from src.team_loader.validation.team_validator import TeamValidator
 from src.team_loader.models.conversation_settings import AgentConversationSettings, TeamConversationSettings
 from tests.support import agent
@@ -28,6 +31,7 @@ def valid_team(**overrides) -> SimpleNamespace:
         "schema_version": 1,
         "id": "product",
         "custom_tools": {},
+        "mcp_servers": {},
         "toolsets": {},
         "agent_references": {"entry": reference()},
         "agents": {"entry": agent("entry", entrypoint=True)},
@@ -49,6 +53,7 @@ class TeamValidatorTests(unittest.TestCase):
     def test_schema_custom_tool_and_toolset_errors(self) -> None:
         self.assert_invalid(valid_team(schema_version=2), "Unsupported")
         self.assert_invalid(valid_team(id=""), "non-empty id")
+        self.assert_invalid(valid_team(raw={"defaults": {"extra": "."}}), "unsupported key")
         self.assert_invalid(valid_team(custom_tools={"probe": SimpleNamespace(id="probe", factory="module", exposes=("tool",))}), "module:function")
         self.assert_invalid(valid_team(custom_tools={"probe": SimpleNamespace(id="probe", factory="module:function", exposes=())}), "exposes")
         self.assert_invalid(valid_team(toolsets={"empty": SimpleNamespace(name="empty", tools=())}), "must list")
@@ -56,6 +61,134 @@ class TeamValidatorTests(unittest.TestCase):
             valid_team(toolsets={"custom": SimpleNamespace(name="custom", tools=(SimpleNamespace(custom="missing"),))}),
             "unknown custom tool",
         )
+        time_server = McpServerDefinition.from_mapping("time", {"transport": "stdio", "command": "uvx"})
+        TeamValidator().validate(
+            valid_team(
+                mcp_servers={"time": time_server},
+                toolsets={"time": SimpleNamespace(name="time", tools=(SimpleNamespace(custom=None, mcp="time"),))},
+            )
+        )
+        self.assert_invalid(
+            valid_team(mcp_servers={"bad": McpServerDefinition.from_mapping("bad", {"transport": "stdio"})}),
+            "command is required",
+        )
+        self.assert_invalid(
+            valid_team(mcp_servers={"bad": McpServerDefinition.from_mapping("bad", {"transport": "http"})}),
+            "url is required",
+        )
+        self.assert_invalid(
+            valid_team(mcp_servers={"bad": McpServerDefinition.from_mapping("bad", {"transport": "ftp", "url": "x"})}),
+            "transport",
+        )
+        self.assert_invalid(
+            valid_team(mcp_servers={"bad": McpServerDefinition.from_mapping("bad", {"transport": "stdio", "command": "uvx", "exposes": []})}),
+            "exposes",
+        )
+        self.assert_invalid(
+            valid_team(mcp_servers={"bad": McpServerDefinition.from_mapping("bad", {"transport": "stdio", "command": "uvx", "timeout": 0})}),
+            "timeout",
+        )
+        self.assert_invalid(
+            valid_team(
+                mcp_servers={
+                    "bad": McpServerDefinition.from_mapping(
+                        "bad",
+                        {"transport": "stdio", "command": "uvx", "auth": {"type": "bearer", "env": "TOKEN"}},
+                    )
+                }
+            ),
+            "HTTP transports",
+        )
+        self.assert_invalid(
+            valid_team(
+                mcp_servers={"docs": McpServerDefinition.from_mapping("docs", {"transport": "http", "url": "https://example.test/mcp"})},
+                toolsets={"docs": SimpleNamespace(name="docs", tools=(SimpleNamespace(custom=None, mcp="missing"),))},
+            ),
+            "unknown MCP server",
+        )
+        self.assert_invalid(
+            valid_team(
+                mcp_servers={
+                    "docs": McpServerDefinition.from_mapping(
+                        "docs",
+                        {"transport": "http", "url": "https://example.test/mcp", "auth": {"type": "bearer"}},
+                    )
+                }
+            ),
+            "auth.env",
+        )
+        self.assert_invalid(
+            valid_team(
+                mcp_servers={
+                    "docs": McpServerDefinition.from_mapping(
+                        "docs",
+                        {"transport": "http", "url": "https://example.test/mcp", "auth": {"type": "api_key", "env": "KEY"}},
+                    )
+                }
+            ),
+            "auth.header",
+        )
+        self.assert_invalid(
+            valid_team(
+                mcp_servers={
+                    "docs": McpServerDefinition.from_mapping(
+                        "docs",
+                        {"transport": "http", "url": "https://example.test/mcp", "auth": {"type": "custom", "factory": "module"}},
+                    )
+                }
+            ),
+            "module:function",
+        )
+
+    def test_working_directory_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sub = root / "sub"
+            sub.mkdir()
+            TeamValidator().validate(
+                valid_team(
+                    working_directory=str(root),
+                    load_cwd=Path.cwd(),
+                    agents={"entry": agent("entry", entrypoint=True, relative_working_directory="sub")},
+                )
+            )
+            self.assert_invalid(valid_team(working_directory="", load_cwd=Path.cwd()), "must not be empty")
+            self.assert_invalid(
+                valid_team(working_directory=str(root / "missing"), load_cwd=Path.cwd()),
+                "working_directory",
+            )
+            self.assert_invalid(
+                valid_team(
+                    working_directory=str(root),
+                    load_cwd=Path.cwd(),
+                    agents={"entry": agent("entry", entrypoint=True, relative_working_directory=str(sub))},
+                ),
+                "must be relative",
+            )
+            self.assert_invalid(
+                valid_team(
+                    working_directory=str(root),
+                    load_cwd=Path.cwd(),
+                    agents={"entry": agent("entry", entrypoint=True, relative_working_directory="")},
+                ),
+                "relative_working_directory must not be empty",
+            )
+            self.assert_invalid(
+                valid_team(
+                    working_directory=str(root),
+                    load_cwd=Path.cwd(),
+                    agents={"entry": agent("entry", entrypoint=True, relative_working_directory="..")},
+                ),
+                "must stay within",
+            )
+            self.assert_invalid(
+                valid_team(
+                    working_directory=str(root),
+                    load_cwd=Path.cwd(),
+                    agents={"entry": agent("entry", entrypoint=True, relative_working_directory="missing")},
+                ),
+                "existing directory",
+            )
 
     def test_agent_errors(self) -> None:
         self.assert_invalid(valid_team(agent_references={}, agents={}), "at least one agent")

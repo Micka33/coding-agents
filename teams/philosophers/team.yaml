@@ -1,9 +1,9 @@
 schema_version: 1
 id: philosophers
 description: Multilingual philosopher team led by an English philosopher, with German and Japanese philosophers and a translator.
+working_directory: "."
 
 defaults:
-  root_dir: "."
   model:
     env: CODING_AGENTS_MODEL_XXXXX
     default: openai:gpt-5.4-mini

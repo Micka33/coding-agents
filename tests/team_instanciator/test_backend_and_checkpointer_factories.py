@@ -17,13 +17,13 @@ from tests.support import agent, defaults, team
 class BackendFactoryTests(unittest.TestCase):
     def test_creates_filesystem_backend_by_default_and_composite_backend_for_local_shell_agents(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            team_config = team(team_defaults=defaults(root_dir=tmp, execution_backend_default="none"))
+            team_config = team(working_directory=tmp, team_defaults=defaults(execution_backend_default="none"))
 
             filesystem = BackendFactory().create(team_config, agent(toolsets=()))
             shell_composite = BackendFactory(RuntimeConfiguration({"EXECUTION_BACKEND": "local"})).create(
                 team(
+                    working_directory=tmp,
                     team_defaults=defaults(
-                        root_dir=tmp,
                         execution_backend_env="EXECUTION_BACKEND",
                         execution_backend_default="none",
                     )
@@ -37,7 +37,7 @@ class BackendFactoryTests(unittest.TestCase):
     def test_execution_backend_can_come_from_process_environment(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"EXECUTION_BACKEND": "local"}, clear=True):
             created = BackendFactory().create(
-                team(team_defaults=defaults(root_dir=tmp, execution_backend_env="EXECUTION_BACKEND")),
+                team(working_directory=tmp, team_defaults=defaults(execution_backend_env="EXECUTION_BACKEND")),
                 agent(toolsets=("shell",)),
             )
 
@@ -56,30 +56,35 @@ class CheckpointerFactoryTests(unittest.TestCase):
 
     def test_creates_sqlite_checkpointer_from_relative_and_absolute_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            launch_cwd = Path(tmp) / "launcher"
+            working = launch_cwd / "workspace"
+            working.mkdir(parents=True)
             relative_handle = CheckpointerFactory(
                 RuntimeConfiguration({"SQLITE_PATH": "state/checkpoints.sqlite"})
             ).create(
                 team(
+                    working_directory="workspace",
+                    load_cwd=launch_cwd,
                     team_defaults=defaults(
-                        root_dir=root,
                         checkpointer_default="sqlite",
                         sqlite_path_env="SQLITE_PATH",
                     )
                 )
             )
-            absolute_path = root / "absolute.sqlite"
+            absolute_path = launch_cwd / "absolute.sqlite"
             absolute_handle = CheckpointerFactory().create(
                 team(
+                    working_directory="workspace",
+                    load_cwd=launch_cwd,
                     team_defaults=defaults(
-                        root_dir=root,
                         checkpointer_default="sqlite",
                         sqlite_path_default=str(absolute_path),
                     )
                 )
             )
 
-            self.assertTrue((root / "state" / "checkpoints.sqlite").exists())
+            self.assertTrue((launch_cwd / "state" / "checkpoints.sqlite").exists())
+            self.assertFalse((working / "state" / "checkpoints.sqlite").exists())
             self.assertTrue(absolute_path.exists())
             self.assertEqual(type(relative_handle.checkpointer).__name__, "SqliteSaver")
 
@@ -88,17 +93,22 @@ class CheckpointerFactoryTests(unittest.TestCase):
 
     def test_backend_and_sqlite_path_can_come_from_process_environment(self) -> None:
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"CHECKPOINTER_BACKEND": "sqlite", "SQLITE_PATH": "env.sqlite"}, clear=True):
+            launch_cwd = Path(tmp) / "launcher"
+            working = launch_cwd / "workspace"
+            working.mkdir(parents=True)
             handle = CheckpointerFactory().create(
                 team(
+                    working_directory="workspace",
+                    load_cwd=launch_cwd,
                     team_defaults=defaults(
-                        root_dir=tmp,
                         checkpointer_env="CHECKPOINTER_BACKEND",
                         sqlite_path_env="SQLITE_PATH",
                     )
                 )
             )
 
-            self.assertTrue((Path(tmp) / "env.sqlite").exists())
+            self.assertTrue((launch_cwd / "env.sqlite").exists())
+            self.assertFalse((working / "env.sqlite").exists())
             handle.close()
 
     def test_unsupported_and_unimplemented_backends_raise(self) -> None:

@@ -5,15 +5,15 @@ from pathlib import Path
 
 from src.team_loader.models.agent_definition import AgentDefinition
 from src.team_loader.models.team_definition import TeamDefinition
+from src.team_loader.resolvers.working_directory_resolver import WorkingDirectoryResolver
 
-from src.team_instanciator.resolvers.root_dir_resolver import RootDirResolver
 from src.team_instanciator.configuration.runtime_configuration import RuntimeConfiguration
 
 
 class SkillsResolver:
     def __init__(self, configuration: RuntimeConfiguration | None = None) -> None:
         self._configuration = configuration or RuntimeConfiguration()
-        self._root_dir_resolver = RootDirResolver()
+        self._working_directory_resolver = WorkingDirectoryResolver()
 
     def resolve(self, team: TeamDefinition, agent: AgentDefinition) -> list[str] | None:
         if agent.skills is None or agent.skills == "inherit":
@@ -36,4 +36,4 @@ class SkillsResolver:
         return project_path
 
     def _project_skills_dir(self, team: TeamDefinition) -> Path:
-        return self._root_dir_resolver.resolve(team) / ".agents" / "skills"
+        return self._working_directory_resolver.resolve_launch_cwd(team) / ".agents" / "skills"

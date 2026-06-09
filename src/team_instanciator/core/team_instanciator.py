@@ -5,6 +5,7 @@ from pathlib import Path
 
 from src.type_defs import JsonObject
 from src.team_loader.loading.team_loader import TeamLoader
+from src.team_loader.resolvers.working_directory_resolver import WorkingDirectoryResolver
 
 from src.team_instanciator.core.agent_graph_registry import AgentGraphRegistry
 from src.team_instanciator.resolvers.agent_runtime_resolver import AgentRuntimeResolver
@@ -19,7 +20,6 @@ from src.team_instanciator.resolvers.memory_resolver import MemoryResolver
 from src.team_instanciator.resolvers.model_resolver import ModelResolver
 from src.team_instanciator.factories.permissions_factory import PermissionsFactory
 from src.team_instanciator.factories.relation_tool_factory import RelationToolFactory
-from src.team_instanciator.resolvers.root_dir_resolver import RootDirResolver
 from src.team_instanciator.configuration.runtime_configuration import RuntimeConfiguration
 from src.team_instanciator.configuration.runtime_configuration_validator import RuntimeConfigurationValidator
 from src.team_instanciator.resolvers.skills_resolver import SkillsResolver
@@ -61,6 +61,7 @@ class TeamInstanciator:
         checkpoint_metadata_factory = CheckpointMetadataFactory()
         tool_call_edge_recorder = ToolCallEdgeRecorder(checkpointer_handle.connection)
         branch_thread_resolver = BranchThreadResolver(checkpointer_handle.connection, team.id)
+        working_directory_resolver = WorkingDirectoryResolver()
         runtime_manifest = TeamRuntimeManifestBuilder(thread_id_factory).build(team)
         langchain_agent_factory = LangChainAgentFactory(model_resolver, toolset_resolver)
         subagent_factory = SubagentFactory(
@@ -107,7 +108,7 @@ class TeamInstanciator:
                     team=team,
                     registry=registry,
                     checkpointer_handle=checkpointer_handle,
-                    root_dir=RootDirResolver().resolve(team),
+                    root_dir=working_directory_resolver.resolve_team(team),
                     conversation_id=team.id,
                     thread_id_factory=thread_id_factory,
                     checkpoint_metadata_factory=checkpoint_metadata_factory,

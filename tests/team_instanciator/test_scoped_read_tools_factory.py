@@ -105,9 +105,19 @@ class ScopedReadToolsFactoryTests(unittest.TestCase):
             root = Path(tmp)
             (root / "sub").mkdir()
 
-            tools = create_scoped_read_tools(SimpleNamespace(root_dir=root), {"root_dir": "sub"})
+            tools = create_scoped_read_tools(SimpleNamespace(root_dir=root), {"relative_working_directory": "sub"})
 
         self.assertEqual([tool.name for tool in tools], ["ls", "read_file", "glob", "grep"])
+
+    def test_factory_function_rejects_custom_root_outside_context(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "repo"
+            root.mkdir()
+
+            with self.assertRaises(ValueError):
+                create_scoped_read_tools(SimpleNamespace(root_dir=root), {"relative_working_directory": str(root)})
+            with self.assertRaises(ValueError):
+                create_scoped_read_tools(SimpleNamespace(root_dir=root), {"relative_working_directory": ".."})
 
     def test_error_handlers_and_backend_error_results_are_returned_as_text(self) -> None:
         class ErrorBackend:

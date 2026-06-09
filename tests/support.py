@@ -39,7 +39,6 @@ class FakeClosable:
 
 def defaults(
     *,
-    root_dir: str | Path = ".",
     model_env: str | None = None,
     model_default: str | None = "openai:gpt-test",
     reasoning_env: str | None = None,
@@ -54,7 +53,6 @@ def defaults(
     memory_error_when_missing: bool = False,
 ) -> SimpleNamespace:
     return SimpleNamespace(
-        root_dir=str(root_dir),
         model=SimpleNamespace(env=model_env, default=model_default),
         reasoning_effort=SimpleNamespace(env=reasoning_env, default=reasoning_default),
         checkpointer=SimpleNamespace(
@@ -84,11 +82,13 @@ def agent(
     memory: Any = "inherit",
     debug: Any = "inherit",
     config_path: Path | None = None,
+    relative_working_directory: str = ".",
 ) -> SimpleNamespace:
     return SimpleNamespace(
         id=agent_id,
         kind=kind,
         entrypoint=entrypoint,
+        relative_working_directory=relative_working_directory,
         enable_general_purpose_subagent=enable_general_purpose_subagent,
         toolsets=toolsets,
         model=model,
@@ -129,19 +129,25 @@ def team(
     relations: tuple[Any, ...] = (),
     team_defaults: Any | None = None,
     custom_tools: dict[str, Any] | None = None,
+    mcp_servers: dict[str, Any] | None = None,
     toolsets: dict[str, Any] | None = None,
     agent_references: dict[str, Any] | None = None,
     schema_version: int = 1,
     conversation: Any | None = None,
+    working_directory: str | Path = ".",
+    load_cwd: str | Path | None = None,
 ) -> FakeTeam:
     resolved_agents = agents or {"entry": agent("entry", entrypoint=True)}
     return FakeTeam(
         id=team_id,
         schema_version=schema_version,
+        working_directory=str(working_directory),
+        load_cwd=Path(load_cwd).resolve() if load_cwd is not None else Path.cwd().resolve(),
         defaults=team_defaults or defaults(),
         agents=resolved_agents,
         relations=relations,
         custom_tools=custom_tools or {},
+        mcp_servers=mcp_servers or {},
         toolsets=toolsets or {},
         agent_references=agent_references if agent_references is not None else resolved_agents,
         conversation=conversation,

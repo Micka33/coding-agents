@@ -105,11 +105,6 @@ class ReliableChatModel(BaseChatModel):
         value = getattr(self.wrapped_model, "model_id", None)
         return str(value) if value else self.resolved_model_name
 
-    @property
-    def profile(self) -> dict[str, Any] | None:
-        value = getattr(self.wrapped_model, "profile", None)
-        return value if isinstance(value, dict) else None
-
     def bind(self, **kwargs: Any) -> Any:
         return self._wrap_runnable(self.wrapped_model.bind(**kwargs))
 

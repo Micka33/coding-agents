@@ -4,11 +4,13 @@ import asyncio
 import base64
 import io
 import json
+import queue
 import runpy
 import sqlite3
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,7 +20,9 @@ from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
+from src.team_instanciator.configuration.runtime_configuration import RuntimeConfiguration
 from src.team_instanciator.conversation import ConversationEvent, ConversationFileRef, ConversationStore
+from src.team_loader.parsing.yaml_parser import YamlParser
 from src.webapp_studio.backend.api.checkpoint_history_reader import CheckpointHistoryReader
 from src.webapp_studio.backend.api.redactor import redact_sensitive_fields
 from src.webapp_studio.backend.api.studio_attachment_ref_factory import (
@@ -26,14 +30,23 @@ from src.webapp_studio.backend.api.studio_attachment_ref_factory import (
     StudioAttachmentRefFactory,
 )
 from src.webapp_studio.backend.api.studio_api_controller import StudioApiController
+from src.webapp_studio.backend.api.studio_api_error import StudioApiError
 from src.webapp_studio.backend.api.studio_session_controller import StudioSessionController
-from src.webapp_studio.backend.api.team_discovery_service import TeamDiscoveryService
+from src.webapp_studio.backend.api.team_discovery_service import TeamDiscoveryService, duplicate_team_id_message
 from src.webapp_studio.backend.api.studio_state_factory import StudioStateFactory
+from src.webapp_studio.backend.api.studio_terminal_session import StudioTerminalSession
+from src.webapp_studio.backend.api.studio_workspace_file_browser import StudioWorkspaceFileBrowser
 from src.webapp_studio.backend.application.studio_backend_launcher import StudioBackendLauncher
+from src.webapp_studio.backend.contracts.agent_prompt_inject_request import AgentPromptInjectRequest
+from src.webapp_studio.backend.contracts.agent_delivery_state_dto import AgentDeliveryStateDto
+from src.webapp_studio.backend.contracts.append_message_request import AppendMessageRequest
 from src.webapp_studio.backend.contracts.branch_create_request import BranchCreateRequest
 from src.webapp_studio.backend.contracts.checkpoint_summary import CheckpointSummary
+from src.webapp_studio.backend.contracts.conversation_create_request import ConversationCreateRequest
 from src.webapp_studio.backend.contracts.conversation_delivery_dto import ConversationDeliveryDto
+from src.webapp_studio.backend.contracts.edit_message_request import EditMessageRequest
 from src.webapp_studio.backend.contracts.runtime_update_request import RuntimeUpdateRequest
+from src.webapp_studio.backend.contracts.studio_branch_ui_state_update_request import StudioBranchUiStateUpdateRequest
 from src.webapp_studio.backend.server import (
     CONTENT_SECURITY_POLICY,
     _produce_stream_events,
@@ -360,6 +373,10 @@ class BackendApiTests(unittest.TestCase):
             terminal_output = client.get(
                 f"/api/studio/v1/terminal/sessions/{terminal['data']['session_id']}/output"
             ).json()
+            terminal_input = client.post(
+                f"/api/studio/v1/terminal/sessions/{terminal['data']['session_id']}/input",
+                json={"data": ""},
+            ).json()
             resized_terminal = client.post(
                 f"/api/studio/v1/terminal/sessions/{terminal['data']['session_id']}/resize",
                 json={"columns": 120, "rows": 40},
@@ -397,6 +414,7 @@ class BackendApiTests(unittest.TestCase):
             self.assertEqual(terminal["data"]["cwd"], str(root_dir.resolve()))
             self.assertEqual(terminal["data"]["status"], "running")
             self.assertIn("Terminal started", terminal_output["data"]["chunks"][0]["text"])
+            self.assertEqual(terminal_input["data"]["status"], "running")
             self.assertEqual(resized_terminal["data"]["columns"], 120)
             self.assertEqual(resized_terminal["data"]["rows"], 40)
             self.assertEqual(stopped_terminal["data"]["status"], "terminated")
@@ -1217,6 +1235,303 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(resume_interrupt["errors"][0]["details"]["capability"], "interrupts")
         self.assertEqual(invalid_request["errors"][0]["code"], "invalid_request")
 
+    def test_studio_controller_direct_contract_fallbacks(self) -> None:
+        controller = StudioApiController(self._fake_conversation())
+
+        teams = controller.teams()
+
+        self.assertEqual(teams["teams"][0]["team_id"], "team")
+        self.assertIsNone(teams["teams"][0]["team_file"])
+        with self.assertRaises(StudioApiError):
+            controller.create_conversation(ConversationCreateRequest(team_id="team", initial_message="hello"))
+
+        legacy_fake = self._fake_conversation()
+        original_append = legacy_fake.append_human_message
+
+        def legacy_append_human_message(content, *, author_id, files, wait):
+            return original_append(content, author_id=author_id, files=files, wait=wait)
+
+        legacy_fake.append_human_message = legacy_append_human_message
+        legacy_controller = StudioApiController(legacy_fake)
+        appended = legacy_controller.append_message(
+            AppendMessageRequest(content="@agent legacy client", author_id="human", client_message_id="client_01")
+        )
+
+        self.assertEqual(appended.event.content, "@agent legacy client")
+        self.assertEqual(legacy_fake.messages[0][4], None)
+
+        switchable = self._fake_conversation()
+        switched_to = []
+
+        def with_conversation_id(conversation_id):
+            switched_to.append(conversation_id)
+            return self._fake_conversation()
+
+        switchable.with_conversation_id = with_conversation_id
+        switch_controller = StudioApiController(switchable)
+
+        with self.assertRaises(StudioApiError):
+            switch_controller.switch_conversation(" ")
+        with self.assertRaises(StudioApiError):
+            switch_controller.switch_conversation("thread", team_id="other")
+
+        switched = switch_controller.switch_conversation(" next-thread ")
+
+        self.assertEqual(switched_to, ["next-thread"])
+        self.assertEqual(switched["session"]["conversation_id"], "thread")
+        with self.assertRaises(StudioApiError):
+            StudioApiController(self._fake_conversation()).switch_conversation("thread")
+
+        noisy_fake = self._fake_conversation()
+        noisy_fake.state = lambda: {
+            "team_id": "team",
+            "conversation_id": "thread",
+            "events": [object(), {"attachments": [object(), {"filename": "missing-id"}]}],
+        }
+
+        self.assertEqual(StudioApiController(noisy_fake).files(), {"files": []})
+
+        terminal_controller = StudioApiController(self._fake_conversation())
+        terminal_controller._terminal_sessions["session"] = SimpleNamespace(write=lambda data: {"written": data})
+
+        self.assertEqual(terminal_controller.terminal_input("session", "pwd\n"), {"written": "pwd\n"})
+        with self.assertRaises(StudioApiError):
+            terminal_controller.terminal_output("missing")
+
+        prompt_controller = StudioApiController(self._fake_conversation())
+        with self.assertRaises(StudioApiError):
+            prompt_controller.inject_agent_prompt("", AgentPromptInjectRequest(content="go"))
+
+        no_prompt_fake = self._fake_conversation()
+        delattr(no_prompt_fake.runtime, "inject_agent_prompt")
+        with self.assertRaises(StudioApiError):
+            StudioApiController(no_prompt_fake).inject_agent_prompt("agent", AgentPromptInjectRequest(content="go"))
+
+        value_prompt_fake = self._fake_conversation()
+
+        def reject_prompt(_agent_id, _content, *, wait=False):
+            raise ValueError("prompt rejected")
+
+        value_prompt_fake.runtime.inject_agent_prompt = reject_prompt
+        with self.assertRaises(StudioApiError):
+            StudioApiController(value_prompt_fake).inject_agent_prompt("agent", AgentPromptInjectRequest(content="go"))
+
+        with self.assertRaises(StudioApiError):
+            StudioApiController(self._fake_conversation()).archive_branch("branch")
+
+        archive_fake = self._fake_conversation(branching=True)
+
+        def reject_archive(_branch_id):
+            raise ValueError("bad branch")
+
+        archive_fake.runtime.archive_branch = reject_archive
+        with self.assertRaises(StudioApiError):
+            StudioApiController(archive_fake).archive_branch("branch_bad")
+
+        with self.assertRaises(StudioApiError):
+            StudioApiController(self._fake_conversation()).update_ui_state(StudioBranchUiStateUpdateRequest())
+
+        ui_fake = self._fake_conversation(branching=True)
+
+        def reject_ui_state(**_kwargs):
+            raise ValueError("bad ui state")
+
+        ui_fake.runtime.save_studio_branch_ui_state = reject_ui_state
+        with self.assertRaises(StudioApiError):
+            StudioApiController(ui_fake).update_ui_state(StudioBranchUiStateUpdateRequest())
+
+    def test_studio_controller_sqlite_conversation_and_git_helpers(self) -> None:
+        with sqlite3.connect(":memory:", check_same_thread=False) as connection:
+            connection.execute(
+                """
+                create table team_conversation_events (
+                    team_id text not null,
+                    conversation_id text not null,
+                    seq integer not null,
+                    created_at text not null,
+                    author_id text not null,
+                    author_kind text not null,
+                    content text not null
+                )
+                """
+            )
+            connection.executemany(
+                """
+                insert into team_conversation_events (
+                    team_id,
+                    conversation_id,
+                    seq,
+                    created_at,
+                    author_id,
+                    author_kind,
+                    content
+                ) values (?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    ("team", "thread", 1, "2026-06-01T10:00:00Z", "human", "human", "hello from thread"),
+                    ("team", "thread", 2, "2026-06-01T10:00:01Z", "agent", "agent", "reply"),
+                    ("team", "agent-only", 1, "2026-06-01T10:00:02Z", "agent", "agent", "only agent"),
+                ],
+            )
+            connection.commit()
+            conversations = StudioApiController(self._fake_conversation(connection=connection)).conversations(limit=200)
+
+        by_id = {item["conversation_id"]: item for item in conversations["conversations"]}
+
+        self.assertEqual(conversations["current_conversation_id"], "thread")
+        self.assertEqual(by_id["thread"]["title"], "hello from thread")
+        self.assertEqual(by_id["thread"]["last_author_id"], "agent")
+        self.assertEqual(by_id["agent-only"]["title"], "agent-only")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root_dir = Path(temp_dir)
+            controller = StudioApiController(self._fake_conversation(root_dir=root_dir))
+            parsed = controller._changes_from_git_status(
+                b"X\0R  renamed.txt\0original.txt\0C  copied.txt\0source.txt\0"
+            )
+
+            self.assertEqual([item["status"] for item in parsed], ["renamed", "copied"])
+            self.assertEqual(parsed[0]["source_path"], "original.txt")
+            self.assertEqual(parsed[1]["source_path"], "source.txt")
+            self.assertEqual(controller._change_status(" D"), "deleted")
+            self.assertEqual(controller._change_status("R "), "renamed")
+            self.assertEqual(controller._change_status("C "), "copied")
+            self.assertEqual(controller._change_status("A "), "added")
+            self.assertEqual(controller._change_status("!!"), "changed")
+            self.assertIsNone(controller._change_by_id("missing"))
+            with self.assertRaises(StudioApiError):
+                controller.change_diff("missing")
+            self.assertFalse(controller._path_is_within_root(root_dir.parent, root_dir))
+            with self.assertRaises(StudioApiError):
+                controller._git_diff_for_path(root_dir, "../outside.txt")
+
+            missing_untracked_controller = StudioApiController(self._fake_conversation(root_dir=root_dir))
+            missing_untracked_controller._change_by_id = lambda _change_id: {
+                "status": "untracked",
+                "path": "missing.txt",
+            }
+
+            self.assertEqual(missing_untracked_controller.change_diff("change")["diff"], "")
+
+    def test_studio_controller_branch_checkpoint_and_helper_edges(self) -> None:
+        edit_fake = self._fake_conversation(branching=True)
+        edit_event = ConversationEvent(
+            id="event_edit_delivery",
+            team_id="team",
+            conversation_id="thread",
+            branch_id="branch_main",
+            seq=2,
+            created_at="2026-06-01T10:00:02Z",
+            author_id="human",
+            author_kind="human",
+            content="@agent edited",
+            mentions=("agent",),
+        )
+
+        def edit_with_delivery(_message_id, _content, *, author_id="human", wait=False):
+            return SimpleNamespace(
+                event=edit_event,
+                deliveries=(
+                    SimpleNamespace(
+                        to_dict=lambda: {
+                            "id": "delivery_edit",
+                            "team_id": "team",
+                            "conversation_id": "thread",
+                            "branch_id": "branch_main",
+                            "agent_id": "agent",
+                            "run_id": None,
+                            "snapshot_seq": 2,
+                            "status": "success",
+                            "created_at": "2026-06-01T10:00:02Z",
+                            "completed_at": "2026-06-01T10:00:03Z",
+                            "error": None,
+                        }
+                    ),
+                ),
+                failures=(),
+            )
+
+        edit_fake.runtime.edit_human_message = edit_with_delivery
+        edited_state = StudioApiController(edit_fake).edit_message(
+            "event_01",
+            EditMessageRequest(content="@agent edited", author_id="human"),
+        )
+
+        self.assertEqual(edited_state.team_id, "team")
+
+        controller = StudioApiController(self._fake_conversation())
+        forkable, continuable, has_metadata = controller._checkpoint_usability(
+            {
+                "thread_frontiers": [
+                    object(),
+                    {"branch_id": "other", "checkpoint_id": "checkpoint_other"},
+                    {"branch_id": "branch_main", "checkpoint_id": None},
+                    {
+                        "branch_id": "branch_main",
+                        "physical_thread_id": "thread:branch:branch_main:mention:agent",
+                        "checkpoint_id": "checkpoint_01",
+                        "usable_for_fork": True,
+                    },
+                ],
+                "runs": [
+                    object(),
+                    {"branch_id": "other", "stable_checkpoint_id": "checkpoint_other"},
+                    {
+                        "branch_id": "branch_main",
+                        "physical_thread_id": "thread:branch:branch_main:mention:agent",
+                        "stable_checkpoint_id": "checkpoint_02",
+                        "latest_checkpoint_id": "checkpoint_02",
+                        "commit_state": "pending",
+                    },
+                ],
+            },
+            current_branch_id="branch_main",
+        )
+
+        self.assertTrue(has_metadata)
+        self.assertIn(("thread:branch:branch_main:mention:agent", "checkpoint_01"), forkable)
+        self.assertEqual(continuable, set())
+        self.assertEqual(controller._event_origin_metadata(None), (None, None))
+        self.assertEqual(controller._event_origin_metadata("missing"), (None, None))
+        self.assertEqual(controller._preview_mode("image.png", "image/png", 10), "iframe")
+        self.assertEqual(controller._summary_text("   "), "Untitled conversation")
+        self.assertEqual(controller._summary_text("x" * 81), f"{'x' * 77}...")
+        self.assertEqual(controller._conversation_title([{"author_kind": "agent", "content": "reply"}]), "thread")
+        self.assertIsNone(controller._team_file())
+        team_file_controller = StudioApiController(self._fake_conversation())
+        team_file_controller._conversation.team = SimpleNamespace(path="team.yaml")
+        self.assertEqual(team_file_controller._team_file(), str((Path.cwd() / "team.yaml").resolve()))
+        self.assertEqual(controller._resolved_root_dir(), Path.cwd().resolve())
+        self.assertEqual(controller._optional_int("42"), 42)
+        self.assertIsNone(controller._optional_int("forty-two"))
+
+        noisy_state_fake = self._fake_conversation()
+        noisy_state_fake.state = lambda: {
+            "team_id": "team",
+            "conversation_id": "thread",
+            "events": [
+                object(),
+                {"metadata": "not a mapping"},
+                {"metadata": {"client_message_id": "client_01"}, "author_id": "agent"},
+            ],
+        }
+
+        self.assertIsNone(
+            StudioApiController(noisy_state_fake)._event_for_client_message_id("client_01", "human")
+        )
+
+        class BrokenConnection:
+            def execute(self, _sql):
+                raise RuntimeError("database unavailable")
+
+        self.assertIsNone(controller._sqlite_database_path(BrokenConnection()))
+        with sqlite3.connect(":memory:") as memory_connection:
+            self.assertIsNone(controller._sqlite_database_path(memory_connection))
+        with tempfile.TemporaryDirectory() as temp_dir:
+            sqlite_path = Path(temp_dir) / "history.sqlite"
+            with sqlite3.connect(sqlite_path) as file_connection:
+                self.assertEqual(controller._sqlite_database_path(file_connection), str(sqlite_path.resolve()))
+
     def test_custom_exception_handlers_return_envelopes(self) -> None:
         app = create_app(self._fake_conversation())
 
@@ -1880,6 +2195,23 @@ class BackendApiTests(unittest.TestCase):
         self.assertTrue(served_team.closed)
         self.assertEqual(run.call_args.kwargs["port"], 9999)
 
+    def test_backend_launcher_prints_discovery_error_message(self) -> None:
+        controller = SimpleNamespace(
+            discovery_error_message=lambda: "duplicate team",
+            close=lambda: setattr(controller, "closed", True),
+        )
+
+        with (
+            patch("src.webapp_studio.backend.application.studio_backend_launcher.StudioSessionController", return_value=controller),
+            patch("src.webapp_studio.backend.application.studio_backend_launcher.create_app", return_value="app"),
+            patch("src.webapp_studio.backend.application.studio_backend_launcher.uvicorn.run"),
+            patch("sys.stdout", new_callable=io.StringIO) as output,
+        ):
+            StudioBackendLauncher().launch(team_file="team.yaml", port=9999)
+
+        self.assertIn("duplicate team", output.getvalue())
+        self.assertTrue(controller.closed)
+
     def test_team_discovery_blocks_case_insensitive_duplicate_conversation_team_ids(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1897,6 +2229,320 @@ class BackendApiTests(unittest.TestCase):
         self.assertEqual(duplicate["normalized_id"], "openspec")
         self.assertEqual(len(duplicate["team_files"]), 2)
 
+    def test_team_discovery_handles_invalid_descriptors_and_duplicate_messages(self) -> None:
+        class StaticParser:
+            def __init__(self, parsed):
+                self.parsed = parsed
+
+            def parse(self, _text):
+                return self.parsed
+
+        class UnreadablePath:
+            def is_file(self):
+                return True
+
+            def read_text(self, *, encoding="utf-8"):
+                raise OSError("unreadable")
+
+            def __str__(self):
+                return "/unreadable/team.yaml"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            repository = root / "repo"
+            project_team = workspace / ".coding-agents" / "teams" / "local" / "team.yaml"
+            self._write_discovery_team(project_team, "Local")
+
+            discovery = TeamDiscoveryService(repository_root=repository, workspace_dir=workspace).discover(
+                explicit_team_file=project_team
+            )
+
+            self.assertEqual(len(discovery["teams"]), 1)
+
+            invalid_file = root / "invalid.yaml"
+            invalid_file.write_text("[]", encoding="utf-8")
+            self.assertIsNone(
+                TeamDiscoveryService(
+                    repository_root=repository,
+                    workspace_dir=workspace,
+                    yaml_parser=StaticParser([]),
+                )._descriptor(invalid_file, "test")
+            )
+            self.assertIsNone(
+                TeamDiscoveryService(
+                    repository_root=repository,
+                    workspace_dir=workspace,
+                    yaml_parser=StaticParser({}),
+                )._descriptor(invalid_file, "test")
+            )
+            self.assertIsNone(
+                TeamDiscoveryService(repository_root=repository, workspace_dir=workspace)._descriptor(
+                    UnreadablePath(),
+                    "test",
+                )
+            )
+
+            service = TeamDiscoveryService(
+                repository_root=repository,
+                workspace_dir=workspace,
+                yaml_parser=StaticParser(
+                    {
+                        "id": "aliases",
+                        "conversation": {},
+                        "agents": {
+                            "guide": {"kind": "deepagent", "conversation": "bad"},
+                            "helper": {"kind": "subagent", "conversation": {}},
+                            "broken": "bad",
+                        },
+                    }
+                ),
+            )
+            descriptor = service._descriptor(invalid_file, "test")
+
+        self.assertEqual(descriptor["participants"], ["guide"])
+        self.assertEqual(descriptor["participant_aliases"], {"guide": []})
+        self.assertEqual(service._participants({"agents": "bad"}), [])
+        self.assertEqual(service._participant_aliases({"agents": "bad"}, ["guide"]), {})
+        self.assertEqual(service._participant_aliases({"agents": {"guide": "bad"}}, ["guide"]), {})
+        self.assertIsNone(duplicate_team_id_message({"duplicate_ids": []}))
+        message = duplicate_team_id_message(
+            {
+                "duplicate_ids": [
+                    {
+                        "team_id": "Local",
+                        "normalized_id": "local",
+                        "team_files": ["/a/team.yaml", "/b/team.yaml"],
+                    }
+                ]
+            }
+        )
+        self.assertIn('id "Local"', message)
+        self.assertIn("/a/team.yaml", message)
+
+    def test_workspace_file_browser_edge_branches(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for index in range(6):
+                (root / f"alpha-{index}.txt").write_text(str(index), encoding="utf-8")
+            (root / "src").mkdir()
+            (root / "src" / "target.py").write_text("print('x')\n", encoding="utf-8")
+            (root / ".git").write_text("git-file", encoding="utf-8")
+            browser = StudioWorkspaceFileBrowser(root)
+
+            limited = browser.files(query="alpha", limit=1)
+
+            self.assertEqual(len(limited["files"]), 1)
+            with self.assertRaises(StudioApiError):
+                browser.file_path("", field="workspace_paths")
+
+            target = root / "alpha-0.txt"
+            original_stat = Path.stat
+            calls = {"count": 0}
+
+            def flaky_stat(path, *args, **kwargs):
+                if path.name == target.name:
+                    calls["count"] += 1
+                    if calls["count"] >= 4:
+                        raise OSError("gone")
+                return original_stat(path, *args, **kwargs)
+
+            with patch.object(type(target), "stat", flaky_stat):
+                with self.assertRaises(StudioApiError):
+                    browser.file_path("alpha-0.txt", field="workspace_paths")
+
+            with patch(
+                "src.webapp_studio.backend.api.studio_workspace_file_browser.subprocess.run",
+                return_value=SimpleNamespace(stdout=b"valid.txt\0\xff\0.git/config\0"),
+            ):
+                self.assertEqual(browser._git_workspace_file_candidates(), ["valid.txt"])
+
+            with patch("src.webapp_studio.backend.api.studio_workspace_file_browser._MAX_WORKSPACE_SCAN_FILES", 1):
+                scanned = browser._scanned_workspace_file_candidates()
+
+            self.assertEqual(len(scanned), 1)
+            self.assertTrue(scanned[0].startswith("alpha-"))
+            self.assertNotIn(".git", browser._scanned_workspace_file_candidates())
+
+            broken_item = SimpleNamespace(stat=lambda: (_ for _ in ()).throw(OSError("missing")))
+            browser.file_path = lambda _relative_path, *, field: broken_item
+
+            self.assertIsNone(browser._workspace_file_item("missing.txt"))
+            self.assertEqual(
+                StudioWorkspaceFileBrowser(root)._workspace_file_score(
+                    {"path": "src/target.py", "filename": "target.py"},
+                    "src",
+                ),
+                1,
+            )
+            self.assertEqual(
+                StudioWorkspaceFileBrowser(root)._workspace_file_score(
+                    {"path": "src/target.py", "filename": "target.py"},
+                    "get",
+                ),
+                2,
+            )
+            self.assertEqual(
+                StudioWorkspaceFileBrowser(root)._workspace_file_score(
+                    {"path": "src/target.py", "filename": "target.py"},
+                    "target.p",
+                ),
+                0,
+            )
+            self.assertEqual(
+                StudioWorkspaceFileBrowser(root)._workspace_file_score(
+                    {"path": "src/target.py", "filename": "target.py"},
+                    "rc/tar",
+                ),
+                3,
+            )
+
+    def test_checkpoint_reader_terminal_and_state_factory_edges(self) -> None:
+        reader = CheckpointHistoryReader()
+
+        self.assertEqual(
+            reader._thread_ids(
+                {
+                    "participants": ["agent"],
+                    "branch_threads": [
+                        object(),
+                        {"branch_id": "other", "physical_thread_id": "thread:branch:other:mention:agent"},
+                        {"branch_id": "branch_main", "physical_thread_id": "thread:branch:branch_main:relation:worker"},
+                    ],
+                },
+                conversation_id="thread",
+                branch_id="branch_main",
+            ),
+            ["thread:branch:branch_main:mention:agent", "thread:branch:branch_main:relation:worker"],
+        )
+
+        class BrokenCheckpointConnection:
+            def execute(self, _sql, _args):
+                raise sqlite3.OperationalError("database is locked")
+
+        with self.assertRaises(sqlite3.OperationalError):
+            reader.checkpoints(
+                SimpleNamespace(checkpointer_handle=SimpleNamespace(connection=BrokenCheckpointConnection())),
+                {"conversation_id": "thread", "participants": ["agent"]},
+            )
+        with sqlite3.connect(":memory:") as connection:
+            self.assertEqual(reader._written_messages(connection, "thread", "", "checkpoint"), [])
+
+        class BrokenWritesConnection:
+            def execute(self, _sql, _args):
+                raise sqlite3.OperationalError("database is locked")
+
+        with self.assertRaises(sqlite3.OperationalError):
+            reader._written_messages(BrokenWritesConnection(), "thread", "", "checkpoint")
+
+        session = StudioTerminalSession.__new__(StudioTerminalSession)
+        session.session_id = "term"
+        session.cwd = Path.cwd()
+        session.columns = 100
+        session.rows = 30
+        session.created_at = "2026-06-01T10:00:00Z"
+        session._chunks = []
+        session._lock = threading.Lock()
+        session._output_queue = queue.Queue()
+
+        session._process = SimpleNamespace(poll=lambda: 1, stdin=None, stdout=None)
+
+        self.assertEqual(session.write("echo hi\n")["status"], "terminated")
+        session._read_output()
+
+        class FakeStdin:
+            def __init__(self):
+                self.data = b""
+                self.flushed = False
+
+            def write(self, data):
+                self.data += data
+
+            def flush(self):
+                self.flushed = True
+
+        stdin = FakeStdin()
+        session._process = SimpleNamespace(poll=lambda: None, stdin=stdin, stdout=None)
+
+        self.assertEqual(session.write("pwd\n")["status"], "running")
+        self.assertEqual(stdin.data, b"pwd\n")
+        self.assertTrue(stdin.flushed)
+
+        class FakeStdout:
+            def fileno(self):
+                return 123
+
+        session._process = SimpleNamespace(stdout=FakeStdout())
+        with patch("src.webapp_studio.backend.api.studio_terminal_session.os.read", side_effect=OSError("closed")):
+            session._read_output()
+
+        self.assertIsNone(session._output_queue.get_nowait())
+
+        session._output_queue = queue.Queue()
+        reads = [b"hello", b""]
+
+        def next_read(_descriptor, _size):
+            return reads.pop(0)
+
+        with patch("src.webapp_studio.backend.api.studio_terminal_session.os.read", next_read):
+            session._read_output()
+
+        self.assertEqual(session._output_queue.get_nowait(), b"hello")
+        self.assertIsNone(session._output_queue.get_nowait())
+
+        session._output_queue = queue.Queue()
+        session._output_queue.put(b"drained")
+        session._output_queue.put(None)
+        session._drain_output()
+        session._append_output("")
+
+        self.assertEqual(session._chunks[-1]["text"], "drained")
+
+        factory = StudioStateFactory()
+        agent_state = AgentDeliveryStateDto.model_validate(
+            {
+                "team_id": "team",
+                "conversation_id": "thread",
+                "branch_id": "branch_main",
+                "agent_id": "agent",
+                "last_delivered_seq": 1,
+                "running": True,
+                "queued": False,
+                "current_run_id": "run_01",
+                "current_snapshot_seq": 1,
+                "stop_requested": False,
+                "last_identity_refresh_seq": 0,
+                "token_estimate_since_identity_refresh": 0,
+            }
+        )
+        runs = factory._runs(
+            {
+                "events": [],
+                "runs": [
+                    {
+                        "id": "run_01",
+                        "team_id": "team",
+                        "conversation_id": "thread",
+                        "branch_id": "branch_main",
+                        "agent_id": "agent",
+                        "status": "success",
+                        "snapshot_seq": 1,
+                        "started_at": "2026-06-01T10:00:00Z",
+                        "completed_at": "2026-06-01T10:00:01Z",
+                        "commit_state": "committed",
+                    }
+                ],
+            },
+            [agent_state],
+            [],
+        )
+
+        self.assertEqual([run.id for run in runs], ["run_01"])
+        self.assertEqual(factory._run_status_from_persisted("success", "orphaned"), "unknown")
+        self.assertEqual(factory._run_status_from_persisted("running", "committed"), "running")
+        self.assertEqual(factory._run_status_from_persisted("failed", "committed"), "failed")
+        self.assertEqual(factory._run_status_from_persisted("ignored", "committed"), "superseded")
+
     def test_session_controller_starts_empty_and_creates_first_message_conversation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1907,7 +2553,11 @@ class BackendApiTests(unittest.TestCase):
             source_file = source_dir / "app.py"
             source_file.write_text("print('draft')\n", encoding="utf-8")
             source_file_size = source_file.stat().st_size
-            self._write_discovery_team(repository / "teams" / "alpha" / "team.yaml", "alpha")
+            self._write_discovery_team(
+                repository / "teams" / "alpha" / "team.yaml",
+                "alpha",
+                working_directory="project",
+            )
             self._write_conversation_history(
                 workspace / ".team-instanciator" / "checkpoints.sqlite",
                 team_id="alpha",
@@ -1982,6 +2632,168 @@ class BackendApiTests(unittest.TestCase):
         self.assertIn("alpha-existing", created_conversations)
         self.assertIn(("alpha-existing", False), dispatch_calls)
 
+    def test_session_controller_delegates_and_handles_discovery_edge_cases(self) -> None:
+        class Active:
+            def __getattr__(self, name: str):
+                def call(*args, **kwargs):
+                    return {"method": name, "args": args, "kwargs": kwargs}
+
+                return call
+
+            def health(self):
+                return "health"
+
+            def session(self):
+                return {"team_id": "alpha", "conversation_id": "thread"}
+
+            def conversations(self, limit):
+                return {"limit": limit}
+
+            def workspace_files(self, *, query: str, limit: int):
+                return {"query": query, "limit": limit}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            team_file = root / "team.yaml"
+            self._write_discovery_team(team_file, "alpha")
+            controller = object.__new__(StudioSessionController)
+            controller._repository_root = root
+            controller._workspace_dir = root
+            controller._team_file = None
+            controller._variables = None
+            controller._config_variables = None
+            controller._stream_buffer = StreamBuffer()
+            controller._instanciator_factory = None
+            controller._started_at = "now"
+            controller._discovery = {
+                "status": "ready",
+                "teams": [{"team_id": "alpha", "team_file": str(team_file)}],
+            }
+            controller._configuration = RuntimeConfiguration({"SQLITE_PATH": "configured.sqlite"})
+            controller._yaml_parser = YamlParser()
+            controller._instances = {}
+            controller._active = Active()
+
+            self.assertIsInstance(controller.stream_buffer, StreamBuffer)
+            self.assertEqual(controller.health(), "health")
+            self.assertEqual(controller.session()["team_id"], "alpha")
+            self.assertEqual(controller.conversations(3), {"limit": 3})
+            self.assertEqual(controller.activity("agent")["method"], "activity")
+            self.assertEqual(controller.append_message(object())["method"], "append_message")
+            self.assertEqual(controller.edit_message("message", object())["method"], "edit_message")
+            self.assertEqual(controller.switch_conversation("thread")["method"], "switch_conversation")
+            self.assertEqual(controller.files()["method"], "files")
+            self.assertEqual(controller.workspace_files(query="app", limit=1), {"query": "app", "limit": 1})
+            self.assertEqual(controller.changes()["method"], "changes")
+            self.assertEqual(controller.change_diff("change")["method"], "change_diff")
+            self.assertEqual(controller.create_terminal_session()["method"], "create_terminal_session")
+            self.assertEqual(controller.terminal_output("terminal")["method"], "terminal_output")
+            self.assertEqual(controller.terminal_input("terminal", "x")["method"], "terminal_input")
+            self.assertEqual(controller.terminal_resize("terminal", columns=80, rows=24)["method"], "terminal_resize")
+            self.assertEqual(controller.terminate_terminal_session("terminal")["method"], "terminate_terminal_session")
+            self.assertEqual(controller.update_runtime(object())["method"], "update_runtime")
+            self.assertEqual(controller.stop_agent("agent")["method"], "stop_agent")
+            self.assertEqual(controller.inject_agent_prompt("agent", object())["method"], "inject_agent_prompt")
+            self.assertEqual(controller.runs()["method"], "runs")
+            self.assertEqual(controller.join_run("run")["method"], "join_run")
+            self.assertEqual(controller.queue()["method"], "queue")
+            self.assertEqual(controller.cancel_queue_item("item")["method"], "cancel_queue_item")
+            self.assertEqual(controller.clear_queue(object())["method"], "clear_queue")
+            self.assertEqual(controller.checkpoints()["method"], "checkpoints")
+            self.assertEqual(controller.checkpoint("checkpoint")["method"], "checkpoint")
+            self.assertEqual(controller.resume_checkpoint("checkpoint", object())["method"], "resume_checkpoint")
+            self.assertEqual(controller.branches()["method"], "branches")
+            self.assertEqual(controller.create_branch(object())["method"], "create_branch")
+            self.assertEqual(controller.switch_branch("branch")["method"], "switch_branch")
+            self.assertEqual(controller.archive_branch("branch")["method"], "archive_branch")
+            self.assertEqual(controller.update_ui_state(object())["method"], "update_ui_state")
+            self.assertEqual(controller.interrupts()["method"], "interrupts")
+            self.assertEqual(controller.resume_interrupt("interrupt", object())["method"], "resume_interrupt")
+            self.assertEqual(controller.file_resource("file", allow_blocked=True, preview=True)["method"], "file_resource")
+            self.assertEqual(controller.compat_state()["method"], "compat_state")
+            self.assertEqual(controller.compat_activity("query")["method"], "compat_activity")
+            self.assertEqual(controller.compat_append_message({})["method"], "compat_append_message")
+            self.assertEqual(controller.compat_update_runtime({})["method"], "compat_update_runtime")
+            self.assertEqual(controller.compat_stop_agent({})["method"], "compat_stop_agent")
+            self.assertEqual(controller._require_active().session()["team_id"], "alpha")
+            self.assertIsNone(controller._team_for_file(None))
+            self.assertEqual(controller._team_for_file(team_file.resolve())["team_id"], "alpha")
+            self.assertEqual(controller._summary_text(""), "Untitled conversation")
+            self.assertTrue(controller._summary_text("x" * 90).endswith("..."))
+
+            controller._active = None
+            self.assertEqual(controller.health().started_at, "now")
+            self.assertIsNone(controller.session()["team_id"])
+            self.assertEqual(controller.conversations(2)["conversations"], [])
+            self.assertEqual(controller.workspace_files(query="", limit=1)["files"][0]["path"], "team.yaml")
+
+            with self.assertRaises(StudioApiError):
+                controller._require_active()
+            with self.assertRaises(StudioApiError):
+                controller.create_conversation(ConversationCreateRequest(team_id="alpha", initial_message=" "))
+            with self.assertRaises(StudioApiError):
+                controller._activate_team("alpha", " ")
+            with self.assertRaises(StudioApiError):
+                controller._activate_team("missing", "thread")
+
+            controller._instances = {"alpha": SimpleNamespace(conversation_for=lambda _conversation_id: None)}
+            with self.assertRaises(StudioApiError):
+                controller._activate_team("alpha", "thread")
+
+            controller._discovery = {"status": "blocked", "duplicate_ids": []}
+            with self.assertRaises(StudioApiError):
+                controller._ensure_discovery_ready()
+            self.assertEqual(controller._persisted_conversations(10), [])
+
+    def test_session_controller_sqlite_path_branches_resolve_from_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            controller = object.__new__(StudioSessionController)
+            controller._workspace_dir = root
+            controller._configuration = RuntimeConfiguration({"BACKEND": "sqlite", "SQLITE_PATH": "configured.sqlite"})
+            controller._yaml_parser = YamlParser()
+
+            self.assertIsNone(controller._sqlite_path_for_team({}))
+            list_file = root / "list.yaml"
+            list_file.write_text("- one\n", encoding="utf-8")
+            self.assertIsNone(controller._sqlite_path_for_team({"team_file": str(list_file)}))
+            memory_file = root / "memory.yaml"
+            memory_file.write_text("schema_version: 1\ndefaults:\n  checkpointer:\n    default: memory\n", encoding="utf-8")
+            self.assertIsNone(controller._sqlite_path_for_team({"team_file": str(memory_file)}))
+
+            absolute = root / "absolute.sqlite"
+            absolute_file = root / "absolute.yaml"
+            absolute_file.write_text(
+                f"defaults:\n  checkpointer:\n    default: sqlite\n    sqlite_path:\n      default: {absolute}\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(controller._sqlite_path_for_team({"team_file": str(absolute_file)}), absolute)
+
+            configured_file = root / "configured.yaml"
+            configured_file.write_text(
+                "\n".join(
+                    [
+                        "working_directory: project",
+                        "defaults:",
+                        "  checkpointer:",
+                        "    env: BACKEND",
+                        "    default: memory",
+                        "    sqlite_path:",
+                        "      env: SQLITE_PATH",
+                        "      default: ignored.sqlite",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                controller._sqlite_path_for_team({"team_file": str(configured_file)}),
+                (root / "configured.sqlite").resolve(),
+            )
+            self.assertEqual(controller._sqlite_conversations({"team_id": "alpha"}, root / "missing.sqlite", 10), [])
+            empty_db = root / "empty.sqlite"
+            sqlite3.connect(empty_db).close()
+            self.assertEqual(controller._sqlite_conversations({"team_id": "alpha"}, empty_db, 10), [])
+
     def _create_checkpoint_tables(self, connection: sqlite3.Connection) -> None:
         connection.execute(
             """
@@ -2013,15 +2825,24 @@ class BackendApiTests(unittest.TestCase):
             """
         )
 
-    def _write_discovery_team(self, path: Path, team_id: str, *, conversation: bool = True) -> None:
+    def _write_discovery_team(
+        self,
+        path: Path,
+        team_id: str,
+        *,
+        conversation: bool = True,
+        working_directory: str | None = None,
+    ) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         conversation_section = "conversation:\n  human_input:\n    default_targets: []" if conversation else ""
+        working_directory_section = f"working_directory: {working_directory}" if working_directory else ""
         path.write_text(
             "\n".join(
                 [
                     "schema_version: 1",
                     f"id: {team_id}",
                     "description: Test team",
+                    working_directory_section,
                     "defaults:",
                     "  checkpointer:",
                     "    default: sqlite",

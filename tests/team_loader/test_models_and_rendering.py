@@ -7,6 +7,7 @@ from pathlib import Path
 from src.team_loader.models.agent_reference import AgentReference
 from src.team_loader.models.checkpointer_default import CheckpointerDefault
 from src.team_loader.models.custom_tool_definition import CustomToolDefinition
+from src.team_loader.models.mcp_server_definition import McpConfigValue, McpServerDefinition
 from src.team_loader.parsing.include_resolver import IncludeResolver
 from src.team_loader.parsing.mdc_parser import MdcParser
 from src.team_loader.models.team_definition import TeamDefinition
@@ -32,6 +33,7 @@ class ModelsAndRenderingTests(unittest.TestCase):
             )
 
             self.assertEqual(reference.config_path(team_file), (Path(tmp) / "agents" / "entry.mdc").resolve())
+            self.assertEqual(reference.relative_working_directory, ".")
             self.assertTrue(reference.enable_general_purpose_subagent)
 
         checkpointer = CheckpointerDefault.from_mapping({"postgres_url": {"env": "DATABASE_URL"}})
@@ -43,8 +45,32 @@ class ModelsAndRenderingTests(unittest.TestCase):
 
         self.assertEqual(ToolReference.from_value("ls").name, "ls")
         self.assertEqual(ToolReference.from_value({"custom": "probe"}).custom, "probe")
+        self.assertEqual(ToolReference.from_value({"mcp": "time"}).mcp, "time")
         with self.assertRaisesRegex(TeamLoaderError, "Invalid tool reference"):
             ToolReference.from_value({"name": "ls"})
+
+        mcp_server = McpServerDefinition.from_mapping(
+            "docs",
+            {
+                "transport": "http",
+                "url": "https://mcp.example.test/mcp",
+                "headers": {"X-Client": "coding-agents", "X-Tenant": {"env": "TENANT_ID"}},
+                "auth": {"type": "bearer", "env": "MCP_TOKEN"},
+                "timeout": 45,
+            },
+        )
+        self.assertEqual(mcp_server.transport, "streamable_http")
+        self.assertIsNone(mcp_server.exposes)
+        self.assertEqual(mcp_server.headers["X-Client"], McpConfigValue(value="coding-agents"))
+        self.assertEqual(mcp_server.headers["X-Tenant"], McpConfigValue(env="TENANT_ID"))
+        self.assertEqual(mcp_server.auth.type, "bearer")
+        self.assertEqual(mcp_server.timeout, 45)
+        self.assertEqual(
+            McpServerDefinition.from_mapping("time", {"transport": "stdio", "command": "uvx", "exposes": ["now"]}).exposes,
+            ("now",),
+        )
+        with self.assertRaisesRegex(TeamLoaderError, "Invalid MCP config value"):
+            McpServerDefinition.from_mapping("bad", {"headers": {"X-Bad": ["nope"]}})
 
     def test_include_resolver_expands_nested_includes_and_reports_missing_or_recursive_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -113,6 +139,13 @@ class ModelsAndRenderingTests(unittest.TestCase):
                     [
                         "schema_version: 1",
                         "id: product",
+                        f"working_directory: {root}",
+                        "mcp_servers:",
+                        "  time:",
+                        "    transport: stdio",
+                        "    command: uvx",
+                        "    args:",
+                        "      - mcp-server-time",
                         "conversation:",
                         "  human_input:",
                         "    default_targets:",
@@ -121,6 +154,7 @@ class ModelsAndRenderingTests(unittest.TestCase):
                         "  Entry:",
                         "    kind: deepagent",
                         "    config: agents/entry.mdc",
+                        "    relative_working_directory: agents",
                         "    entrypoint: true",
                         "    enable_general_purpose_subagent: true",
                         "    conversation: {}",
@@ -140,6 +174,10 @@ class ModelsAndRenderingTests(unittest.TestCase):
             loaded = TeamLoader().load(team_file, {"name": "Ada"})
 
             self.assertEqual(loaded.entrypoint().prompt, "Hello Ada 2 {{ missing }}")
+            self.assertEqual(loaded.working_directory, str(root))
+            self.assertEqual(loaded.mcp_servers["time"].command, "uvx")
+            self.assertEqual(loaded.mcp_servers["time"].args, ("mcp-server-time",))
+            self.assertEqual(loaded.agents["Entry"].relative_working_directory, "agents")
             self.assertEqual(loaded.agents["Entry"].variables["count"], 2)
             self.assertTrue(loaded.agents["Entry"].enable_general_purpose_subagent)
             self.assertEqual(loaded.conversation.human_input.default_targets, ("Entry",))

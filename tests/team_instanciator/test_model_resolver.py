@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import builtins
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -12,6 +14,10 @@ from src.team_instanciator.resolvers.model_resolver import ModelResolver
 from src.team_instanciator.resolvers.model_reliability import (
     ModelReliabilityPolicy,
     ReliableChatModel,
+    _float_setting,
+    classify_model_exception,
+    reliability_init_kwargs,
+    retryable_model_exception_types,
     wrap_model_for_reliability,
 )
 from src.team_instanciator.configuration.runtime_configuration import RuntimeConfiguration
@@ -22,6 +28,10 @@ class RecordingRunnable:
     def __init__(self) -> None:
         self.config_kwargs = None
         self.retry_kwargs = None
+        self.invoke_calls = []
+        self.ainvoke_calls = []
+        self.stream_calls = []
+        self.astream_calls = []
 
     def with_config(self, **kwargs):
         self.config_kwargs = kwargs
@@ -30,6 +40,22 @@ class RecordingRunnable:
     def with_retry(self, **kwargs):
         self.retry_kwargs = kwargs
         return self
+
+    def invoke(self, input, config=None, **kwargs):
+        self.invoke_calls.append((input, config, kwargs))
+        return "invoke-result"
+
+    async def ainvoke(self, input, config=None, **kwargs):
+        self.ainvoke_calls.append((input, config, kwargs))
+        return "ainvoke-result"
+
+    def stream(self, input, config=None, **kwargs):
+        self.stream_calls.append((input, config, kwargs))
+        yield "stream-result"
+
+    async def astream(self, input, config=None, **kwargs):
+        self.astream_calls.append((input, config, kwargs))
+        yield "astream-result"
 
 
 class RecordingChatModel(BaseChatModel):
@@ -43,6 +69,12 @@ class RecordingChatModel(BaseChatModel):
 
     def _generate(self, messages, stop=None, run_manager=None, **kwargs):
         return ChatResult(generations=[ChatGeneration(message=AIMessage(content="ok"))])
+
+    async def _agenerate(self, messages, stop=None, run_manager=None, **kwargs):
+        return self._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
+
+    def with_config(self, **kwargs):
+        return self.bound
 
     def bind(self, **kwargs):
         return self.bound
@@ -226,6 +258,34 @@ class ModelResolverTests(unittest.TestCase):
         self.assertEqual(model.bound.retry_kwargs["stop_after_attempt"], 2)
         self.assertEqual(model.bound.retry_kwargs["exponential_jitter_params"]["initial"], 0)
 
+    def test_reliable_chat_model_forwards_properties_and_invocations(self) -> None:
+        model = RecordingChatModel()
+        policy = ModelReliabilityPolicy(stream_idle_timeout_s=5, max_attempts=1)
+        wrapped = wrap_model_for_reliability(model, model_name="anthropic:claude", policy=policy)
+        assert isinstance(wrapped, ReliableChatModel)
+
+        self.assertEqual(wrapped._identifying_params["provider"], "anthropic")
+        self.assertEqual(wrapped.model_name, "anthropic:claude")
+        self.assertEqual(wrapped.model, "anthropic:claude")
+        self.assertEqual(wrapped.model_id, "anthropic:claude")
+        self.assertEqual(wrapped._llm_type, "reliable:recording")
+        self.assertIs(wrapped.bind(value="x"), model.bound)
+        self.assertIs(wrapped.bind_tools([], tool_choice="required"), model.bound)
+        self.assertEqual(wrapped.invoke("input", config={"tags": ["t"]}), "invoke-result")
+        self.assertEqual(asyncio.run(wrapped.ainvoke("input")), "ainvoke-result")
+        self.assertEqual(list(wrapped.stream("input")), ["stream-result"])
+
+        async def collect_astream() -> list[str]:
+            return [chunk async for chunk in wrapped.astream("input")]
+
+        self.assertEqual(asyncio.run(collect_astream()), ["astream-result"])
+        self.assertEqual(wrapped._generate([AIMessage(content="hello")]).generations[0].message.content, "ok")
+        self.assertEqual(
+            asyncio.run(wrapped._agenerate([AIMessage(content="hello")])).generations[0].message.content,
+            "ok",
+        )
+        self.assertIsNone(model.bound.retry_kwargs)
+
     def test_reliability_policy_invalid_values_warn_and_fall_back(self) -> None:
         with self.assertLogs("src.team_instanciator.resolvers.model_reliability", level="WARNING"):
             policy = ModelReliabilityPolicy.from_configuration(
@@ -241,6 +301,61 @@ class ModelResolverTests(unittest.TestCase):
         self.assertEqual(policy.stream_idle_timeout_s, 120.0)
         self.assertEqual(policy.max_attempts, 1)
         self.assertEqual(policy.retry_backoff_initial_s, 1.0)
+        self.assertEqual(policy.max_attempts, 1)
+
+        with self.assertLogs("src.team_instanciator.resolvers.model_reliability", level="WARNING"):
+            invalid_attempts = ModelReliabilityPolicy.from_configuration(
+                RuntimeConfiguration({"CODING_AGENTS_MODEL_MAX_ATTEMPTS": "bad"})
+            )
+        self.assertEqual(invalid_attempts.max_attempts, 3)
+
+        with self.assertLogs("src.team_instanciator.resolvers.model_reliability", level="WARNING"):
+            value = _float_setting(
+                RuntimeConfiguration({"VALUE": "0"}),
+                "VALUE",
+                default=2.0,
+                allow_zero=False,
+            )
+        self.assertEqual(value, 2.0)
+
+    def test_reliability_helpers_cover_provider_error_branches(self) -> None:
+        self.assertEqual(reliability_init_kwargs("mistral-large", ModelReliabilityPolicy()), {})
+        self.assertEqual(reliability_init_kwargs("custom:model", ModelReliabilityPolicy()), {})
+        self.assertEqual(
+            reliability_init_kwargs("anthropic:claude", ModelReliabilityPolicy(stream_idle_timeout_s=0)),
+            {"timeout": None, "max_retries": 0},
+        )
+        self.assertFalse(classify_model_exception(ValueError("bad")).retryable)
+        self.assertEqual(classify_model_exception(ConnectionError("offline")).failure_code, "network_error")
+        self.assertEqual(classify_model_exception(TimeoutError("idle")).failure_code, "stream_idle_timeout")
+
+        class StatusError(Exception):
+            def __init__(self, status_code: int) -> None:
+                super().__init__(status_code)
+                self.status_code = status_code
+
+        class ServiceUnavailableError(Exception):
+            pass
+
+        class InternalServerError(Exception):
+            pass
+
+        self.assertEqual(classify_model_exception(StatusError(429)).failure_code, "rate_limited")
+        self.assertEqual(classify_model_exception(StatusError(409)).failure_code, "network_error")
+        self.assertEqual(classify_model_exception(StatusError(503)).failure_code, "temporary_unavailable")
+        self.assertEqual(classify_model_exception(InternalServerError()).failure_code, "server_error")
+        self.assertEqual(classify_model_exception(ServiceUnavailableError()).failure_code, "temporary_unavailable")
+
+    def test_retryable_exception_types_handles_missing_openai_package(self) -> None:
+        real_import = builtins.__import__
+
+        def import_without_openai(name, *args, **kwargs):
+            if name == "openai":
+                raise ImportError(name)
+            return real_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=import_without_openai):
+            self.assertEqual(retryable_model_exception_types(), (TimeoutError, ConnectionError))
 
     def _team(self, *, model: str, reasoning_effort: str | None) -> SimpleNamespace:
         return SimpleNamespace(

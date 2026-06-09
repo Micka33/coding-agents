@@ -89,7 +89,8 @@ class CustomToolContextTests(unittest.TestCase):
             root = Path(tmp).resolve()
             checkpointer = FakeCheckpointer()
             team = SimpleNamespace(
-                defaults=SimpleNamespace(root_dir=str(root)),
+                working_directory=str(root),
+                load_cwd=Path.cwd(),
                 custom_tools={
                     "probe": CustomToolDefinition(
                         id="probe",

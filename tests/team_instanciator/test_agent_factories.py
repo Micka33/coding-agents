@@ -33,6 +33,17 @@ class Factory:
         return self.value
 
 
+class SimpleCapabilities:
+    def __init__(self, *, provider: str) -> None:
+        self.provider = provider
+
+
+class SimpleModel:
+    def __init__(self, *, model_name: str, capabilities: SimpleCapabilities) -> None:
+        self.model_name = model_name
+        self.capabilities = capabilities
+
+
 class AgentFactoryTests(unittest.TestCase):
     def test_deep_agent_factory_passes_resolved_dependencies_to_deepagents(self) -> None:
         team_config = team()
@@ -137,6 +148,38 @@ class AgentFactoryTests(unittest.TestCase):
             )
 
         self.assertEqual(create_deep_agent.call_args.kwargs["subagents"], [{"name": "translator"}])
+
+    def test_deep_agent_factory_harness_profile_key_handles_model_objects(self) -> None:
+        factory = DeepAgentFactory(
+            Resolver("model"),
+            ToolsetResolver(),
+            Factory("backend"),
+            Factory(["permissions"]),
+            Resolver(["memory.md"]),
+            Resolver(["skill-path"]),
+        )
+
+        self.assertIsNone(factory._harness_profile_key(object()))
+        self.assertEqual(
+            factory._harness_profile_key(SimpleModel(model_name="openai:gpt-test", capabilities=SimpleCapabilities(provider="openai"))),
+            "openai:gpt-test",
+        )
+        self.assertEqual(
+            factory._harness_profile_key(
+                SimpleModel(model_name="gpt-test", capabilities=SimpleCapabilities(provider="openai"))
+            ),
+            "openai:gpt-test",
+        )
+        self.assertIsNone(
+            factory._harness_profile_key(
+                SimpleModel(model_name="gpt-test", capabilities=SimpleCapabilities(provider="unknown"))
+            )
+        )
+
+        with patch("src.team_instanciator.factories.deep_agent_factory.register_harness_profile") as register_profile:
+            factory._disable_default_general_purpose_subagent(object())
+
+        register_profile.assert_not_called()
 
     def test_langchain_agent_factory_passes_resolved_model_and_tools(self) -> None:
         team_config = team()

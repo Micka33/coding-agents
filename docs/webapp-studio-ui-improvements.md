@@ -240,11 +240,11 @@ The left sidebar should show the active persistence context:
 - checkpointer backend;
 - resolved checkpoint database path when using SQLite.
 
-This matters because relative team settings such as `root_dir: "."` and
-relative SQLite paths are resolved from the launcher working directory. Running
-the same command from a different folder can point the same thread id at a
-different database. The UI should expose that fact instead of looking like an
-empty or buggy chat.
+This matters because relative team settings such as `working_directory: "."`
+and relative SQLite paths are resolved from the launcher working directory.
+Running the same command from a different folder can point the same thread id
+at a different database. The UI should expose that fact instead of looking like
+an empty or buggy chat.
 
 On startup, the chat must hydrate from the backend's persisted public
 conversation before presenting itself as ready. If the selected thread has

@@ -99,7 +99,7 @@ class TeamInstanciatorTests(unittest.TestCase):
         loaded_team = team(
             team_id="product",
             agents={"entry": agent("entry", entrypoint=True)},
-            team_defaults=defaults(root_dir=Path.cwd()),
+            working_directory=Path.cwd(),
         )
         loader = Loader(loaded_team)
 
@@ -117,7 +117,7 @@ class TeamInstanciatorTests(unittest.TestCase):
         self.assertEqual(instantiated.runtime_manifest.team_id, "product")
 
     def test_instantiate_closes_checkpointer_when_team_has_no_entrypoint(self) -> None:
-        loaded_team = team(agents={"worker": agent("worker")}, team_defaults=defaults(root_dir=Path.cwd()))
+        loaded_team = team(agents={"worker": agent("worker")}, working_directory=Path.cwd())
 
         with (
             patch("src.team_instanciator.core.team_instanciator.CheckpointerFactory", FakeCheckpointerFactory),
@@ -129,7 +129,7 @@ class TeamInstanciatorTests(unittest.TestCase):
         self.assertTrue(FakeCheckpointerFactory.handle.closed)
 
     def test_instantiate_closes_checkpointer_when_graph_creation_fails(self) -> None:
-        loaded_team = team(agents={"entry": agent("entry", entrypoint=True)}, team_defaults=defaults(root_dir=Path.cwd()))
+        loaded_team = team(agents={"entry": agent("entry", entrypoint=True)}, working_directory=Path.cwd())
         FakeRegistry.graph_exception = RuntimeError("boom")
 
         with (
@@ -204,8 +204,8 @@ class TeamInstanciatorTests(unittest.TestCase):
                     [
                         "schema_version: 1",
                         "id: product",
+                        "working_directory: .",
                         "defaults:",
-                        "  root_dir: .",
                         "  model:",
                         "    default: openai:gpt-tool-visibility-test",
                         "  checkpointer:",

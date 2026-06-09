@@ -7,7 +7,6 @@ from src.team_loader.models.agent_definition import AgentDefinition
 from src.team_loader.models.agent_reference import AgentReference
 from src.team_loader.parsing.mdc_parser import MdcParser
 from src.team_loader.models.team_definition import TeamDefinition
-from src.team_loader.models.team_defaults import TeamDefaults
 from src.team_loader.errors.team_loader_error import TeamLoaderError
 from src.team_loader.validation.team_validator import TeamValidator
 from src.team_loader.parsing.template_renderer import TemplateRenderer
@@ -28,20 +27,24 @@ class TeamLoader:
         self._validator = validator or TeamValidator()
 
     def load(self, team_file: str | Path, variables: JsonObject | None = None) -> TeamDefinition:
+        load_cwd = Path.cwd().resolve()
         path = Path(team_file).resolve()
         raw_mapping = self._load_team_mapping(path)
-        base_variables = TeamDefaults.from_mapping(raw_mapping.get("defaults")).template_variables()
+        base_variables = self._base_template_variables(raw_mapping)
         config_variables = {**base_variables, **(variables or {})}
         mapping = self._template_renderer.render_config_value(raw_mapping, config_variables)
         if not is_json_object(mapping):
             raise TeamLoaderError(f"{path} must render to a YAML mapping.")
         references = self._load_agent_references(mapping)
-        default_variables = TeamDefinition.from_mapping(path, mapping, {}).defaults.template_variables()
+        default_variables = TeamDefinition.from_mapping(path, mapping, {}, load_cwd).template_variables()
         template_variables = {**default_variables, **(variables or {})}
         agents = self._load_agents(path, references, template_variables)
-        team = TeamDefinition.from_mapping(path, mapping, agents)
+        team = TeamDefinition.from_mapping(path, mapping, agents, load_cwd)
         self._validator.validate(team)
         return team
+
+    def _base_template_variables(self, mapping: JsonObject) -> dict[str, str]:
+        return {"working_directory": str(mapping.get("working_directory") or ".")}
 
     def _load_team_mapping(self, path: Path) -> JsonObject:
         if not path.is_file():

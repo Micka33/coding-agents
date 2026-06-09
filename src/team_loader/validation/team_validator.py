@@ -1,15 +1,23 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from pathlib import Path
 
+from src.type_defs import is_json_object
 from src.team_loader.models.team_definition import TeamDefinition
 from src.team_loader.errors.team_loader_error import TeamLoaderError
+from src.team_loader.resolvers.working_directory_resolver import WorkingDirectoryResolver
 
 
 class TeamValidator:
+    def __init__(self, working_directory_resolver: WorkingDirectoryResolver | None = None) -> None:
+        self._working_directory_resolver = working_directory_resolver or WorkingDirectoryResolver()
+
     def validate(self, team: TeamDefinition) -> None:
         self._validate_schema(team)
+        self._validate_working_directories(team)
         self._validate_custom_tools(team)
+        self._validate_mcp_servers(team)
         self._validate_toolsets(team)
         self._validate_agents(team)
         self._validate_relations(team)
@@ -20,6 +28,36 @@ class TeamValidator:
             raise TeamLoaderError(f"Unsupported team schema_version: {team.schema_version!r}.")
         if not team.id:
             raise TeamLoaderError("team.yaml requires a non-empty id.")
+        defaults = team.raw.get("defaults") if is_json_object(getattr(team, "raw", None)) else None
+        if is_json_object(defaults):
+            allowed = {"model", "reasoning_effort", "checkpointer", "execution_backend", "memory"}
+            unsupported = sorted(key for key in defaults if key not in allowed)
+            if unsupported:
+                raise TeamLoaderError(f"defaults contains unsupported key: {unsupported[0]}.")
+
+    def _validate_working_directories(self, team: TeamDefinition) -> None:
+        working_directory = str(getattr(team, "working_directory", "."))
+        if not working_directory:
+            raise TeamLoaderError("team.yaml working_directory must not be empty.")
+        team_directory = self._working_directory_resolver.resolve_team(team)
+        if not team_directory.is_dir():
+            raise TeamLoaderError(f"team.yaml working_directory must be an existing directory: {team_directory}")
+        for agent_id, agent in getattr(team, "agents", {}).items():
+            configured = str(getattr(agent, "relative_working_directory", "."))
+            if not configured:
+                raise TeamLoaderError(f"agents.{agent_id}.relative_working_directory must not be empty.")
+            if Path(configured).is_absolute():
+                raise TeamLoaderError(f"agents.{agent_id}.relative_working_directory must be relative.")
+            try:
+                agent_directory = self._working_directory_resolver.resolve_agent(team, agent)
+            except ValueError as error:
+                raise TeamLoaderError(
+                    f"agents.{agent_id}.relative_working_directory must stay within team working_directory."
+                ) from error
+            if not agent_directory.is_dir():
+                raise TeamLoaderError(
+                    f"agents.{agent_id}.relative_working_directory must be an existing directory: {agent_directory}"
+                )
 
     def _validate_custom_tools(self, team: TeamDefinition) -> None:
         for custom_tool in team.custom_tools.values():
@@ -28,13 +66,52 @@ class TeamValidator:
             if not custom_tool.exposes:
                 raise TeamLoaderError(f"custom_tools.{custom_tool.id}.exposes must list at least one tool.")
 
+    def _validate_mcp_servers(self, team: TeamDefinition) -> None:
+        for server in getattr(team, "mcp_servers", {}).values():
+            if server.transport not in {"stdio", "streamable_http", "sse"}:
+                raise TeamLoaderError(f"mcp_servers.{server.id}.transport must be stdio, http, streamable_http, or sse.")
+            if server.exposes == ():
+                raise TeamLoaderError(f"mcp_servers.{server.id}.exposes must list at least one tool when configured.")
+            if server.timeout is not None and server.timeout < 1:
+                raise TeamLoaderError(f"mcp_servers.{server.id}.timeout must be positive.")
+            if server.auth is not None:
+                self._validate_mcp_auth(server.id, server.auth)
+            if server.transport == "stdio":
+                if server.auth is not None:
+                    raise TeamLoaderError(f"mcp_servers.{server.id}.auth is supported only for HTTP transports.")
+                if not server.command:
+                    raise TeamLoaderError(f"mcp_servers.{server.id}.command is required for stdio transport.")
+                continue
+            if not server.url:
+                raise TeamLoaderError(f"mcp_servers.{server.id}.url is required for {server.transport} transport.")
+
+    def _validate_mcp_auth(self, server_id: str, auth: object) -> None:
+        auth_type = str(getattr(auth, "type", ""))
+        if auth_type not in {"bearer", "api_key", "custom"}:
+            raise TeamLoaderError(f"mcp_servers.{server_id}.auth.type must be bearer, api_key, or custom.")
+        if auth_type == "bearer" and not getattr(auth, "env", None):
+            raise TeamLoaderError(f"mcp_servers.{server_id}.auth.env is required for bearer auth.")
+        if auth_type == "api_key":
+            if not getattr(auth, "header", None):
+                raise TeamLoaderError(f"mcp_servers.{server_id}.auth.header is required for api_key auth.")
+            if not getattr(auth, "env", None):
+                raise TeamLoaderError(f"mcp_servers.{server_id}.auth.env is required for api_key auth.")
+        if auth_type == "custom":
+            factory = str(getattr(auth, "factory", "") or "")
+            if ":" not in factory:
+                raise TeamLoaderError(f"mcp_servers.{server_id}.auth.factory must use module:function format.")
+
     def _validate_toolsets(self, team: TeamDefinition) -> None:
         for toolset in team.toolsets.values():
             if not toolset.tools:
                 raise TeamLoaderError(f"toolsets.{toolset.name} must list at least one tool.")
             for tool in toolset.tools:
-                if tool.custom and tool.custom not in team.custom_tools:
-                    raise TeamLoaderError(f"toolsets.{toolset.name} references unknown custom tool '{tool.custom}'.")
+                custom = getattr(tool, "custom", None)
+                mcp = getattr(tool, "mcp", None)
+                if custom and custom not in team.custom_tools:
+                    raise TeamLoaderError(f"toolsets.{toolset.name} references unknown custom tool '{custom}'.")
+                if mcp and mcp not in getattr(team, "mcp_servers", {}):
+                    raise TeamLoaderError(f"toolsets.{toolset.name} references unknown MCP server '{mcp}'.")
 
     def _validate_agents(self, team: TeamDefinition) -> None:
         if not team.agent_references:

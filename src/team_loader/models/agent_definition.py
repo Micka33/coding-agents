@@ -15,6 +15,7 @@ class AgentDefinition:
     id: str
     kind: str
     config_path: Path
+    relative_working_directory: str
     entrypoint: bool
     enable_general_purpose_subagent: bool
     description: str | None
@@ -42,6 +43,7 @@ class AgentDefinition:
             id=reference.id,
             kind=reference.kind,
             config_path=document.path,
+            relative_working_directory=reference.relative_working_directory,
             entrypoint=reference.entrypoint,
             enable_general_purpose_subagent=reference.enable_general_purpose_subagent,
             description=optional_string(data.get("description")),
