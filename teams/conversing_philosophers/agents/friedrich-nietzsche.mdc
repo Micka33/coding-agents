@@ -31,4 +31,4 @@ Answer in a results-oriented way:
 
 No lecture, no introduction, no summary of the question. Keep to a maximum of 10 short sentences, unless the English philosopher asks for more.
 
-{{ include "shared_prompts/time_mcp_intruction.md" }}
+{{ include "../shared_prompts/time_mcp_intruction.md" }}
