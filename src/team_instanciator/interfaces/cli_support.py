@@ -5,6 +5,7 @@ from collections.abc import Sequence
 from typing import Protocol
 
 from src.team_instanciator.configuration.dotenv_loader import DotEnvLoader
+from src.type_defs import JsonObject
 
 
 class RuntimeConfigArgs(Protocol):
@@ -15,8 +16,8 @@ class RuntimeConfigArgs(Protocol):
     no_env_file: bool
 
 
-def parse_key_value_pairs(raw_values: Sequence[str]) -> dict[str, str]:
-    values: dict[str, str] = {}
+def parse_key_value_pairs(raw_values: Sequence[str]) -> JsonObject:
+    values: JsonObject = {}
     for raw in raw_values:
         key, separator, value = raw.partition("=")
         if separator:
@@ -24,8 +25,8 @@ def parse_key_value_pairs(raw_values: Sequence[str]) -> dict[str, str]:
     return values
 
 
-def build_config_variables(args: RuntimeConfigArgs) -> dict[str, str]:
-    config_variables: dict[str, str] = {}
+def build_config_variables(args: RuntimeConfigArgs) -> JsonObject:
+    config_variables: JsonObject = {}
     if not args.no_env_file:
         dotenv_path = Path(args.env_file) if args.env_file else Path.cwd() / ".env"
         config_variables.update(DotEnvLoader().load(dotenv_path))

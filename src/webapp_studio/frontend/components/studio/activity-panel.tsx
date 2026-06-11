@@ -23,6 +23,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import { studioToolCallsFromValue } from "@/lib/studio/tool-calls"
 import { cn } from "@/lib/utils"
 import type { StudioState } from "@/lib/studio/schemas"
 
@@ -162,33 +163,41 @@ export function ActivityPanel({
             No private activity for this agent
           </div>
         ) : (
-          orderedThreads.map((thread) => (
-            <section className="min-w-0 overflow-hidden" key={thread.thread_id}>
-              {showThreadLabels ? (
-                <div className="mb-3 border-b pb-2">
-                  <p className="text-xs break-all text-muted-foreground">
-                    {thread.thread_id}
-                  </p>
-                </div>
-              ) : null}
-              <div className="grid min-w-0 gap-4">
-                {thread.messages.length === 0 ? (
-                  <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-                    No messages in this thread
+          orderedThreads.map((thread) => {
+            const toolDisplay = toolDisplayState(thread.messages)
+            const displayMessages = thread.messages.filter(
+              (_message, index) =>
+                !toolDisplay.hiddenToolMessageIndexes.has(index)
+            )
+            return (
+              <section className="min-w-0 overflow-hidden" key={thread.thread_id}>
+                {showThreadLabels ? (
+                  <div className="mb-3 border-b pb-2">
+                    <p className="text-xs break-all text-muted-foreground">
+                      {thread.thread_id}
+                    </p>
                   </div>
-                ) : (
-                  thread.messages.map((message, index) => (
-                    <ActivityMessageItem
-                      isFinalMessage={isFinalAiMessage(thread.messages, index)}
-                      key={`${thread.thread_id}-${index}-${speakerKey(message)}-${message.content}`}
-                      message={message}
-                      previousMessage={thread.messages[index - 1]}
-                    />
-                  ))
-                )}
-              </div>
-            </section>
-          ))
+                ) : null}
+                <div className="grid min-w-0 gap-4">
+                  {displayMessages.length === 0 ? (
+                    <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+                      No messages in this thread
+                    </div>
+                  ) : (
+                    displayMessages.map((message, index) => (
+                      <ActivityMessageItem
+                        isFinalMessage={isFinalAiMessage(displayMessages, index)}
+                        key={`${thread.thread_id}-${index}-${speakerKey(message)}-${message.content}`}
+                        message={message}
+                        previousMessage={displayMessages[index - 1]}
+                        resultByToolCallId={toolDisplay.resultByToolCallId}
+                      />
+                    ))
+                  )}
+                </div>
+              </section>
+            )
+          })
         )}
 
         <section className="min-w-0 rounded-md border p-4">
@@ -230,10 +239,12 @@ function ActivityMessageItem({
   isFinalMessage,
   message,
   previousMessage,
+  resultByToolCallId,
 }: {
   isFinalMessage: boolean
   message: ActivityMessage
   previousMessage: ActivityMessage | undefined
+  resultByToolCallId: ReadonlyMap<string, unknown>
 }) {
   const content = message.content || "empty message"
   const [copied, setCopied] = useState(false)
@@ -333,7 +344,10 @@ function ActivityMessageItem({
         defaultCodeWrap={false}
       />
       <div className="min-w-0 overflow-hidden">
-        <ToolCallList value={message.tool_calls} />
+        <ToolCallList
+          resultByToolCallId={resultByToolCallId}
+          value={message.tool_calls}
+        />
       </div>
       {isFinalMessage ? (
         <MessageActions
@@ -509,6 +523,32 @@ function isHumanMessage(message: ActivityMessage) {
 
 function isThinkingMessage(message: ActivityMessage) {
   return message.type === "thinking" || message.type === "reasoning"
+}
+
+function toolDisplayState(messages: ActivityMessage[]) {
+  const toolCallIds = new Set<string>()
+  const resultByToolCallId = new Map<string, unknown>()
+  const hiddenToolMessageIndexes = new Set<number>()
+
+  for (const message of messages) {
+    for (const call of studioToolCallsFromValue(message.tool_calls)) {
+      toolCallIds.add(call.id)
+    }
+  }
+
+  messages.forEach((message, index) => {
+    if (message.type !== "tool") {
+      return
+    }
+    const toolCallId =
+      typeof message.tool_call_id === "string" ? message.tool_call_id.trim() : ""
+    if (toolCallId && toolCallIds.has(toolCallId)) {
+      resultByToolCallId.set(toolCallId, message.content)
+      hiddenToolMessageIndexes.add(index)
+    }
+  })
+
+  return { hiddenToolMessageIndexes, resultByToolCallId }
 }
 
 function isFinalAiMessage(messages: ActivityMessage[], index: number) {

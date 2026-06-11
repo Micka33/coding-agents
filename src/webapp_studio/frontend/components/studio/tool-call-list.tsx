@@ -12,6 +12,7 @@ import type { StudioToolCall, StudioToolState } from "@/lib/studio/tool-calls"
 import { studioToolCallsFromValue } from "@/lib/studio/tool-calls"
 
 type ToolCallListProps = {
+  resultByToolCallId?: ReadonlyMap<string, unknown>
   value: unknown
 }
 
@@ -21,8 +22,10 @@ const inProgressStates = new Set<StudioToolState>([
   "input-streaming",
 ])
 
-export function ToolCallList({ value }: ToolCallListProps) {
-  const calls = studioToolCallsFromValue(value)
+export function ToolCallList({ resultByToolCallId, value }: ToolCallListProps) {
+  const calls = studioToolCallsFromValue(value).map((call) =>
+    toolCallWithResult(call, resultByToolCallId)
+  )
   if (calls.length === 0) {
     return null
   }
@@ -42,6 +45,25 @@ export function ToolCallList({ value }: ToolCallListProps) {
   )
 }
 
+function toolCallWithResult(
+  call: StudioToolCall,
+  resultByToolCallId: ReadonlyMap<string, unknown> | undefined
+) {
+  if (
+    call.output !== undefined ||
+    call.errorText ||
+    !resultByToolCallId?.has(call.id)
+  ) {
+    return call
+  }
+
+  return {
+    ...call,
+    output: resultByToolCallId.get(call.id),
+    state: "output-available" as const,
+  }
+}
+
 function ActionGroup({
   calls,
   kind,
@@ -51,6 +73,14 @@ function ActionGroup({
 }) {
   if (calls.length === 0) {
     return null
+  }
+  if (calls.length === 1) {
+    return (
+      <ActionRow
+        call={calls[0]}
+        tone={kind === "in-progress" ? "in-progress" : "default"}
+      />
+    )
   }
 
   return (
@@ -78,14 +108,31 @@ function ActionGroup({
   )
 }
 
-function ActionRow({ call }: { call: StudioToolCall }) {
+function ActionRow({
+  call,
+  tone = "default",
+}: {
+  call: StudioToolCall
+  tone?: "default" | "in-progress"
+}) {
   const summary = actionSummary(call)
 
   return (
-    <Collapsible className="group/action-row min-w-0 rounded-md border bg-background">
+    <Collapsible
+      className={cn(
+        "group/action-row min-w-0 rounded-md border bg-background",
+        tone === "in-progress" &&
+          "border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-100"
+      )}
+    >
       <CollapsibleTrigger
         aria-label={`Open action ${summary}`}
-        className="flex w-full min-w-0 items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-muted/50"
+        className={cn(
+          "flex w-full min-w-0 items-center justify-between gap-2 px-3 py-2 text-left text-sm",
+          tone === "in-progress"
+            ? "hover:bg-amber-100/70 dark:hover:bg-amber-900/70"
+            : "hover:bg-muted/50"
+        )}
       >
         <span className="min-w-0 truncate">
           <span className="font-mono text-muted-foreground">&gt;</span>{" "}

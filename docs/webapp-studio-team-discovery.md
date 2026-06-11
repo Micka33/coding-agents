@@ -73,7 +73,8 @@ conversation teams.
 
 ## Duplicate Team Ids
 
-Duplicate `team.yaml` ids must block Studio usage until they are resolved.
+Duplicate `team.yaml` ids block only the colliding teams until they are
+resolved. Non-colliding teams remain discoverable and usable.
 
 The duplicate check is case-insensitive. Implement it with Python `casefold()`,
 so values such as `OpenSpec`, `openspec`, and `OPENSPEC` collide.
@@ -82,8 +83,8 @@ When duplicates exist, the system should report them at two levels.
 
 ### Console Output
 
-The launcher should print a clear blocking error listing each duplicated id and
-the files that declare it.
+When every discoverable team is part of a collision, the launcher should print a
+clear blocking error listing each duplicated id and the files that declare it.
 
 Example:
 
@@ -97,14 +98,13 @@ id "philosophers" is declared by:
 Rename one of these team.yaml ids, then restart webapp-studio.
 ```
 
-The backend should still be allowed to start in a configuration-blocked mode so
-the frontend can show the same problem in the browser. This avoids a confusing
-blank or disconnected Studio page.
+The backend should still be allowed to start. It enters configuration-blocked
+mode only when no non-colliding teams remain.
 
 ### Studio UI
 
 The Studio should display a blocking configuration screen when duplicate ids
-exist. The screen should:
+leave no usable teams. The screen should:
 
 - state that team discovery failed because multiple `team.yaml` files declare
   the same id;
@@ -113,7 +113,8 @@ exist. The screen should:
 - tell the user to rename one of the ids and restart Studio;
 - disable chat creation, team selection, and conversation switching.
 
-No fallback team should be auto-selected while discovery is blocked.
+When at least one non-colliding team remains, Studio should keep those teams
+usable and surface a non-blocking collision diagnostic.
 
 ## New Chat Flow
 

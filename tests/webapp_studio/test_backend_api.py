@@ -22,6 +22,7 @@ from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
 from src.team_instanciator.configuration.runtime_configuration import RuntimeConfiguration
 from src.team_instanciator.conversation import ConversationEvent, ConversationFileRef, ConversationStore
+from src.team_instanciator.errors.team_instanciator_error import TeamInstanciatorError
 from src.team_instanciator.runtime.thread_id_factory import ThreadIdFactory
 from src.team_loader.parsing.yaml_parser import YamlParser
 from src.webapp_studio.backend.api.checkpoint_history_reader import CheckpointHistoryReader
@@ -2224,6 +2225,56 @@ class BackendApiTests(unittest.TestCase):
         self.assertIn("duplicate team", output.getvalue())
         self.assertTrue(controller.closed)
 
+    def test_backend_launcher_exits_when_controller_raises_studio_api_error(self) -> None:
+        with (
+            patch(
+                "src.webapp_studio.backend.application.studio_backend_launcher.StudioSessionController",
+                side_effect=StudioApiError(status_code=409, code="team_instantiation_failed", message="untrusted package"),
+            ),
+            patch("sys.stderr", new_callable=io.StringIO) as errors,
+            self.assertRaises(SystemExit) as raised,
+        ):
+            StudioBackendLauncher().launch(team_file="team.yaml")
+
+        self.assertEqual(raised.exception.code, 1)
+        self.assertIn("untrusted package", errors.getvalue())
+
+    def test_session_controller_maps_instantiation_failure_and_rejects_colliding_explicit_team(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / "workspace"
+            repository = root / "repo"
+            self._write_discovery_team(repository / "teams" / "alpha" / "team.yaml", "alpha")
+
+            def failing_factory(config_variables=None):
+                def instantiate(_team_file, _variables):
+                    raise TeamInstanciatorError("Package team has untrusted executable surfaces")
+
+                return SimpleNamespace(instantiate=instantiate)
+
+            controller = StudioSessionController(
+                repository_root=repository,
+                workspace_dir=workspace,
+                instanciator_factory=failing_factory,
+            )
+            with self.assertRaises(StudioApiError) as raised:
+                controller.create_conversation(ConversationCreateRequest(team_id="alpha", initial_message="go"))
+
+            explicit = workspace / ".coding-agents" / "teams" / "dup" / "team.yaml"
+            self._write_discovery_team(explicit, "ALPHA")
+            self._write_discovery_team(repository / "teams" / "other" / "team.yaml", "other")
+            with self.assertRaisesRegex(ValueError, "collides with duplicate team id"):
+                StudioSessionController(
+                    repository_root=repository,
+                    workspace_dir=workspace,
+                    team_file=explicit,
+                    instanciator_factory=failing_factory,
+                )
+
+        self.assertEqual(raised.exception.status_code, 409)
+        self.assertEqual(raised.exception.code, "team_instantiation_failed")
+        self.assertIn("untrusted executable surfaces", raised.exception.message)
+
     def test_team_discovery_blocks_case_insensitive_duplicate_conversation_team_ids(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -2331,6 +2382,22 @@ class BackendApiTests(unittest.TestCase):
         )
         self.assertIn('id "Local"', message)
         self.assertIn("/a/team.yaml", message)
+        self.assertIn("hid colliding team ids", message)
+        self.assertIn("selectable", message)
+        blocked_message = duplicate_team_id_message(
+            {
+                "status": "blocked",
+                "duplicate_ids": [
+                    {
+                        "team_id": "Local",
+                        "normalized_id": "local",
+                        "team_files": ["/a/team.yaml", "/b/team.yaml"],
+                    }
+                ],
+            }
+        )
+        self.assertIn("discovery failed", blocked_message)
+        self.assertIn("restart webapp-studio", blocked_message)
 
     def test_workspace_file_browser_edge_branches(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

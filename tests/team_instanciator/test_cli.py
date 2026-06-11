@@ -155,6 +155,19 @@ class CliTests(unittest.TestCase):
         )
         self.assertEqual(json.loads(output.getvalue())["agents"], ["entry", "worker"])
 
+    def test_run_subcommand_uses_existing_instantiation_flow(self) -> None:
+        output = io.StringIO()
+
+        with (
+            patch("src.team_instanciator.interfaces.cli.TeamInstanciator", FakeTeamInstanciator),
+            redirect_stdout(output),
+        ):
+            exit_code = cli_module.main(["run", "team.yaml", "--no-env-file", "--json"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(FakeTeamInstanciator.calls[0][1], "team.yaml")
+        self.assertEqual(json.loads(output.getvalue())["team"], "product")
+
     def test_message_invocation_prints_json_and_uses_thread_id(self) -> None:
         output = io.StringIO()
 
@@ -267,6 +280,15 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 7)
         webapp_main.assert_called_once_with(["team.yaml"])
+
+    def test_team_subcommand_delegates_to_package_cli(self) -> None:
+        with patch("src.team_instanciator.interfaces.cli.TeamPackageCli") as package_cli:
+            package_cli.return_value.main.return_value = 11
+
+            exit_code = cli_module.TeamInstanciatorCli().main(["team", "list"])
+
+        self.assertEqual(exit_code, 11)
+        package_cli.return_value.main.assert_called_once_with(["list"])
 
     def test_module_main_guard_runs(self) -> None:
         output = io.StringIO()

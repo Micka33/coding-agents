@@ -12,6 +12,7 @@ from src.team_loader.models.team_definition import TeamDefinition
 from src.team_instanciator.configuration.runtime_configuration import RuntimeConfiguration
 from src.team_instanciator.errors.team_instanciator_error import TeamInstanciatorError
 from src.team_instanciator.resolvers.resolved_skill_source import ResolvedSkillSource
+from src.team_packages.package_locator import InstalledPackageLocator
 
 logger = logging.getLogger(__name__)
 
@@ -21,22 +22,36 @@ class SkillSourceResolver:
         self._configuration = configuration or RuntimeConfiguration()
 
     def resolve_team_sources(self, team: TeamDefinition) -> tuple[ResolvedSkillSource, ...]:
-        candidates: list[tuple[Path, str, str]] = []
+        candidates: list[tuple[Path, str, str, tuple[str, ...] | None]] = []
         home = self._configuration.get("CODEX_HOME")
         if home is None:
             home = os.environ.get("CODEX_HOME")
         if home:
-            candidates.append((Path(home) / "skills", "User", "user"))
-        candidates.append((self._launch_cwd(team) / ".agents" / "skills", "Project", "project"))
+            candidates.append((Path(home) / "skills", "User", "user", None))
+        candidates.append((self._launch_cwd(team) / ".agents" / "skills", "Project", "project", None))
+        package_source = self._package_skill_source(team)
+        if package_source is not None:
+            candidates.append(package_source)
 
         team_skills = self._team_dir(team) / "skills"
         if team_skills.is_dir():
-            candidates.append((team_skills, "Team", "team"))
+            candidates.append((team_skills, "Team", "team", None))
 
         for index, configured in enumerate(getattr(team, "skill_sources", ()), start=1):
-            candidates.append((self._resolve_team_source(team, configured), f"Team Source {index}", f"team-source-{index}"))
+            candidates.append(
+                (
+                    self._resolve_team_source(team, configured),
+                    f"Team Source {index}",
+                    f"team-source-{index}",
+                    None,
+                )
+            )
 
-        existing = [(path.resolve(), label, slug) for path, label, slug in candidates if self._source_exists(path, label)]
+        existing = [
+            (path.resolve(), label, slug, allowed_skill_ids)
+            for path, label, slug, allowed_skill_ids in candidates
+            if self._source_exists(path, label)
+        ]
         return self._dedupe_and_virtualize(existing)
 
     def resolve_agent_sources(self, team: TeamDefinition, agent: AgentDefinition) -> tuple[ResolvedSkillSource, ...]:
@@ -55,7 +70,7 @@ class SkillSourceResolver:
                 host_path=source.host_path,
                 virtual_path=f"{agent_prefix}/{self._source_slug(source.virtual_path)}",
                 label=source.label,
-                allowed_skill_ids=selected,
+                allowed_skill_ids=self._intersected_skill_ids(source, selected),
             )
             for source in sources
             if self._source_contains_any(source, selected)
@@ -73,19 +88,26 @@ class SkillSourceResolver:
 
     def read_permission_paths(self, team: TeamDefinition, agent: AgentDefinition) -> list[str]:
         paths: list[str] = []
-        selected = self.selected_skill_ids(agent)
         for source in self.resolve_agent_sources(team, agent):
-            if selected is None:
+            if source.allowed_skill_ids is None:
                 paths.extend([source.virtual_path, f"{source.virtual_path}/**"])
                 continue
-            for skill_id in selected:
+            for skill_id in source.allowed_skill_ids:
                 if self._skill_exists(source.host_path, skill_id):
                     base = f"{source.virtual_path}/{skill_id}"
                     paths.extend([base, f"{base}/**"])
         return paths
 
-    def _dedupe_and_virtualize(self, sources: list[tuple[Path, str, str]]) -> tuple[ResolvedSkillSource, ...]:
-        by_path: dict[Path, tuple[Path, str, str]] = {}
+    def _intersected_skill_ids(self, source: ResolvedSkillSource, selected: tuple[str, ...]) -> tuple[str, ...]:
+        if source.allowed_skill_ids is None:
+            return selected
+        return tuple(skill_id for skill_id in selected if skill_id in source.allowed_skill_ids)
+
+    def _dedupe_and_virtualize(
+        self,
+        sources: list[tuple[Path, str, str, tuple[str, ...] | None]],
+    ) -> tuple[ResolvedSkillSource, ...]:
+        by_path: dict[Path, tuple[Path, str, str, tuple[str, ...] | None]] = {}
         order: list[Path] = []
         for source in sources:
             path = source[0]
@@ -97,9 +119,16 @@ class SkillSourceResolver:
         used_virtual_paths: set[str] = set()
         resolved: list[ResolvedSkillSource] = []
         for path in order:
-            host_path, label, slug = by_path[path]
+            host_path, label, slug, allowed_skill_ids = by_path[path]
             virtual_path = self._unique_virtual_path(f"/skills/{slug}", used_virtual_paths)
-            resolved.append(ResolvedSkillSource(host_path=host_path, virtual_path=virtual_path, label=label))
+            resolved.append(
+                ResolvedSkillSource(
+                    host_path=host_path,
+                    virtual_path=virtual_path,
+                    label=label,
+                    allowed_skill_ids=allowed_skill_ids,
+                )
+            )
         return tuple(resolved)
 
     def _unique_virtual_path(self, base_path: str, used_paths: set[str]) -> str:
@@ -119,15 +148,26 @@ class SkillSourceResolver:
         return False
 
     def _source_contains_any(self, source: ResolvedSkillSource, skill_ids: tuple[str, ...]) -> bool:
+        if source.allowed_skill_ids is not None:
+            skill_ids = tuple(skill_id for skill_id in skill_ids if skill_id in source.allowed_skill_ids)
         return any(self._skill_exists(source.host_path, skill_id) for skill_id in skill_ids)
 
     def _available_skill_ids(self, sources: tuple[ResolvedSkillSource, ...]) -> set[str]:
-        return {
-            child.name
-            for source in sources
-            for child in source.host_path.iterdir()
-            if self._skill_exists(source.host_path, child.name)
-        }
+        available: set[str] = set()
+        for source in sources:
+            if source.allowed_skill_ids is not None:
+                available.update(
+                    skill_id
+                    for skill_id in source.allowed_skill_ids
+                    if self._skill_exists(source.host_path, skill_id)
+                )
+                continue
+            available.update(
+                child.name
+                for child in source.host_path.iterdir()
+                if self._skill_exists(source.host_path, child.name)
+            )
+        return available
 
     def _skill_exists(self, source_path: Path, skill_id: str) -> bool:
         return (source_path / skill_id / "SKILL.md").is_file()
@@ -146,6 +186,16 @@ class SkillSourceResolver:
 
     def _launch_cwd(self, team: TeamDefinition) -> Path:
         return Path(getattr(team, "load_cwd", Path.cwd())).expanduser().resolve()
+
+    def _package_skill_source(self, team: TeamDefinition) -> tuple[Path, str, str, tuple[str, ...]] | None:
+        locator = InstalledPackageLocator(self._launch_cwd(team))
+        locked_skill_ids = locator.locked_skill_ids(getattr(team, "path", self._team_dir(team) / "team.yaml"))
+        if not locked_skill_ids:
+            return None
+        package_skills = self._launch_cwd(team) / ".coding-agents" / "skills"
+        if not package_skills.is_dir():
+            return None
+        return package_skills, "Package", "package", locked_skill_ids
 
     def _source_slug(self, virtual_path: str) -> str:
         return virtual_path.strip("/").split("/")[-1]

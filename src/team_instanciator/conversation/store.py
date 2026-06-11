@@ -8,7 +8,7 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from typing import cast
 
-from src.type_defs import JsonMapping, JsonValue, is_json_object, is_json_value
+from src.type_defs import JsonMapping, JsonObject, JsonValue, is_json_object, is_json_value
 from src.team_instanciator.runtime.tool_call_edge import ToolCallEdge, ToolCallEdgeStatus
 from src.team_instanciator.runtime.thread_forker import ThreadForker
 

@@ -11,4 +11,5 @@ class MessageSummaryDto(ContractModel):
     name: str | None = None
     content: str
     tool_calls: JsonLike = Field(default_factory=list)
+    tool_call_id: str | None = None
     created_at: str | None = None

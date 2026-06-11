@@ -419,6 +419,65 @@ describe("studio sidebar controls", () => {
     expect(onCascadeLimitChange).toHaveBeenCalledWith(5)
   })
 
+  it("labels package teams, disables missing ones, and surfaces trust and env notices", () => {
+    const fixture = loadStudioMock()
+    const packaged: StudioTeamDescriptor = {
+      team_id: "software",
+      description: "Packaged team",
+      team_file: "/repo/.coding-agents/packages/acme/software-team/teams/software/team.yaml",
+      source: "package",
+      conversation_available: true,
+      participants: [],
+      participant_aliases: {},
+      package_name: "acme/software-team",
+      package_version: "1.0.0",
+      package_source: "git:https://example.test/repo.git",
+      lock_status: "locked",
+      trust_status: "untrusted",
+      risk_flags: ["shell", "stdio_mcp"],
+      missing_required_env: ["PACKAGE_TOKEN"],
+      warnings: ["Required environment variable 'PACKAGE_TOKEN' is not set."],
+    }
+    const missing: StudioTeamDescriptor = {
+      team_id: "gone",
+      description: null,
+      team_file: "/repo/.coding-agents/packages/acme/gone/teams/gone/team.yaml",
+      source: "package",
+      conversation_available: false,
+      participants: [],
+      participant_aliases: {},
+      package_name: "acme/gone",
+      lock_status: "missing",
+      trust_status: "not_required",
+      risk_flags: [],
+      missing_required_env: [],
+      warnings: [],
+    }
+    const state: StudioState = {
+      ...fixture.state,
+      team_id: "software",
+      conversation_id: "",
+    }
+
+    renderSidebar({
+      state,
+      teams: { status: "ready", teams: [packaged, missing], duplicate_ids: [] },
+    })
+
+    const select = screen.getByLabelText(/Team/) as HTMLSelectElement
+    const options = within(select).getAllByRole("option") as HTMLOptionElement[]
+    expect(options.map((option) => option.textContent)).toEqual([
+      "software · acme/software-team",
+      "gone · acme/gone (missing)",
+    ])
+    expect(options[1]).toBeDisabled()
+
+    const notices = screen.getByTestId("team-package-notices")
+    expect(notices).toHaveTextContent("Untrusted package (shell, stdio_mcp)")
+    expect(notices).toHaveTextContent("coding-agents team trust acme/software-team")
+    expect(notices).toHaveTextContent("Required environment variable 'PACKAGE_TOKEN' is not set.")
+  })
+
   it("renders branches as a parent-child tree and switches from tree items", () => {
     const fixture = loadStudioMock()
     const onSwitchBranch = vi.fn()
@@ -548,6 +607,79 @@ describe("activity panel navigation", () => {
     expect(historyText.indexOf("agent history")).toBeLessThan(
       historyText.indexOf("older agent history")
     )
+  })
+
+  it("pairs tool result messages with activity tool calls", () => {
+    const state = stateWithAgentActivity()
+    state.activity.private_threads = [
+      {
+        agent_id: "agent",
+        thread_id: "thread:mention:agent",
+        messages: [
+          {
+            type: "ai",
+            name: "agent",
+            content: "",
+            tool_calls: [
+              {
+                id: "call_time",
+                name: "get_current_time",
+                args: { timezone: "Europe/Paris" },
+              },
+            ],
+          },
+          {
+            type: "tool",
+            name: "get_current_time",
+            content: "2026-06-11T12:09:04+02:00",
+            tool_call_id: "call_time",
+            tool_calls: [],
+          },
+          {
+            type: "ai",
+            name: "agent",
+            content: "12:09 PM",
+            tool_calls: [],
+          },
+          {
+            type: "tool",
+            name: "get_current_time",
+            content: "orphan result",
+            tool_call_id: "call_orphan",
+            tool_calls: [],
+          },
+        ],
+      },
+    ]
+
+    renderActivityPanel({
+      focusedAgentId: "agent",
+      onAgentSelect: () => undefined,
+      onBack: () => undefined,
+      state,
+    })
+
+    const completedAction = screen.getByRole("button", {
+      name: /Open action get_current_time .*Europe\/Paris/,
+    })
+
+    expect(completedAction).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "1 action effectuée" })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "1 action en cours" })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByText("2026-06-11T12:09:04+02:00")
+    ).not.toBeInTheDocument()
+    expect(screen.getByText("orphan result")).toBeInTheDocument()
+
+    fireEvent.click(completedAction)
+
+    expect(
+      screen.getAllByText("2026-06-11T12:09:04+02:00").length
+    ).toBe(1)
   })
 
   it("shows message timestamps beside actions without today's date", () => {
@@ -1192,6 +1324,9 @@ describe("chat panel mention autocomplete", () => {
         "openspec-guide": ["guide"],
         "product-strategist": ["product"],
       },
+      risk_flags: [],
+      missing_required_env: [],
+      warnings: [],
     }
     localStorage.clear()
 
@@ -1958,12 +2093,15 @@ describe("tool-call rendering", () => {
     const completedGroup = screen.getByRole("button", {
       name: "2 actions effectuées",
     })
-    const pendingGroup = screen.getByRole("button", {
-      name: "1 action en cours",
+    const pendingAction = screen.getByRole("button", {
+      name: /Open action custom_tool/,
     })
 
     expect(completedGroup).toHaveAttribute("aria-expanded", "false")
-    expect(pendingGroup).toHaveAttribute("aria-expanded", "false")
+    expect(pendingAction).toHaveAttribute("aria-expanded", "false")
+    expect(
+      screen.queryByRole("button", { name: "1 action en cours" })
+    ).not.toBeInTheDocument()
     expect(screen.queryByText("uv run coverage report")).not.toBeInTheDocument()
 
     fireEvent.click(completedGroup)
@@ -1983,5 +2121,47 @@ describe("tool-call rendering", () => {
 
     expect(screen.getByText("uv run coverage report")).toBeInTheDocument()
     expect(screen.getByText("Result")).toBeInTheDocument()
+  })
+
+  it("uses matching tool messages to complete pending tool calls", () => {
+    render(
+      <ToolCallList
+        resultByToolCallId={
+          new Map([["call_time", "2026-06-11T12:09:04+02:00"]])
+        }
+        value={[
+          {
+            id: "call_time",
+            name: "get_current_time",
+            args: { timezone: "Europe/Paris" },
+          },
+          {
+            id: "call_missing",
+            name: "get_current_time",
+            args: { timezone: "UTC" },
+          },
+        ]}
+      />
+    )
+
+    const completedAction = screen.getByRole("button", {
+      name: /Open action get_current_time .*Europe\/Paris/,
+    })
+    const pendingAction = screen.getByRole("button", {
+      name: /Open action get_current_time .*UTC/,
+    })
+
+    expect(completedAction).toBeInTheDocument()
+    expect(pendingAction).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "1 action effectuée" })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "1 action en cours" })
+    ).not.toBeInTheDocument()
+
+    fireEvent.click(completedAction)
+
+    expect(screen.getByText("2026-06-11T12:09:04+02:00")).toBeInTheDocument()
   })
 })

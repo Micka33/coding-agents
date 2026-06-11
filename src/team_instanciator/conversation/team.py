@@ -711,6 +711,11 @@ class MentionAwareTeam:
             if not isinstance(message, Mapping)
             else message.get("tool_calls")
         )
+        tool_call_id = (
+            getattr(message, "tool_call_id", None)
+            if not isinstance(message, Mapping)
+            else message.get("tool_call_id")
+        )
         summary: MessageSummaryDict = {
             "type": str(
                 getattr(message, "type", None)
@@ -724,6 +729,7 @@ class MentionAwareTeam:
             ),
             "content": self._content_text(content),
             "tool_calls": tool_calls if tool_calls is not None and is_json_value(tool_calls) else [],
+            "tool_call_id": self._optional_text(tool_call_id),
         }
         if created_at is not None:
             summary["created_at"] = created_at

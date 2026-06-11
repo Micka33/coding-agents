@@ -147,8 +147,9 @@ The runtime loads existing sources in this order:
 
 1. `$CODEX_HOME/skills`
 2. `<cli-cwd>/.agents/skills`
-3. `<team.yaml directory>/skills`
-4. configured `skill_sources`, in declaration order
+3. `<cli-cwd>/.coding-agents/skills`, restricted to the installed package's locked dependency ids
+4. `<team.yaml directory>/skills`
+5. configured `skill_sources`, in declaration order
 
 Later sources have higher priority when two sources contain the same skill id.
 

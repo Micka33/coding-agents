@@ -8,6 +8,7 @@ from typing import Any
 
 from src.team_instanciator.configuration.runtime_configuration import RuntimeConfiguration
 from src.team_instanciator.core.team_instanciator import TeamInstanciator
+from src.team_instanciator.errors.team_instanciator_error import TeamInstanciatorError
 from src.team_loader.parsing.yaml_parser import YamlParser
 from src.type_defs import JsonObject
 from src.type_defs import is_json_object
@@ -265,16 +266,17 @@ class StudioSessionController:
     def compat_activity(self, query: str) -> Any:
         return self._require_active().compat_activity(query)
 
-    def compat_append_message(self, body: dict[str, object]) -> Any:
+    def compat_append_message(self, body: JsonObject) -> Any:
         return self._require_active().compat_append_message(body)
 
-    def compat_update_runtime(self, body: dict[str, object]) -> Any:
+    def compat_update_runtime(self, body: JsonObject) -> Any:
         return self._require_active().compat_update_runtime(body)
 
     def compat_stop_agent(self, body: dict[str, object]) -> Any:
         return self._require_active().compat_stop_agent(body)
 
     def _activate_explicit_team(self, conversation_id: str | None) -> None:
+        self._ensure_explicit_team_not_colliding()
         descriptor = self._team_for_file(self._team_file) or {
             "team_id": str(self._team_file),
             "team_file": str(self._team_file),
@@ -317,7 +319,15 @@ class StudioSessionController:
         if existing is not None:
             return existing
         instanciator = self._instanciator_factory(config_variables=self._config_variables)
-        instantiated = instanciator.instantiate(descriptor["team_file"], self._variables)
+        try:
+            instantiated = instanciator.instantiate(descriptor["team_file"], self._variables)
+        except TeamInstanciatorError as error:
+            raise StudioApiError(
+                status_code=409,
+                code="team_instantiation_failed",
+                message=str(error),
+                field="team_id",
+            ) from error
         self._instances[team_id] = instantiated
         return instantiated
 
@@ -344,6 +354,15 @@ class StudioSessionController:
                 message="Team discovery is blocked by duplicate team ids.",
                 details={"duplicate_ids": self._discovery.get("duplicate_ids", [])},
             )
+
+    def _ensure_explicit_team_not_colliding(self) -> None:
+        team_file = str(self._team_file)
+        for duplicate in self._discovery.get("duplicate_ids", []):
+            if team_file in duplicate.get("team_files", []):
+                raise ValueError(
+                    f"Team file {team_file} collides with duplicate team id \"{duplicate.get('team_id')}\". "
+                    "Rename one of the colliding team.yaml ids."
+                )
 
     def _dispatch_pending(self, conversation: Any) -> None:
         dispatch_pending = getattr(conversation, "dispatch_pending", None)

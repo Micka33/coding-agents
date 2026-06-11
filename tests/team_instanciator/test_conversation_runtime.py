@@ -1994,6 +1994,18 @@ class ConversationRuntimeTests(unittest.TestCase):
             activity = runtime.activity("agent-b")
             self.assertEqual(activity["private_messages"][0]["content"], "overwrite")
             self.assertEqual(runtime._message_summary({"role": "assistant", "content": [{"text": "dict text"}]})["content"], "dict text")
+            self.assertEqual(
+                runtime._message_summary(
+                    ToolMessage(content="tool result", tool_call_id="call-1")
+                )["tool_call_id"],
+                "call-1",
+            )
+            self.assertEqual(
+                runtime._message_summary({"role": "tool", "content": "tool result", "tool_call_id": "call-2"})[
+                    "tool_call_id"
+                ],
+                "call-2",
+            )
             self.assertEqual(runtime._content_text(["hello", {"reasoning": "because"}]), "hello\nbecause")
             self.assertEqual(runtime._content_text(None), "")
             self.assertEqual(runtime._content_text(123), "123")

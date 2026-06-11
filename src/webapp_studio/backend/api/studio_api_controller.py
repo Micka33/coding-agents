@@ -10,6 +10,7 @@ from urllib.parse import urlencode
 
 from src.team_instanciator.conversation.conversation_branch import ConversationBranch
 from src.team_instanciator.conversation.conversation_file_ref import guess_conversation_media_type
+from src.type_defs import JsonObject
 from src.team_instanciator.conversation.conversation_interrupt import ConversationInterrupt
 from src.team_instanciator.conversation.payloads import ConversationStateDict
 from src.webapp.api.conversation_api_controller import ConversationApiController
@@ -389,7 +390,7 @@ class StudioApiController:
         return snapshot
 
     def update_runtime(self, request: RuntimeUpdateRequest) -> StudioState:
-        body: dict[str, object] = {}
+        body: JsonObject = {}
         if "mention_hook_enabled" in request.model_fields_set:
             body["mention_hook_enabled"] = request.mention_hook_enabled
         if "max_cascade_turns" in request.model_fields_set:
@@ -684,7 +685,7 @@ class StudioApiController:
     def compat_activity(self, query: str) -> ConversationStateDict:
         return self._compat.activity(query)
 
-    def compat_append_message(self, body: dict[str, object]) -> dict[str, object]:
+    def compat_append_message(self, body: JsonObject) -> dict[str, object]:
         result = AppendMessageResult.model_validate(self._compat.append_message(body))
         self._stream_buffer.publish("conversation.event.appended", result.event.model_dump(mode="json"))
         for delivery in result.deliveries + result.failures:
@@ -692,7 +693,7 @@ class StudioApiController:
         self._publish_queue_state(self.state())
         return result.model_dump(mode="json")
 
-    def compat_update_runtime(self, body: dict[str, object]) -> ConversationStateDict:
+    def compat_update_runtime(self, body: JsonObject) -> ConversationStateDict:
         state = self._compat.update_runtime(body)
         self._stream_buffer.publish("snapshot.replace", self._studio_state_from_legacy(state).model_dump(mode="json"))
         return state

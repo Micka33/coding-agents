@@ -494,6 +494,7 @@ export function StudioWorkspace({
       view={inspectorView}
     />
   )
+  const duplicateTeamCount = teams?.duplicate_ids.length ?? 0
 
   return (
     <main className="relative h-svh min-h-svh overflow-hidden bg-background">
@@ -524,10 +525,20 @@ export function StudioWorkspace({
         />
 
         <div className="relative min-h-0 min-w-0">
-          {operationError ? (
-            <div className="absolute left-3 right-3 top-3 z-20 flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 shadow" role="alert">
-              <CircleAlertIcon className="size-4 shrink-0" />
-              <span>{operationError}</span>
+          {operationError || duplicateTeamCount ? (
+            <div className="absolute left-3 right-3 top-3 z-20 grid gap-2">
+              {operationError ? (
+                <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 shadow" role="alert">
+                  <CircleAlertIcon className="size-4 shrink-0" />
+                  <span>{operationError}</span>
+                </div>
+              ) : null}
+              {duplicateTeamCount ? (
+                <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 shadow" role="status">
+                  <CircleAlertIcon className="size-4 shrink-0" />
+                  <span>{duplicateTeamCount} duplicate team id collision{duplicateTeamCount === 1 ? "" : "s"} hidden.</span>
+                </div>
+              ) : null}
             </div>
           ) : null}
           <ChatPanel

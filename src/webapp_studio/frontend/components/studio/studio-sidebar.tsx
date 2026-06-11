@@ -36,6 +36,7 @@ import type {
   InterruptRequest,
   StudioSession,
   StudioState,
+  StudioTeamDescriptor,
   StudioTeams,
 } from "@/lib/studio/schemas"
 import { cn } from "@/lib/utils"
@@ -195,11 +196,12 @@ export function StudioSidebar({
                   value={state.team_id}
                 >
                   {teams.teams.map((team) => (
-                    <option key={team.team_id} value={team.team_id}>
-                      {team.team_id}
+                    <option disabled={team.lock_status === "missing"} key={team.team_id} value={team.team_id}>
+                      {teamOptionLabel(team)}
                     </option>
                   ))}
                 </select>
+                <TeamPackageNotices team={teams.teams.find((team) => team.team_id === state.team_id)} />
               </label>
             ) : null}
             {conversationList?.conversations.length ? (
@@ -546,6 +548,46 @@ export function StudioSidebar({
         </Section>
       </div>
     </aside>
+  )
+}
+
+function teamOptionLabel(team: StudioTeamDescriptor) {
+  const packageSuffix = team.package_name ? ` · ${team.package_name}` : ""
+  const missingSuffix = team.lock_status === "missing" ? " (missing)" : ""
+  return `${team.team_id}${packageSuffix}${missingSuffix}`
+}
+
+function teamPackageNotices(team: StudioTeamDescriptor) {
+  const notices: string[] = []
+  if (team.lock_status === "missing") {
+    notices.push(`Package files are missing. Run \`coding-agents team install\` to restore ${team.package_name}.`)
+  }
+  if (team.trust_status === "untrusted") {
+    const risks = team.risk_flags.length ? ` (${team.risk_flags.join(", ")})` : ""
+    notices.push(`Untrusted package${risks}. Run \`coding-agents team trust ${team.package_name}\` before starting a chat.`)
+  }
+  notices.push(...team.warnings)
+  return notices
+}
+
+function TeamPackageNotices({ team }: { team: StudioTeamDescriptor | undefined }) {
+  if (!team?.package_name) {
+    return null
+  }
+  const notices = teamPackageNotices(team)
+  if (!notices.length) {
+    return null
+  }
+  return (
+    <div
+      className="grid gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 font-normal text-amber-900"
+      data-testid="team-package-notices"
+      role="status"
+    >
+      {notices.map((notice) => (
+        <span key={notice}>{notice}</span>
+      ))}
+    </div>
   )
 }
 

@@ -30,21 +30,26 @@ Lance une session agent pour développer dans ce repo:
 
 ```bash
 uv run coding-agents \
-  --root /Users/mickael/Documents/github/coding-agents \
-  --mode implementation \
+  run teams/software/team.yaml \
   --thread-id implementation-main
 ```
 
-Dans un second terminal, lance la Web UI:
+La forme historique reste acceptée:
 
 ```bash
-uv run python webui/server.py --db .coding-agents/checkpoints.sqlite --port 8766
+uv run coding-agents teams/software/team.yaml --thread-id implementation-main
+```
+
+Lancer Studio directement:
+
+```bash
+uv run webapp-studio teams/software/team.yaml --port 8765
 ```
 
 Puis ouvre:
 
 ```text
-http://127.0.0.1:8766
+http://127.0.0.1:8765
 ```
 
 ## Développer avec la Web UI
@@ -97,22 +102,21 @@ Le détail affiche:
 Lancer les tests:
 
 ```bash
-uv run python -m unittest discover -s tests
+uv run python -m unittest discover -s tests -t .
 ```
 
-Initialiser les artefacts de workflow sans lancer l'agent:
+Valider et installer un package d'équipe local:
 
 ```bash
-uv run coding-agents --init-only
+uv run coding-agents team validate ./my-team-package
+uv run coding-agents team install ./my-team-package
 ```
 
-Continuer une conversation existante:
+Voir les packages installés et faire confiance à une version verrouillée:
 
 ```bash
-uv run coding-agents \
-  --root /Users/mickael/Documents/github/coding-agents \
-  --mode implementation \
-  --thread-id implementation-main
+uv run coding-agents team list
+uv run coding-agents team trust acme/software-team
 ```
 
 ## Documentation

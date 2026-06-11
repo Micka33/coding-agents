@@ -12,6 +12,7 @@ from src.team_instanciator.configuration.dotenv_loader import DotEnvLoader
 from src.team_instanciator.conversation.team import MentionAwareTeam
 from src.team_instanciator.core.instantiated_team import InstantiatedTeam
 from src.team_instanciator.core.team_instanciator import TeamInstanciator
+from src.team_packages.cli import TeamPackageCli
 
 
 class CliMessageDict(TypedDict):
@@ -28,6 +29,10 @@ class TeamInstanciatorCli:
             from src.webapp.server import main as webapp_main
 
             return webapp_main(raw_argv[1:])
+        if raw_argv and raw_argv[0] == "team":
+            return TeamPackageCli().main(raw_argv[1:])
+        if raw_argv and raw_argv[0] == "run":
+            raw_argv = raw_argv[1:]
 
         parser = argparse.ArgumentParser(description="Instantiate a team graph from team.yaml.")
         parser.add_argument("team_file", help="Path to team.yaml.")
@@ -76,7 +81,7 @@ class TeamInstanciatorCli:
         return parse_key_value_pairs(raw_values)
 
     def _config_variables(self, args: argparse.Namespace) -> JsonObject:
-        config_variables = self._dotenv_variables(args)
+        config_variables: JsonObject = dict(self._dotenv_variables(args))
         config_variables.update(self._variables(args.config))
         if args.openai_api_key:
             config_variables["openai_api_key"] = args.openai_api_key

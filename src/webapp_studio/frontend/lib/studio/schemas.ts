@@ -198,10 +198,18 @@ export const StudioTeamDescriptorSchema = z
     team_id: z.string(),
     description: z.string().nullable(),
     team_file: z.string(),
-    source: z.enum(["project", "builtin", "explicit", "active"]),
+    source: z.enum(["project", "package", "builtin", "explicit", "active"]),
     conversation_available: z.boolean(),
     participants: z.array(z.string()).default([]),
     participant_aliases: z.record(z.string(), z.array(z.string())).default({}),
+    package_name: z.string().optional(),
+    package_version: z.string().optional(),
+    package_source: z.string().optional(),
+    lock_status: z.enum(["locked", "missing"]).optional(),
+    trust_status: z.enum(["not_required", "trusted", "untrusted"]).optional(),
+    risk_flags: z.array(z.string()).default([]),
+    missing_required_env: z.array(z.string()).default([]),
+    warnings: z.array(z.string()).default([]),
   })
   .passthrough()
 
@@ -372,6 +380,7 @@ export const MessageSummarySchema = z
     name: z.string().nullable(),
     content: z.string(),
     tool_calls: JsonValueSchema,
+    tool_call_id: z.string().nullable().optional(),
   })
   .passthrough()
 

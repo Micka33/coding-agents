@@ -12,7 +12,7 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 
 from src.team_instanciator.configuration.runtime_configuration import RuntimeConfiguration
 from src.team_instanciator.core.team_instanciator import TeamInstanciator
-from tests.support import agent, defaults, team
+from tests.support import agent, team
 
 
 class Loader:

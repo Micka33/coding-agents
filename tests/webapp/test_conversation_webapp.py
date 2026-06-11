@@ -16,7 +16,7 @@ from unittest.mock import patch
 
 from src.webapp import server as server_module
 from src.webapp.application.conversation_web_app_launcher import ConversationWebAppLauncher
-from src.webapp.server import ConversationRequestHandler
+from src.webapp.http.conversation_request_handler import ConversationRequestHandler
 
 
 class FakeConversation:

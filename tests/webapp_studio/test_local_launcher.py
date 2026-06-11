@@ -263,6 +263,8 @@ class LocalLauncherTests(unittest.TestCase):
         command = records[0]["command"]
         self.assertIn("--env-file", command)
         self.assertIn(".env.test", command)
+        self.assertIn("--no-env-file", command)
+        self.assertIn("model=gpt", command)
 
     def _free_port(self) -> int:
         with socket.socket() as sock:
@@ -285,8 +287,6 @@ class LocalLauncherTests(unittest.TestCase):
     def _json_get(self, port: int, path: str) -> dict[str, object]:
         with request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=5) as response:
             return json.loads(response.read().decode("utf-8"))
-        self.assertIn("--no-env-file", command)
-        self.assertIn("model=gpt", command)
 
     def test_port_conflicts_fail_before_processes_start(self) -> None:
         connection = SimpleNamespace(closed=False)

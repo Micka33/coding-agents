@@ -21,6 +21,7 @@ class MessageSummaryDict(TypedDict):
     name: str | None
     content: str
     tool_calls: JsonValue
+    tool_call_id: NotRequired[str | None]
     created_at: NotRequired[str]
 
 

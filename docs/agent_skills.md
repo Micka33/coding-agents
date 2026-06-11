@@ -91,6 +91,8 @@ Skill source roots are resolved by scope:
   `$CODEX_HOME/skills`.
 - Project sources resolve from the CLI launch CWD, such as
   `<cli-cwd>/.agents/skills`.
+- Package sources resolve from `.coding-agents/skills` for installed package
+  teams, restricted to dependency ids locked for that package.
 - Team sources resolve relative to the directory containing `team.yaml`, such as
   `./skills`.
 
@@ -172,6 +174,7 @@ Recommended effective order:
 built-in skills
 $CODEX_HOME/skills
 <cli-cwd>/.agents/skills
+<cli-cwd>/.coding-agents/skills restricted by package lockfile
 <team-dir>/skills
 team.yaml skill_sources, in declaration order
 ```

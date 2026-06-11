@@ -288,15 +288,14 @@ function FilesInspector({
 }
 
 function TextFilePreview({ filename, url }: { filename: string; url: string }) {
-  const [preview, setPreview] = useState<{
+  const [loaded, setLoaded] = useState<{
     error: string | null
-    loading: boolean
     text: string
-  }>({ error: null, loading: true, text: "" })
+    url: string
+  } | null>(null)
 
   useEffect(() => {
     let cancelled = false
-    setPreview({ error: null, loading: true, text: "" })
     fetch(url)
       .then((response) => {
         if (!response.ok) {
@@ -306,15 +305,15 @@ function TextFilePreview({ filename, url }: { filename: string; url: string }) {
       })
       .then((text) => {
         if (!cancelled) {
-          setPreview({ error: null, loading: false, text })
+          setLoaded({ error: null, text, url })
         }
       })
       .catch((error) => {
         if (!cancelled) {
-          setPreview({
+          setLoaded({
             error: error instanceof Error ? error.message : "Unable to load preview.",
-            loading: false,
             text: "",
+            url,
           })
         }
       })
@@ -323,7 +322,9 @@ function TextFilePreview({ filename, url }: { filename: string; url: string }) {
     }
   }, [url])
 
-  if (preview.loading) {
+  const preview = loaded?.url === url ? loaded : null
+
+  if (!preview) {
     return <div className="p-4 text-sm text-muted-foreground">Loading preview...</div>
   }
 

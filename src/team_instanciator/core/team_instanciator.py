@@ -5,6 +5,7 @@ from pathlib import Path
 
 from src.type_defs import JsonObject
 from src.team_loader.loading.team_loader import TeamLoader
+from src.team_loader.models.team_definition import TeamDefinition
 from src.team_loader.resolvers.working_directory_resolver import WorkingDirectoryResolver
 
 from src.team_instanciator.core.agent_graph_registry import AgentGraphRegistry
@@ -32,6 +33,12 @@ from src.team_instanciator.runtime.branch_thread_resolver import BranchThreadRes
 from src.team_instanciator.manifest.team_runtime_manifest_builder import TeamRuntimeManifestBuilder
 from src.team_instanciator.manifest.team_runtime_manifest_store import TeamRuntimeManifestStore
 from src.team_instanciator.resolvers.toolset_resolver import ToolsetResolver
+from src.team_instanciator.errors.team_instanciator_error import TeamInstanciatorError
+from src.team_packages.content_hasher import ContentHasher
+from src.team_packages.locked_package import LockedPackage
+from src.team_packages.package_locator import InstalledPackageLocator
+from src.team_packages.risk_scanner import PackageRiskScanner
+from src.team_packages.trust_store import TeamPackageTrustStore
 
 
 class TeamInstanciator:
@@ -51,6 +58,7 @@ class TeamInstanciator:
     ) -> InstantiatedTeam:
         configuration = self._configuration.merge(config_variables)
         team = self._team_loader.load(team_file, variables)
+        self._enforce_package_trust(team)
         RuntimeConfigurationValidator(configuration).validate(team)
         checkpointer_handle = CheckpointerFactory(configuration).create(team)
         skill_source_resolver = SkillSourceResolver(configuration)
@@ -139,3 +147,33 @@ class TeamInstanciator:
         if isinstance(config_variables, RuntimeConfiguration):
             return config_variables
         return RuntimeConfiguration(config_variables)
+
+    def _enforce_package_trust(self, team: TeamDefinition) -> None:
+        locator = InstalledPackageLocator(Path(team.load_cwd))
+        package = locator.package_for_team_file(team.path)
+        if package is None:
+            if locator.is_installed_package_path(team.path):
+                raise TeamInstanciatorError(f"Installed package team is not locked: {team.path}")
+            return
+        risk_flags = PackageRiskScanner().risk_flags(team)
+        if not risk_flags:
+            return
+        name = package.name
+        integrity = self._verified_package_integrity(locator, package, name)
+        if TeamPackageTrustStore().is_trusted(name, integrity):
+            return
+        flags = ", ".join(risk_flags)
+        raise TeamInstanciatorError(
+            f"Package team '{name}' has untrusted executable surfaces: {flags}. "
+            f"Run `coding-agents team trust {name}` to trust this package integrity."
+        )
+
+    def _verified_package_integrity(self, locator: InstalledPackageLocator, package: LockedPackage, name: str) -> str:
+        installed_path = locator.installed_package_path(package)
+        locked_integrity = package.integrity
+        if installed_path is None or ContentHasher().hash_directory(installed_path) != locked_integrity:
+            raise TeamInstanciatorError(
+                f"Package team '{name}' does not match its locked integrity. "
+                f"Reinstall it with `coding-agents team install` before instantiating."
+            )
+        return locked_integrity

@@ -5,7 +5,6 @@ from dataclasses import dataclass
 
 from src.team_instanciator.interfaces.cli_support import build_config_variables, parse_key_value_pairs
 from src.webapp.application.conversation_web_app_launcher import ConversationWebAppLauncher
-from src.webapp.http.conversation_request_handler import ConversationRequestHandler
 
 
 @dataclass(frozen=True)
