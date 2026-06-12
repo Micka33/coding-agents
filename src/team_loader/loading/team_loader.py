@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
-from src.type_defs import JsonObject, is_json_object
+from src.type_defs import JsonObject, JsonValue, is_json_object
 from src.team_loader.models.agent_definition import AgentDefinition
 from src.team_loader.models.agent_reference import AgentReference
 from src.team_loader.parsing.mdc_parser import MdcParser
@@ -70,10 +71,28 @@ class TeamLoader:
         for agent_id, reference in references.items():
             config_path = reference.config_path(team_file)
             document = self._mdc_parser.parse_file(config_path)
+            if reference.overrides:
+                merged = self._merge_overrides(document.frontmatter, reference.overrides)
+                document = replace(document, frontmatter=merged)
             prompt_variables = self._agent_variables(document.frontmatter, variables)
             prompt = self._template_renderer.render(document.body, prompt_variables, config_path)
             agents[agent_id] = AgentDefinition.from_document(reference, document, prompt, prompt_variables)
         return agents
+
+    def _merge_overrides(self, frontmatter: JsonObject, overrides: JsonObject) -> JsonObject:
+        merged = dict(frontmatter)
+        for key, value in overrides.items():
+            if key == "variables":
+                merged[key] = self._merge_variables(frontmatter.get("variables"), value)
+            else:
+                merged[key] = value
+        return merged
+
+    def _merge_variables(self, base: JsonValue, override: JsonValue) -> JsonObject:
+        merged = dict(base) if is_json_object(base) else {}
+        if is_json_object(override):
+            merged.update(override)
+        return merged
 
     def _agent_variables(self, frontmatter: JsonObject, variables: JsonObject) -> JsonObject:
         result = dict(variables)

@@ -102,8 +102,12 @@ class ModelsAndRenderingTests(unittest.TestCase):
 
         self.assertEqual(document.frontmatter, {"name": "Entry"})
         self.assertEqual(document.body, "Prompt")
-        with self.assertRaisesRegex(TeamLoaderError, "must start"):
-            parser.parse_text("name: Entry", Path("entry.mdc"))
+        body_only = parser.parse_text("\nPure prompt body", Path("entry.mdc"))
+        self.assertEqual(body_only.frontmatter, {})
+        self.assertEqual(body_only.body, "Pure prompt body")
+        empty_frontmatter = parser.parse_text("---\n---\nPrompt", Path("entry.mdc"))
+        self.assertEqual(empty_frontmatter.frontmatter, {})
+        self.assertEqual(empty_frontmatter.body, "Prompt")
         with self.assertRaisesRegex(TeamLoaderError, "frontmatter must be"):
             parser.parse_text("---\n- one\n---\nPrompt", Path("entry.mdc"))
         with self.assertRaisesRegex(TeamLoaderError, "missing the closing"):
@@ -199,6 +203,93 @@ class ModelsAndRenderingTests(unittest.TestCase):
                 TeamLoader()._load_team_mapping(list_file)
             with self.assertRaisesRegex(TeamLoaderError, "requires an agents mapping"):
                 TeamLoader()._load_agent_references({})
+
+    def test_agent_entry_overrides_and_optional_frontmatter(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            agents_dir = root / "agents"
+            agents_dir.mkdir()
+            (agents_dir / "entry.mdc").write_text("Hello {{ greeting }}", encoding="utf-8")
+            (agents_dir / "worker.mdc").write_text(
+                "---\nmodel: openai:gpt-frontmatter\nreasoning_effort: high\nvariables:\n  a: one\n---\nWorker {{ a }} {{ b }}",
+                encoding="utf-8",
+            )
+            team_file = root / "team.yaml"
+            team_file.write_text(
+                "\n".join(
+                    [
+                        "schema_version: 1",
+                        "id: product",
+                        f"working_directory: {root}",
+                        "toolsets:",
+                        "  web:",
+                        "    - web_search",
+                        "agents:",
+                        "  Entry:",
+                        "    kind: deepagent",
+                        "    config: agents/entry.mdc",
+                        "    entrypoint: true",
+                        "    description: Entry agent",
+                        "    model: openai:gpt-entry",
+                        "    toolsets:",
+                        "      - web",
+                        "    state:",
+                        "      persistence: persistent",
+                        "    variables:",
+                        "      greeting: Hi",
+                        "  Worker:",
+                        "    kind: deepagent",
+                        "    config: agents/worker.mdc",
+                        "    model: openai:gpt-override",
+                        "    variables:",
+                        "      b: two",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            loaded = TeamLoader().load(team_file)
+
+            entry = loaded.agents["Entry"]
+            self.assertEqual(entry.prompt, "Hello Hi")
+            self.assertEqual(entry.model, "openai:gpt-entry")
+            self.assertEqual(entry.description, "Entry agent")
+            self.assertEqual(entry.toolsets, ("web",))
+            self.assertEqual(entry.state.persistence, "persistent")
+
+            worker = loaded.agents["Worker"]
+            self.assertEqual(worker.prompt, "Worker one two")
+            self.assertEqual(worker.model, "openai:gpt-override")
+            self.assertEqual(worker.reasoning_effort, "high")
+            self.assertEqual(worker.variables["a"], "one")
+            self.assertEqual(worker.variables["b"], "two")
+
+    def test_unsupported_agent_entry_key_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            agents_dir = root / "agents"
+            agents_dir.mkdir()
+            (agents_dir / "entry.mdc").write_text("Prompt", encoding="utf-8")
+            team_file = root / "team.yaml"
+            team_file.write_text(
+                "\n".join(
+                    [
+                        "schema_version: 1",
+                        "id: product",
+                        f"working_directory: {root}",
+                        "agents:",
+                        "  Entry:",
+                        "    kind: deepagent",
+                        "    config: agents/entry.mdc",
+                        "    entrypoint: true",
+                        "    modle: openai:gpt-typo",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(TeamLoaderError, "unsupported key: modle"):
+                TeamLoader().load(team_file)
 
 
 if __name__ == "__main__":

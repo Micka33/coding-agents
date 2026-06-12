@@ -44,6 +44,13 @@ agents:
     kind: deepagent
     config: ./agents/francis-bacon.mdc
     entrypoint: true
+    description: Francis Bacon is an English-speaking philosopher.
+    model: openai:gpt-5.5
+    reasoning_effort: medium
+    state:
+      persistence: persistent
+    toolsets:
+      - time_mcp
     conversation:
       aliases:
         - Francis
@@ -55,6 +62,13 @@ agents:
   Friedrich-Nietzsche:
     kind: deepagent
     config: ./agents/friedrich-nietzsche.mdc
+    description: Friedrich Nietzsche is a German-speaking philosopher.
+    model: openai:gpt-5.5
+    reasoning_effort: medium
+    state:
+      persistence: persistent
+    toolsets:
+      - time_mcp
     conversation:
       aliases:
         - Friedrich
@@ -66,6 +80,13 @@ agents:
   Hayashi-Razan:
     kind: deepagent
     config: ./agents/hayashi-razan.mdc
+    description: Hayashi Razan is a Japanese-speaking philosopher.
+    model: openai:gpt-5.5
+    reasoning_effort: medium
+    state:
+      persistence: persistent
+    toolsets:
+      - time_mcp
     conversation:
       aliases:
         - Hayashi
@@ -77,6 +98,11 @@ agents:
   translator:
     kind: subagent
     config: ./agents/translator.mdc
+    description: Use when need to translate messages in English, German, and Japanese.
+    model: openai:gpt-5.5
+    reasoning_effort: none
+    state:
+      persistence: disposable
 
 relations:
   - from: Francis-Bacon

@@ -387,15 +387,43 @@ agents:
 | Key | Required | Behavior |
 | --- | --- | --- |
 | `kind` | Yes | `deepagent` or `subagent`. |
-| `config` | Yes | Path to the agent `.mdc` file, relative to `team.yaml`. |
+| `config` | Yes | Path to the agent prompt file, relative to `team.yaml`. Frontmatter in that file is optional. |
 | `relative_working_directory` | No | Path relative to the team `working_directory`. Defaults to `"."`. |
 | `entrypoint` | No | Exactly one agent must have `entrypoint: true`. |
 | `enable_general_purpose_subagent` | No | Deep Agents only. Defaults to `false`. Set to `true` to expose the default `general-purpose` subagent through the `task` tool. |
 | `conversation` | No | Makes a `deepagent` available on the public mention bus. |
+| Agent-local overrides | No | Any `.mdc` frontmatter key may be set here to override that file: `description`, `model`, `reasoning_effort`, `variables`, `toolsets`, `state`, `skills`, `memory`, `debug`. |
+
+Unknown keys on an agent entry fail loading, so a misspelled override (for
+example `modle`) is reported instead of silently ignored.
 
 Use `deepagent` for agents that can run as first-class collaborators or
 relation-tool targets. Use `subagent` for agents meant to be delegated to from a
 parent agent.
+
+### Agent-Local Overrides
+
+Agent-local options can live in the agent's prompt-file frontmatter, on the
+`team.yaml` agent entry, or both. When a key is set in both, the `team.yaml`
+entry wins, then frontmatter, then team `defaults`. Most keys replace the
+frontmatter value; `variables` merges key by key. This lets several agents reuse
+one body-only prompt file while differing only in configuration:
+
+```yaml
+agents:
+  fast-reviewer:
+    kind: subagent
+    config: ./agents/reviewer.md
+    model: openai:gpt-5.4-mini
+  deep-reviewer:
+    kind: subagent
+    config: ./agents/reviewer.md
+    model: openai:gpt-5.5
+    reasoning_effort: high
+```
+
+See [`agent_mdc.md`](agent_mdc.md#overrides-from-teamyaml) for the full key list
+and resolution order.
 
 Public conversation participants must be `kind: deepagent`.
 
@@ -507,6 +535,8 @@ Before a team can instantiate:
 - `schema_version` must be `1`.
 - `id` must be non-empty.
 - Agent ids must be unique after case-insensitive normalization.
+- Agent entries may contain only known keys: the topology keys plus the
+  overridable frontmatter keys.
 - There must be exactly one entrypoint.
 - Every agent `kind` must be `deepagent` or `subagent`.
 - `enable_general_purpose_subagent` may be set only on `deepagent` entries.

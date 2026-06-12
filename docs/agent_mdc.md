@@ -25,11 +25,18 @@ You are a developer in a development-agent team.
 
 | Part | Purpose |
 | --- | --- |
-| YAML frontmatter | Agent-local options: prompt variables, model override, toolsets, memory, skills, and debug. |
+| YAML frontmatter | Optional agent-local options: prompt variables, model override, toolsets, memory, skills, and debug. |
 | Markdown body | The system prompt passed to the agent after includes and variables are rendered. |
 
-The file must start with `---`, contain YAML frontmatter, and close the
-frontmatter with a second `---`. The frontmatter must parse to a mapping.
+Frontmatter is optional. When present, the file must start with `---`, close the
+frontmatter with a second `---`, and parse to a mapping. A file that does not
+start with `---` is treated as a body-only prompt with empty frontmatter; supply
+its agent-local options from the `team.yaml` agent entry instead. An empty
+frontmatter block (`---` immediately followed by `---`) is also allowed.
+
+Every frontmatter key can also be set on the `team.yaml` agent entry. When the
+same key is set in both places, the `team.yaml` entry wins. See
+[Overrides From team.yaml](#overrides-from-teamyaml).
 
 The canonical agent id is the key in `team.yaml` under `agents`. A frontmatter
 `name` key is ignored by the current loader; do not rely on it for ids,
@@ -49,6 +56,48 @@ relations, mentions, or display names.
 | `skills` | `inherit` | `inherit` uses the team's effective skill source roots, `none` disables skills, and `only` restricts the visible catalog by skill id. Legacy lists are treated as `only`. |
 | `memory` | `inherit` | `inherit` uses team default memory files, `none` disables memory, and a list uses those files. |
 | `debug` | `inherit` | Only literal `true` enables debug in the current factories. |
+
+## Overrides From team.yaml
+
+Frontmatter holds an agent's default options. The same agent-local keys may also
+appear directly on the `team.yaml` agent entry, where they override the `.mdc`
+frontmatter. This lets several agents share one prompt file while differing only
+in configuration.
+
+Resolution order, highest priority first:
+
+1. `team.yaml` agent entry
+2. `.mdc` frontmatter
+3. team `defaults` (reached when `model`, `reasoning_effort`, `memory`, or
+   `skills` resolve to `inherit`)
+
+Overridable keys: `description`, `model`, `reasoning_effort`, `variables`,
+`toolsets`, `state`, `skills`, `memory`, `debug`.
+
+Most keys replace the frontmatter value outright (for example `toolsets`
+replaces the whole list). `variables` is merged key by key, so a `team.yaml`
+entry can add or change one variable without restating the others.
+
+Example: two agents reuse one body-only prompt file with different models.
+
+```yaml
+# team.yaml
+agents:
+  fast-reviewer:
+    kind: subagent
+    config: ./agents/reviewer.md
+    model: openai:gpt-5.4-mini
+  deep-reviewer:
+    kind: subagent
+    config: ./agents/reviewer.md
+    model: openai:gpt-5.5
+    reasoning_effort: high
+```
+
+```text
+# agents/reviewer.md (no frontmatter)
+You are a code reviewer. Prioritize correctness, then tests, then clarity.
+```
 
 ## Description
 

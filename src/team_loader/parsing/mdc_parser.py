@@ -20,7 +20,7 @@ class MdcParser:
     def parse_text(self, text: str, path: Path) -> MdcDocument:
         lines = text.splitlines()
         if not lines or lines[0].strip() != "---":
-            raise TeamLoaderError(f"{path} must start with YAML frontmatter.")
+            return MdcDocument(path=path, frontmatter={}, body=text.lstrip("\n"))
         end_index = self._find_frontmatter_end(lines, path)
         frontmatter_text = "\n".join(lines[1:end_index])
         body = "\n".join(lines[end_index + 1:]).lstrip("\n")

@@ -4,6 +4,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from src.type_defs import is_json_object
+from src.team_loader.models.agent_reference import OVERRIDE_KEYS, REFERENCE_KEYS
 from src.team_loader.models.team_definition import TeamDefinition
 from src.team_loader.errors.team_loader_error import TeamLoaderError
 from src.team_loader.resolvers.working_directory_resolver import WorkingDirectoryResolver
@@ -137,6 +138,7 @@ class TeamValidator:
     def _validate_agents(self, team: TeamDefinition) -> None:
         if not team.agent_references:
             raise TeamLoaderError("team.yaml requires at least one agent.")
+        self._validate_agent_entry_keys(team)
         agent_reference_lookup = self._case_insensitive_lookup(team.agent_references)
         if len(agent_reference_lookup) != len(team.agent_references):
             raise TeamLoaderError("Agent ids must be unique after case-insensitive normalization.")
@@ -165,6 +167,18 @@ class TeamValidator:
             if agent.state.persistence not in {"inherit", "disposable", "persistent"}:
                 raise TeamLoaderError(f"Agent '{agent_id}' has invalid state.persistence '{agent.state.persistence}'.")
             self._validate_agent_skills(agent_id, getattr(agent, "skills", "inherit"))
+
+    def _validate_agent_entry_keys(self, team: TeamDefinition) -> None:
+        raw_agents = team.raw.get("agents") if is_json_object(getattr(team, "raw", None)) else None
+        if not is_json_object(raw_agents):
+            return
+        allowed = REFERENCE_KEYS | OVERRIDE_KEYS
+        for agent_id, entry in raw_agents.items():
+            if not is_json_object(entry):
+                continue
+            unsupported = sorted(key for key in entry if key not in allowed)
+            if unsupported:
+                raise TeamLoaderError(f"agents.{agent_id} contains unsupported key: {unsupported[0]}.")
 
     def _validate_agent_skills(self, agent_id: str, skills: object) -> None:
         if skills is None or (isinstance(skills, str) and skills in {"inherit", "none"}):
